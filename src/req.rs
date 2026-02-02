@@ -38,12 +38,13 @@ impl Request {
         // 1️⃣ 解析请求行
         let mut request_line = String::new();
         reader.read_line(&mut request_line).await.unwrap();
-        let parts = request_line.split_whitespace().collect::<Vec<&str>>();
-        assert!(parts.len() >= 3, "Invalid HTTP request line");
 
-        let method_str = parts[0].to_string();
-        let path = parts[1].to_string();
-        let version = parts[2].to_string();
+        // 调用优化后的函数
+        let request_line = request_line.trim_end_matches(&['\r', '\n'][..]);
+        let mut parts = request_line.splitn(3, ' ');
+        let method_str = parts.next().unwrap();
+        let path = parts.next().unwrap();
+        let version = parts.next().unwrap().to_string();
 
         // 解析 HttpMethod
         let method = HttpMethod::from_str(&method_str).expect(
@@ -58,7 +59,7 @@ impl Request {
         // 解析 Cookie
         let cookies = headers
             .get(&HeaderKey::Cookie)
-            .map(|s| Self::parse_cookies(s))
+            .map(|s| Self::parse_cookies_raw(s))
             .unwrap_or_default();
 
         // 判断 Transfer-Encoding
@@ -155,7 +156,7 @@ impl Request {
         Ok(None)
     }
     /// 将 Cookie header 转换为 HashMap
-    fn parse_cookies(header_value: &str) -> HashMap<String, String> {
+    fn parse_cookies_raw(header_value: &str) -> HashMap<String, String> {
         let mut map = HashMap::new();
         for pair in header_value.split(';') {
             let pair = pair.trim();
@@ -178,9 +179,7 @@ impl Request {
     }
 
     /// 读取请求头并更新到 Request.headers 和 content_type
-    pub async fn read_headers(
-        reader: &mut BufReader<OwnedReadHalf>
-    ) -> HashMap<HeaderKey, String> {
+    pub async fn read_headers(reader: &mut BufReader<OwnedReadHalf>) -> HashMap<HeaderKey, String> {
         let mut headers_map: HashMap<HeaderKey, String> = HashMap::new();
         let mut buf = String::new();
 
