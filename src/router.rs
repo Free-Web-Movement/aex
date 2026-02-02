@@ -158,7 +158,8 @@ impl Router {
         // 2️⃣ 匹配路由
         let mut matched_route: Option<&RouteEntry> = None;
         for route in &self.routes {
-            if route.regex.is_match(&url.clone().unwrap().to_string()) {
+            let url_str = url.as_ref().unwrap();
+            if route.regex.is_match(url_str) {
                 matched_route = Some(route);
                 break;
             }
