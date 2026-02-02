@@ -1,9 +1,14 @@
 use std::collections::HashMap;
 
 use regex::Regex;
+use lazy_static::lazy_static;
 
 // 支持 :param? 可选参数 和 * 通配符
 const PATH_PARAMS: &str = r"(?s)(?::([^/\.?]+)\??)|(\*)";
+
+lazy_static! {
+    static ref PATH_PARAMS_RE: Regex = Regex::new(PATH_PARAMS).unwrap();
+}
 /// URL 参数结构
 #[derive(Debug, Clone)]
 pub struct Params {
@@ -35,10 +40,9 @@ impl Params {
     /// 根据 URL 提取 query params
     /// 支持数组参数
     fn parse_query(url: &str) -> HashMap<String, Vec<String>> {
-        if let Some(pos) = url.find('?') {
-            return Self::parse_pairs(&url[pos + 1..]);
-        }
-        HashMap::new()
+        url.split_once('?')
+            .map(|(_, qs)| Self::parse_pairs(qs))
+            .unwrap_or_default()
     }
 
     fn set_form(&mut self, form: &str) {
@@ -60,9 +64,9 @@ impl Params {
         let mut regex_str = String::new();
         let mut param_names = Vec::new();
         let mut pos = 0;
-        let re = Regex::new(PATH_PARAMS).unwrap();
+        // let re = Regex::new(PATH_PARAMS).unwrap();
 
-        for caps in re.captures_iter(path) {
+        for caps in PATH_PARAMS_RE.captures_iter(path) {
             let whole = caps.get(0).unwrap();
             let path_s = &path[pos..whole.start()];
             regex_str += &regex::escape(path_s);
@@ -100,14 +104,11 @@ impl Params {
         let (regex_str, param_names) = Self::parse_path_regex(pattern);
 
         let re = Regex::new(&regex_str).ok()?;
-        let mut map = HashMap::new();
         let caps = re.captures(url)?;
+        let mut map = HashMap::with_capacity(param_names.len());
         for (i, name) in param_names.iter().enumerate() {
-            let mut v = "";
-            if let Some(m) = caps.get(i + 1) {
-                v = m.as_str();
-            }
-            map.insert(name.clone(), v.to_string());
+            let value = caps.get(i + 1).map_or_else(String::new, |m| m.as_str().to_string());
+            map.insert(name.clone(), value);
         }
         Some(map)
     }
