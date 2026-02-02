@@ -41,12 +41,12 @@ impl Request {
         let parts = request_line.split_whitespace().collect::<Vec<&str>>();
         assert!(parts.len() >= 3, "Invalid HTTP request line");
 
-        let method_str = parts[0];
-        let path = parts[1];
+        let method_str = parts[0].to_string();
+        let path = parts[1].to_string();
         let version = parts[2].to_string();
 
         // 解析 HttpMethod
-        let method = HttpMethod::from_str(method_str).expect(
+        let method = HttpMethod::from_str(&method_str).expect(
             &format!("Unsupported HTTP method: {}", method_str)
         );
 
@@ -100,7 +100,8 @@ impl Request {
         };
 
         // 6️⃣ 解析动态 path params
-        let params = Params::new(path.to_string(), route_pattern.to_string());
+        let url = path.to_string();
+        let params = Params::new(url.to_string(), route_pattern.to_string());
 
         // 7️⃣ 构造 Request
         Request {

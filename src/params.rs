@@ -24,34 +24,30 @@ impl Params {
         Self { url, data, query, pattern, form: None }
     }
 
-    /// 根据 URL 提取 query params
-    /// 支持数组参数
-    fn parse_query(url: &str) -> HashMap<String, Vec<String>> {
+    fn parse_pairs(pairs: &str) -> HashMap<String, Vec<String>> {
         let mut map: HashMap<String, Vec<String>> = HashMap::new();
-
-        if let Some(pos) = url.find('?') {
-            let query_str = &url[pos + 1..];
-            for (k, v) in form_urlencoded::parse(query_str.as_bytes()) {
-                map.entry(k.to_string()).or_default().push(v.to_string());
-            }
+        for (k, v) in form_urlencoded::parse(pairs.as_bytes()) {
+            map.entry(k.into_owned()).or_default().push(v.into_owned());
         }
-
         map
     }
 
+    /// 根据 URL 提取 query params
+    /// 支持数组参数
+    fn parse_query(url: &str) -> HashMap<String, Vec<String>> {
+        if let Some(pos) = url.find('?') {
+            return Self::parse_pairs(&url[pos + 1..]);
+        }
+        HashMap::new()
+    }
+
     fn set_form(&mut self, form: &str) {
-        self.form = Some(Self::parse_form(form));
+        self.form = Some(Self::parse_pairs(form));
     }
 
     /// 解析 form body，支持数组参数
     fn parse_form(form: &str) -> HashMap<String, Vec<String>> {
-        let mut map: HashMap<String, Vec<String>> = HashMap::new();
-
-        for (k, v) in form_urlencoded::parse(form.as_bytes()) {
-            map.entry(k.to_string()).or_default().push(v.to_string());
-        }
-
-        map
+        Self::parse_pairs(form)
     }
 
     /// 将 path pattern 转为正则并提取变量名
@@ -160,7 +156,7 @@ mod tests {
         assert_eq!(params.get("ext").unwrap(), "pdf");
     }
 
-        #[test]
+    #[test]
     fn test_path_with_query() {
         let url = "/search?q=rust&sort=asc";
         let pattern = "/search";
