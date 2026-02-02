@@ -1,3 +1,4 @@
+use std::io::{ self, Write };
 use std::{ net::SocketAddr, sync::Arc };
 use tokio::net::TcpListener;
 use tokio::net::TcpStream;
@@ -22,6 +23,7 @@ impl HTTPServer {
     pub async fn run(&self) -> std::io::Result<()> {
         let listener = TcpListener::bind(self.addr).await?;
         println!("HTTPServer listening on {}", self.addr);
+        io::stdout().flush().unwrap(); // 强制刷新
 
         loop {
             let (stream, peer_addr) = listener.accept().await?;
@@ -48,11 +50,10 @@ impl HTTPServer {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tokio::{net::TcpStream, io::{AsyncWriteExt, AsyncReadExt}, sync::oneshot};
+    use tokio::{ net::TcpStream, io::{ AsyncWriteExt, AsyncReadExt }, sync::oneshot };
     use std::net::SocketAddr;
     use crate::router::Router;
 
@@ -109,15 +110,17 @@ mod tests {
 
         for _ in 0..5 {
             let addr = addr.clone();
-            handles.push(tokio::spawn(async move {
-                let mut stream = TcpStream::connect(addr).await.unwrap();
-                let request = b"GET /another HTTP/1.1\r\nHost: localhost\r\n\r\n";
-                stream.write_all(request).await.unwrap();
-                let mut buf = vec![0u8; 1024];
-                let n = stream.read(&mut buf).await.unwrap();
-                let resp = String::from_utf8_lossy(&buf[..n]);
-                assert!(resp.contains("404")); // 因为 router 为空
-            }));
+            handles.push(
+                tokio::spawn(async move {
+                    let mut stream = TcpStream::connect(addr).await.unwrap();
+                    let request = b"GET /another HTTP/1.1\r\nHost: localhost\r\n\r\n";
+                    stream.write_all(request).await.unwrap();
+                    let mut buf = vec![0u8; 1024];
+                    let n = stream.read(&mut buf).await.unwrap();
+                    let resp = String::from_utf8_lossy(&buf[..n]);
+                    assert!(resp.contains("404")); // 因为 router 为空
+                })
+            );
         }
 
         for handle in handles {

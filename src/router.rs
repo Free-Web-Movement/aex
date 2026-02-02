@@ -101,9 +101,7 @@ impl Router {
             let req = ctx_guard.req.lock().await;
             (req.path.clone(), req.method.clone())
         };
-        let routes = self.routes.clone();
-
-        for route in &routes {
+        for route in &self.routes {
             if let Some(caps) = route.regex.captures(&req_path) {
                 // ---------- 填充 path 参数 ----------
                 let mut path_params = HashMap::new();
@@ -116,7 +114,7 @@ impl Router {
                 {
                     let ctx_guard = ctx.lock().await;
                     let mut req = ctx_guard.req.lock().await;
-                    req.params.path = Some(path_params);
+                    req.params.data = Some(path_params);
                 }
 
                 // ---------- 取 executors（必须 clone，不能跨 await 持 borrow） ----------
@@ -144,7 +142,7 @@ impl Router {
         // let writer: Arc<Mutex<tokio::net::tcp::OwnedWriteHalf>> = Arc::new(Mutex::new(writer));
         let mut reader = BufReader::new(reader);
 
-        let writer = BufWriter::new(writer);
+        let mut writer = BufWriter::new(writer);
 
         // 1️⃣ 先读取请求行 / URL
         // ⚠️ 这里假设 Request::parse_url 只解析 URL，不生成完整 Request
@@ -152,15 +150,14 @@ impl Router {
             Ok(u) => u,
             Err(_) => {
                 // 无法读取 URL，直接返回 400
-                let _ = Response::send_status(writer, StatusCode::BadRequest, None).await;
+                let _ = Response::send_status(&mut writer, StatusCode::BadRequest, None).await;
                 return;
             }
         };
 
         // 2️⃣ 匹配路由
         let mut matched_route: Option<&RouteEntry> = None;
-        let routes = self.routes.clone();
-        for route in &routes {
+        for route in &self.routes {
             if route.regex.is_match(&url.clone().unwrap().to_string()) {
                 matched_route = Some(route);
                 break;
@@ -169,7 +166,7 @@ impl Router {
 
         if matched_route.is_none() {
             // 3️⃣ 未匹配到路由 → 返回 404
-            let _ = Response::send_status(writer, StatusCode::NotFound, None).await;
+            let _ = Response::send_status(&mut writer, StatusCode::NotFound, None).await;
             return;
         }
 
@@ -201,13 +198,13 @@ impl Router {
         {
             let ctx_guard = ctx.lock().await;
             let mut req = ctx_guard.req.lock().await;
-            let path_params = Params::extract_path_params(
+            let data = Params::extract_params(
                 &url.unwrap().to_string(),
                 &route.raw_path
             ).unwrap_or_default();
 
             method = req.method.clone();
-            req.params.path = Some(path_params);
+            req.params.data = Some(data);
         }
 
         // 7️⃣ 执行路径相关 middleware

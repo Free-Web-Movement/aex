@@ -10,7 +10,7 @@ pub struct Params {
     /// 原始请求 URL，包括 query
     pub url: String,
     /// Path 参数，例如 /user/:id -> {"id": "123"}
-    pub path: Option<HashMap<String, String>>,
+    pub data: Option<HashMap<String, String>>,
     /// Query 参数，例如 ?active=true -> {"active": "true"}
     pub query: HashMap<String, Vec<String>>,
     pub form: Option<HashMap<String, Vec<String>>>,
@@ -19,9 +19,9 @@ pub struct Params {
 
 impl Params {
     pub fn new(url: String, pattern: String) -> Self {
-        let path = Self::extract_path_params(&url, &pattern);
+        let data = Self::extract_params(&url, &pattern);
         let query = Self::parse_query(&url);
-        Self { url, path, query, pattern, form: None }
+        Self { url, data, query, pattern, form: None }
     }
 
     /// 根据 URL 提取 query params
@@ -100,7 +100,7 @@ impl Params {
     }
 
     /// 将 url 按正则 pattern 解析 path params
-    pub fn extract_path_params(url: &str, pattern: &str) -> Option<HashMap<String, String>> {
+    pub fn extract_params(url: &str, pattern: &str) -> Option<HashMap<String, String>> {
         let (regex_str, param_names) = Self::parse_path_regex(pattern);
 
         let re = Regex::new(&regex_str).ok()?;
@@ -125,7 +125,7 @@ mod tests {
     fn test_basic_path() {
         let url = "/user/123/profile";
         let pattern = "/user/:id/profile";
-        let params = Params::extract_path_params(url, pattern).unwrap();
+        let params = Params::extract_params(url, pattern).unwrap();
         assert_eq!(params.get("id").unwrap(), "123");
     }
 
@@ -133,7 +133,7 @@ mod tests {
     fn test_star_path() {
         let url = "/static/css/main.css";
         let pattern = "/static/*";
-        let params = Params::extract_path_params(url, pattern).unwrap();
+        let params = Params::extract_params(url, pattern).unwrap();
         assert_eq!(params.get("*").unwrap(), "css/main.css");
     }
 
@@ -141,22 +141,33 @@ mod tests {
     fn test_optional_param() {
         let url = "/user/";
         let pattern = "/user/:id?";
-        let params = Params::extract_path_params(url, pattern).unwrap();
+        let params = Params::extract_params(url, pattern).unwrap();
         assert_eq!(params.get("id").unwrap(), "");
     }
 
     #[test]
     #[should_panic(expected = "called `Option::unwrap()` on a `None` value")]
     fn test_optional_param_should_panic() {
-        Params::extract_path_params("/user", "/user/:id?").unwrap();
+        Params::extract_params("/user", "/user/:id?").unwrap();
     }
 
     #[test]
     fn test_ext_param() {
         let url = "/file/report.pdf";
         let pattern = "/file/:name.:ext";
-        let params = Params::extract_path_params(url, pattern).unwrap();
+        let params = Params::extract_params(url, pattern).unwrap();
         assert_eq!(params.get("name").unwrap(), "report");
         assert_eq!(params.get("ext").unwrap(), "pdf");
+    }
+
+        #[test]
+    fn test_path_with_query() {
+        let url = "/search?q=rust&sort=asc";
+        let pattern = "/search";
+        let params = Params::new(url.to_string(), pattern.to_string());
+        println!("params {:?}", params);
+        assert!(params.data.is_none());
+        assert_eq!(params.query.get("q").unwrap(), &vec!["rust".to_string()]);
+        assert_eq!(params.query.get("sort").unwrap(), &vec!["asc".to_string()]);
     }
 }

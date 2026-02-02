@@ -18,20 +18,26 @@ impl Response {
         Response { writer, peer_addr }
     }
     /// 直接写入字符串（不封装 HTTP 响应）
-    pub async fn write_str<S: AsRef<str>>(mut writer: BufWriter<OwnedWriteHalf>, s: S) -> std::io::Result<()> {
+    pub async fn write_str<S: AsRef<str>>(
+        mut writer: BufWriter<OwnedWriteHalf>,
+        s: S
+    ) -> std::io::Result<()> {
         writer.write_all(s.as_ref().as_bytes()).await?;
         writer.flush().await
     }
 
     /// 直接写入字节（不封装 HTTP 响应）
-    pub async fn write_bytes(mut writer: BufWriter<OwnedWriteHalf>, bytes: &[u8]) -> std::io::Result<()> {
+    pub async fn write_bytes(
+        mut writer: BufWriter<OwnedWriteHalf>,
+        bytes: &[u8]
+    ) -> std::io::Result<()> {
         writer.write_all(bytes).await?;
         writer.flush().await
     }
 
     /// 核心发送方法，内部统一处理 header 拼接、Content-Length 和 flush
     async fn send_inner(
-        mut writer: BufWriter<OwnedWriteHalf>,
+        writer: &mut BufWriter<OwnedWriteHalf>,
         status: StatusCode,
         mut headers: HashMap<String, String>,
         body: &[u8]
@@ -56,7 +62,7 @@ impl Response {
 
     /// 发送任意字节 body
     pub async fn send_bytes(
-        writer: BufWriter<OwnedWriteHalf>,
+        writer: &mut BufWriter<OwnedWriteHalf>,
         status: StatusCode,
         headers: HashMap<String, String>,
         body: &[u8]
@@ -66,7 +72,7 @@ impl Response {
 
     /// 发送字符串 body
     pub async fn send_str<S: AsRef<str>>(
-        writer: BufWriter<OwnedWriteHalf>,
+        writer: &mut BufWriter<OwnedWriteHalf>,
         status: StatusCode,
         headers: HashMap<String, String>,
         body: S
@@ -76,7 +82,7 @@ impl Response {
 
     /// 发送 JSON 数据（自动设置 Content-Type: application/json）
     pub async fn send_json<T: Serialize>(
-        writer: BufWriter<OwnedWriteHalf>,
+        writer: &mut BufWriter<OwnedWriteHalf>,
         status: StatusCode,
         mut headers: HashMap<String, String>,
         value: &T
@@ -101,7 +107,7 @@ impl Response {
 
     /// 只发送状态码，body 为空（Content-Length: 0）
     pub async fn send_status(
-        writer: BufWriter<OwnedWriteHalf>,
+        writer: &mut BufWriter<OwnedWriteHalf>,
         status: StatusCode,
         mut headers: Option<HashMap<String, String>>
     ) -> std::io::Result<()> {
@@ -112,7 +118,7 @@ impl Response {
 
     /// 发送本地文件
     pub async fn send_file<P: AsRef<Path>>(
-        mut writer: BufWriter<OwnedWriteHalf>,
+        writer: &mut BufWriter<OwnedWriteHalf>,
         status: StatusCode,
         mut headers: HashMap<String, String>,
         file_path: P
