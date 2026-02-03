@@ -164,68 +164,145 @@ pub async fn handle_request(root: &TrieNode, ctx: &mut HTTPContext<'_>) -> bool 
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashMap, sync::Arc};
+    use std::{ collections::HashMap, sync::Arc };
     use futures::FutureExt;
-    use tokio::io::{BufReader, BufWriter};
+    use tokio::io::{ BufReader, BufWriter };
 
-    use crate::{handler::HTTPContext, req::Request, res::Response, trie::{NodeType, TrieNode, handle_request}};
+    use crate::{
+        handler::HTTPContext,
+        req::Request,
+        res::Response,
+        trie::{ NodeType, TrieNode, handle_request },
+    };
 
     #[tokio::test]
-async fn test_http_server_get_route() {
-    use tokio::net::{TcpListener, TcpStream};
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    async fn test_http_server_get_route() {
+        use tokio::net::{ TcpListener, TcpStream };
+        use tokio::io::{ AsyncReadExt, AsyncWriteExt };
 
-    // 1️⃣ 构建 Trie
-    let mut root = TrieNode::new(NodeType::Static("root".into()));
+        // 1️⃣ 构建 Trie
+        let mut root = TrieNode::new(NodeType::Static("root".into()));
 
-    root.insert(
-        "/hello",
-        Some("GET"),
-        Arc::new(|ctx| async move {
-            ctx.res.body.push("world");
-            true
-        }.boxed()),
-        None,
-    );
+        root.insert(
+            "/hello",
+            Some("GET"),
+            Arc::new(|ctx|
+                (
+                    async move {
+                        ctx.res.body.push("world");
+                        true
+                    }
+                ).boxed()
+            ),
+            None
+        );
 
-    // 2️⃣ 起 TCP server
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
+        // 2️⃣ 起 TCP server
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
 
-    tokio::spawn(async move {
-        let (stream, peer_addr) = listener.accept().await.unwrap();
-        let (reader, writer) = stream.into_split();
-        let reader = BufReader::new(reader);
+        tokio::spawn(async move {
+            let (stream, peer_addr) = listener.accept().await.unwrap();
+            let (reader, writer) = stream.into_split();
+            let reader = BufReader::new(reader);
 
-        let mut writer = BufWriter::new(writer);
+            let mut writer = BufWriter::new(writer);
 
-        // 4️⃣ 生成 Request 对象
-        let req = Request::new(reader, peer_addr, "").await;
-        let res = Response::new(&mut writer);
-        let mut ctx = HTTPContext {
-            req,
-            res,
-            global: HashMap::new(),
-            local: HashMap::new(),
-        };
-        // 4️⃣ 走 Trie
-        handle_request(&root, &mut ctx).await;
+            // 4️⃣ 生成 Request 对象
+            let req = Request::new(reader, peer_addr, "").await;
+            let res = Response::new(&mut writer);
+            let mut ctx = HTTPContext {
+                req,
+                res,
+                global: HashMap::new(),
+                local: HashMap::new(),
+            };
+            // 4️⃣ 走 Trie
+            handle_request(&root, &mut ctx).await;
 
-        // 5️⃣ 写回响应
-        let resp_bytes = ctx.res.body.join("\r\n");
-        Response::<'_>::write_str(&mut writer, &resp_bytes).await
-    });
+            // 5️⃣ 写回响应
+            let resp_bytes = ctx.res.body.join("\r\n");
+            Response::<'_>::write_str(&mut writer, &resp_bytes).await
+        });
 
-    // 6️⃣ 客户端发请求
-    let mut client = TcpStream::connect(addr).await.unwrap();
-    client.write_all(b"GET /hello HTTP/1.1\r\nHost: x\r\n\r\n").await.unwrap();
+        // 6️⃣ 客户端发请求
+        let mut client = TcpStream::connect(addr).await.unwrap();
+        client.write_all(b"GET /hello HTTP/1.1\r\nHost: x\r\n\r\n").await.unwrap();
 
-    let mut resp = vec![0; 1024];
-    let n = client.read(&mut resp).await.unwrap();
-    let resp_str = std::str::from_utf8(&resp[..n]).unwrap();
+        let mut resp = vec![0; 1024];
+        let n = client.read(&mut resp).await.unwrap();
+        let resp_str = std::str::from_utf8(&resp[..n]).unwrap();
 
-    // 7️⃣ 断言
-    assert!(resp_str.contains("world"));
-}
+        // 7️⃣ 断言
+        assert!(resp_str.contains("world"));
 
+    }
+
+
+    #[tokio::test]
+    async fn test_http_server_get_route1() {
+        use tokio::net::{ TcpListener, TcpStream };
+        use tokio::io::{ AsyncReadExt, AsyncWriteExt };
+
+        // 1️⃣ 构建 Trie
+        let mut root = TrieNode::new(NodeType::Static("root".into()));
+
+        root.insert(
+            "/user/:id",
+            Some("POST"),
+            Arc::new(|ctx|
+                (
+                    async move {
+                      // let data = ctx.req.params.data.as_ref().unwrap().get("id").unwrap().as_str();
+
+                      // println!("id = {}", data);
+                        // ctx.res.body.push(data.clone().to_string().as_str());
+                        ctx.res.body.push("posted");
+                        true
+                    }
+                ).boxed()
+            ),
+            None
+        );
+
+        // 2️⃣ 起 TCP server
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        tokio::spawn(async move {
+            let (stream, peer_addr) = listener.accept().await.unwrap();
+            let (reader, writer) = stream.into_split();
+            let reader = BufReader::new(reader);
+
+            let mut writer = BufWriter::new(writer);
+
+            // 4️⃣ 生成 Request 对象
+            let req = Request::new(reader, peer_addr, "").await;
+            let res = Response::new(&mut writer);
+            let mut ctx = HTTPContext {
+                req,
+                res,
+                global: HashMap::new(),
+                local: HashMap::new(),
+            };
+            // 4️⃣ 走 Trie
+            handle_request(&root, &mut ctx).await;
+
+            // 5️⃣ 写回响应
+            let resp_bytes = ctx.res.body.join("\r\n");
+            Response::<'_>::write_str(&mut writer, &resp_bytes).await
+        });
+
+        // 6️⃣ 客户端发请求
+        let mut client = TcpStream::connect(addr).await.unwrap();
+        client.write_all(b"POST /user/ddidi HTTP/1.1\r\nHost: x\r\n\r\n").await.unwrap();
+
+        let mut resp = vec![0; 1024];
+        let n = client.read(&mut resp).await.unwrap();
+        let resp_str = std::str::from_utf8(&resp[..n]).unwrap();
+
+        // 7️⃣ 断言
+        assert!(resp_str.contains("posted"));
+        
+    }
 }
