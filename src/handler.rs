@@ -21,7 +21,7 @@ pub type Executor = Arc<
 #[derive(Clone)]
 pub struct HandlerMapValue {
     pub parameters: Vec<String>,
-    pub executors: Vec<Executor>, // Arc 可以安全 clone
+    pub executors: Vec<Executor>, 
 }
 
 impl HandlerMapValue {

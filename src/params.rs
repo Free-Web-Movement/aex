@@ -71,7 +71,7 @@ impl Params {
             let path_s = &path[pos..whole.start()];
             regex_str += &regex::escape(path_s);
 
-            if let Some(star) = caps.get(2) {
+            if let Some(_star) = caps.get(2) {
                 // '*' 通配符
                 regex_str += "(.*)";
                 param_names.push("*".to_string());
