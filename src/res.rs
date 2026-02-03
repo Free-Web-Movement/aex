@@ -9,16 +9,33 @@ const HTTP_BUFFER: usize = 8 * 1024;
 
 /// HTTP 响应结构
 pub struct Response<'a> {
+    pub status: StatusCode,
     pub writer: &'a mut BufWriter<OwnedWriteHalf>,
     pub headers: HashMap<HeaderKey, String>,
-    pub body: Vec<&'a str>,
+    pub body: Vec<String>,
     // peer_addr: SocketAddr,
 }
 
 impl<'a> Response<'a> {
     pub fn new(writer: &'a mut BufWriter<OwnedWriteHalf>) -> Self {
-        Response { writer, headers: HashMap::new(), body: vec![] }
+        Response { status: StatusCode::Ok, writer, headers: HashMap::new(), body: vec![] }
     }
+
+    /// 实例方法：将当前 Response 结构体中的所有内容一次性发送
+    pub async fn send(&mut self) -> std::io::Result<()> {
+        // 将 Vec<String> 类型的 body 拼接成一个字节数组
+        let full_body = self.body.join("").into_bytes();
+
+        // 将 HashMap<HeaderKey, String> 转换为 send_inner 要求的 HashMap<String, String>
+        let mut string_headers = HashMap::with_capacity(self.headers.len());
+        for (k, v) in &self.headers {
+            string_headers.insert(k.to_str().to_string(), v.clone());
+        }
+
+        // 调用内部现有的核心发送逻辑
+        Self::send_inner(&mut self.writer, self.status, string_headers, &full_body).await
+    }
+
     /// 直接写入字符串（不封装 HTTP 响应）
     pub async fn write_str<S: AsRef<str>>(
         writer: &mut BufWriter<OwnedWriteHalf>,

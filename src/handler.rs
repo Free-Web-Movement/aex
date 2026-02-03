@@ -5,7 +5,7 @@ use crate::{ protocol::method::HttpMethod, req::Request, res::Response };
 
 // HTTP 上下文
 pub struct HTTPContext<'a> {
-    pub req: Request,
+    pub req: Request<'a>,
     pub res: Response<'a>,
     pub global: HashMap<TypeId, Box<dyn Any + Send + Sync>>,
     pub local: HashMap<TypeId, Box<dyn Any + Send + Sync>>,

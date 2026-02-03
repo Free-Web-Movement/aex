@@ -1,12 +1,16 @@
-// src/main.rs
-use std::{collections::HashMap, net::SocketAddr};
+use std::net::SocketAddr;
 use std::sync::Arc;
 
 use clap::Parser;
 use futures::future::FutureExt;
 
 use aex::{
-    handler::{ Executor, HTTPContext }, protocol::status::StatusCode, res::Response, router::Router, server::HTTPServer
+    get,
+    handler::{ Executor, HTTPContext },
+    protocol::{ header::HeaderKey, status::StatusCode },
+    route,
+    server::HTTPServer,
+    trie::{ NodeType, TrieNode }, // 👈 关键：TrieRouter
 };
 
 #[derive(Parser, Debug)]
@@ -19,34 +23,34 @@ struct Opt {
     port: u16,
 }
 
-/// Hello world executor
-fn hello_world_executor() -> Arc<Executor> {
-    Arc::new(|ctx: &mut HTTPContext| {
-        (
-            async {
-                let writer = &mut ctx.res.writer;
-                let headers = HashMap::<String, String>::new();
-                let _ = Response::send_bytes(writer, StatusCode::Ok, headers, b"Hello world!").await;
-
-                // false = 终止 middleware 链
-                false
-            }
-        ).boxed()
-    })
-}
-
 #[tokio::main(flavor = "multi_thread")]
 async fn main() -> anyhow::Result<()> {
     let opt = Opt::parse();
 
     let addr: SocketAddr = format!("{}:{}", opt.ip, opt.port).parse()?;
 
-    // 1️⃣ 构建 Router（完全 mut-less 使用）
-    let mut router = Router::new();
-    router.get(vec!["/"], vec![hello_world_executor()]);
+    // 1️⃣ 构建 TrieRouter
+    let mut route = TrieNode::new(NodeType::Static("root".into()));
 
-    // 2️⃣ 启动 HTTPServer
-    let server = HTTPServer::new(addr, router);
+    route!(
+        route,
+        get!("/", |ctx: &mut HTTPContext| {
+            (
+                async move {
+                    // ctx.res.status = StatusCode::Ok;
+                    // ctx.res.headers.insert(HeaderKey::ContentType, "text/plain".into());
+
+                    ctx.res.body.push("Hello world!".to_string());
+
+                    // false = 不继续 middleware（如果你还保留这个语义）
+                    true
+                }
+            ).boxed()
+        })
+    );
+
+    // 2️⃣ 启动 HTTPServer（直接吃 trie）
+    let server = HTTPServer::new(addr, route);
 
     server.run().await?;
     Ok(())

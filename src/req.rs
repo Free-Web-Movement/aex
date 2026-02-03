@@ -13,7 +13,7 @@ use crate::protocol::header::HeaderKey;
 use crate::protocol::method::HttpMethod;
 use crate::protocol::media_type::MediaType;
 
-pub struct Request {
+pub struct Request<'a> {
     pub method: HttpMethod,
     pub path: String,
     pub is_chunked: bool, // 是否使用 Transfer-Encoding: chunked
@@ -25,26 +25,43 @@ pub struct Request {
     pub content_type: ContentType,
     pub body: Vec<u8>,
     pub cookies: HashMap<String, String>,
-    pub reader: BufReader<OwnedReadHalf>,
+    pub reader: &'a mut BufReader<OwnedReadHalf>,
     pub peer_addr: SocketAddr,
 }
 
-impl Request {
+impl<'a> Request<'a> {
+    /// 专门解析 HTTP 请求行: "GET /index.html HTTP/1.1"
+    #[inline]
+    pub fn parse_request_line(line: &str) -> Option<(String, String, String)> {
+        // let mut parts = line.split(" ");
+        let mut parts = line.split_whitespace();
+        println!("parts {:?}", parts);
+
+        let method = parts.next()?.to_string();
+        let path = parts.next()?.to_string();
+        let version = parts.next()?.to_string();
+
+        println!("method = {}, path = {}, version = {}", method, path, version);
+
+        Some((method, path, version))
+    }
+
     pub async fn new(
-        mut reader: BufReader<OwnedReadHalf>,
+        mut reader: &'a mut BufReader<OwnedReadHalf>,
         peer_addr: SocketAddr,
         route_pattern: &str // 用于解析动态 path params
     ) -> Self {
         // 1️⃣ 解析请求行
         let mut request_line = String::new();
-        reader.read_line(&mut request_line).await.unwrap();
+        reader.read_line(&mut request_line).await.unwrap_or_default();
+
+        println!("request: {}", request_line);
 
         // 调用优化后的函数
-        let request_line = request_line.trim_end_matches(&['\r', '\n'][..]);
-        let mut parts = request_line.splitn(3, ' ');
-        let method_str = parts.next().unwrap();
-        let path = parts.next().unwrap();
-        let version = parts.next().unwrap().to_string();
+        // 调用有名函数，解析失败直接返回 None (即服务器错误)
+        let (method_str, path, version) = Self::parse_request_line(&request_line).unwrap();
+
+        println!("Received HTTP request from {}: {:?} {} {}", peer_addr, method_str, path, version);
 
         // 解析 HttpMethod
         let method = HttpMethod::from_str(&method_str).expect(
@@ -55,6 +72,10 @@ impl Request {
 
         // 2️⃣ 读取 headers
         let headers = Self::read_headers(&mut reader).await;
+
+        for (k, v) in &headers {
+            println!("{:?}:{}", k, v);
+        }
 
         // 解析 Cookie
         let cookies = headers
