@@ -1,5 +1,5 @@
 use std::{ any::TypeId, collections::HashMap, sync::Arc };
-use crate::handler::{ Executor, HTTPContext, Middleware };
+use crate::handler::{ Executor, HTTPContext };
 
 /// 节点类型
 #[derive(Clone, Debug)]
@@ -13,7 +13,7 @@ pub enum NodeType {
 pub struct TrieNode {
     pub node_type: NodeType,
     pub children: HashMap<String, TrieNode>,
-    pub middlewares: Option<HashMap<String, Vec<Arc<Middleware>>>>, // 方法级中间件
+    pub middlewares: Option<HashMap<String, Vec<Arc<Executor>>>>, // 方法级中间件
     pub handlers: Option<HashMap<String, Arc<Executor>>>, // 方法级处理器
 }
 
@@ -33,7 +33,7 @@ impl TrieNode {
         path: &str,
         method: Option<&str>,
         handler: Arc<Executor>,
-        middlewares: Option<Vec<Arc<Middleware>>>
+        middlewares: Option<Vec<Arc<Executor>>>
     ) {
         let segments: Vec<&str> = path.trim_start_matches('/').split('/').collect();
         let mut node = self;
@@ -135,9 +135,9 @@ pub async fn handle_request(root: &TrieNode, ctx: &mut HTTPContext<'_>) -> bool 
             let mws = mws_map.get(method_key).or_else(|| mws_map.get("*"));
             if let Some(mws) = mws {
                 for mw in mws {
-                    let cont = (mw.executor)(ctx).await;
+                    let cont = mw(ctx).await;
                     if !cont {
-                        (mw.fallback)(ctx).await;
+                        // (mw.fallback)(ctx).await;
                         return false;
                     }
                 }
@@ -172,6 +172,7 @@ mod tests {
         handler::HTTPContext,
         req::Request,
         res::Response,
+        route,
         trie::{ NodeType, TrieNode, handle_request },
     };
 
@@ -235,9 +236,7 @@ mod tests {
 
         // 7️⃣ 断言
         assert!(resp_str.contains("world"));
-
     }
-
 
     #[tokio::test]
     async fn test_http_server_get_route1() {
@@ -253,9 +252,9 @@ mod tests {
             Arc::new(|ctx|
                 (
                     async move {
-                      // let data = ctx.req.params.data.as_ref().unwrap().get("id").unwrap().as_str();
+                        // let data = ctx.req.params.data.as_ref().unwrap().get("id").unwrap().as_str();
 
-                      // println!("id = {}", data);
+                        // println!("id = {}", data);
                         // ctx.res.body.push(data.clone().to_string().as_str());
                         ctx.res.body.push("posted");
                         true
@@ -303,6 +302,67 @@ mod tests {
 
         // 7️⃣ 断言
         assert!(resp_str.contains("posted"));
-        
+    }
+
+    #[tokio::test]
+    async fn test_http_server_get_route2() {
+        use tokio::net::{ TcpListener, TcpStream };
+        use tokio::io::{ AsyncReadExt, AsyncWriteExt };
+        // use crate::make_method_macro;
+        // 1️⃣ 构建 Trie
+        let mut root = TrieNode::new(NodeType::Static("root".into()));
+
+        // POST 路由，不带 middleware
+        crate::route!(
+            root,
+            crate::post!("/user/:id/profile", |ctx: &mut HTTPContext|
+                (
+                    async move {
+                        println!("POST Handler");
+                        ctx.res.body.push("macro");
+                        true
+                    }
+                ).boxed()
+            )
+        );
+
+        // 2️⃣ 起 TCP server
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        tokio::spawn(async move {
+            let (stream, peer_addr) = listener.accept().await.unwrap();
+            let (reader, writer) = stream.into_split();
+            let reader = BufReader::new(reader);
+
+            let mut writer = BufWriter::new(writer);
+
+            // 4️⃣ 生成 Request 对象
+            let req = Request::new(reader, peer_addr, "").await;
+            let res = Response::new(&mut writer);
+            let mut ctx = HTTPContext {
+                req,
+                res,
+                global: HashMap::new(),
+                local: HashMap::new(),
+            };
+            // 4️⃣ 走 Trie
+            handle_request(&root, &mut ctx).await;
+
+            // 5️⃣ 写回响应
+            let resp_bytes = ctx.res.body.join("\r\n");
+            Response::<'_>::write_str(&mut writer, &resp_bytes).await
+        });
+
+        // 6️⃣ 客户端发请求
+        let mut client = TcpStream::connect(addr).await.unwrap();
+        client.write_all(b"POST /user/ddidi/profile HTTP/1.1\r\nHost: x\r\n\r\n").await.unwrap();
+
+        let mut resp = vec![0; 1024];
+        let n = client.read(&mut resp).await.unwrap();
+        let resp_str = std::str::from_utf8(&resp[..n]).unwrap();
+
+        // 7️⃣ 断言
+        assert!(resp_str.contains("macro"));
     }
 }
