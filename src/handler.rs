@@ -1,5 +1,4 @@
-use std::{ any::{Any, TypeId}, collections::HashMap, sync::Arc };
-use futures::{ future::BoxFuture };
+use std::{ any::{ Any, TypeId }, collections::HashMap, sync::Arc };
 
 use crate::{ protocol::method::HttpMethod, req::Request, res::Response };
 
@@ -11,50 +10,13 @@ pub struct HTTPContext<'a> {
     pub local: HashMap<TypeId, Box<dyn Any + Send + Sync>>,
 }
 
-// Executor 类型，使用 Arc 包装 trait object
-// pub type Executor = Arc<
-//     dyn (Fn(&mut HTTPContext) -> BoxFuture<'static, bool>) + Send + Sync
-// >;
-
-pub type Executor =
-    dyn for<'a> Fn(&'a mut HTTPContext) -> BoxFuture<'a, bool>
-        + Send
-        + Sync;
-
-// pub type Fallback =
-//     dyn for<'a> Fn(&'a mut HTTPContext) -> BoxFuture<'a, ()>
-//         + Send
-//         + Sync;
-
-
-// pub struct Middleware {
-//   pub executor: Arc<Executor>,
-//   pub fallback: Arc<Fallback>
-// }
-
-// pub type ExecutorArc = Arc<Executor>;
-// pub type FallbackArc = Arc<Fallback>;
-
-
-// impl Middleware {
-//     pub fn new<E, F>(executor: E, fallback: F) -> Self
-//     where
-//         E: for<'a> Fn(&'a mut HTTPContext) -> BoxFuture<'a, bool> + Send + Sync + 'static,
-//         F: for<'a> Fn(&'a mut HTTPContext) -> BoxFuture<'a, ()> + Send + Sync + 'static,
-//     {
-//         Self {
-//             executor: Arc::new(executor),
-//             fallback: Arc::new(fallback),
-//         }
-//     }
-// }
-
+pub type Executor = fn(&mut HTTPContext) -> bool;
 
 // 保存参数名和 executor 的结构
 #[derive(Clone)]
-pub struct  HandlerMapValue {
+pub struct HandlerMapValue {
     pub parameters: Vec<String>,
-    pub executors: Vec<Arc<Executor>>, 
+    pub executors: Vec<Arc<Executor>>,
 }
 
 impl HandlerMapValue {

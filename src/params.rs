@@ -162,7 +162,6 @@ mod tests {
         let url = "/search?q=rust&sort=asc";
         let pattern = "/search";
         let params = Params::new(url.to_string(), pattern.to_string());
-        println!("params {:?}", params);
         assert!(params.data.is_none());
         assert_eq!(params.query.get("q").unwrap(), &vec!["rust".to_string()]);
         assert_eq!(params.query.get("sort").unwrap(), &vec!["asc".to_string()]);

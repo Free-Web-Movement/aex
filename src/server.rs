@@ -35,7 +35,6 @@ impl HTTPServer {
                 if let Err(err) = Self::handle_connection(router, stream, peer_addr).await {
                     eprintln!("[ERROR] Connection {}: {}", peer_addr, err);
                 }
-
             });
         }
     }
@@ -73,8 +72,7 @@ impl HTTPServer {
 
 #[cfg(test)]
 mod tests {
-    use std::{ collections::HashMap, sync::Arc };
-    use futures::FutureExt;
+    use std:: sync::Arc ;
     use tokio::io::{ BufReader, BufWriter, AsyncReadExt, AsyncWriteExt };
     use tokio::net::{ TcpListener, TcpStream };
     use std::net::SocketAddr;
@@ -129,14 +127,10 @@ mod tests {
         root.insert(
             "/hello",
             Some("GET"),
-            Arc::new(|ctx|
-                (
-                    async move {
-                        ctx.res.body.push("world".to_string());
-                        true
-                    }
-                ).boxed()
-            ),
+            Arc::new(|ctx| {
+                ctx.res.body.push("world".to_string());
+                true
+            }),
             None
         );
 
@@ -161,14 +155,10 @@ mod tests {
         root.insert(
             "/user/:id/profile",
             Some("POST"),
-            Arc::new(|ctx|
-                (
-                    async move {
-                        ctx.res.body.push("posted".to_string());
-                        true
-                    }
-                ).boxed()
-            ),
+            Arc::new(|ctx| {
+                ctx.res.body.push("posted".to_string());
+                true
+            }),
             None
         );
 
@@ -192,24 +182,17 @@ mod tests {
         root.insert(
             "/user/:id",
             Some("GET"),
-            Arc::new(|ctx|
-                (
-                    async move {
-                        println!("Inside id handler! ");
+            Arc::new(|ctx| {
+                // 假设 ctx.req.params.data 是 HashMap<String, String>，这里不生成新 String
 
-                        // 假设 ctx.req.params.data 是 HashMap<String, String>，这里不生成新 String
-
-                        if let Some(params) = &ctx.req.params.data {
-                            if let Some(id) = params.get("id") {
-                                println!("get id {} ", id);
-                                // 直接使用原始 &str
-                                ctx.res.body.push(id.to_string()); // 生命周期和 params 一致
-                            }
-                        }
-                        true
+                if let Some(params) = &ctx.req.params.data {
+                    if let Some(id) = params.get("id") {
+                        // 直接使用原始 &str
+                        ctx.res.body.push(id.to_string()); // 生命周期和 params 一致
                     }
-                ).boxed()
-            ),
+                }
+                true
+            }),
             None
         );
 
@@ -221,8 +204,6 @@ mod tests {
         let mut resp = vec![0; 1024];
         let n = client.read(&mut resp).await.unwrap();
         let resp_str = std::str::from_utf8(&resp[..n]).unwrap();
-
-        println!("resp_str {}", resp_str);
 
         assert!(resp_str.contains("42"));
     }

@@ -1,4 +1,4 @@
-use std::{ any::TypeId, collections::HashMap, sync::Arc };
+use std::{ collections::HashMap, sync::Arc };
 use crate::handler::{ Executor, HTTPContext };
 
 /// 节点类型
@@ -125,22 +125,19 @@ impl TrieNode {
 // --------------------------------------
 pub async fn handle_request(root: &TrieNode, ctx: &mut HTTPContext<'_>) -> bool {
     let segments: Vec<&str> = ctx.req.path.trim_start_matches('/').split('/').collect();
-    println!("segements: {:?}", segments);
     let mut params = HashMap::new();
 
     if let Some(node) = root.match_route(&segments, &mut params) {
-        println!("matched!");
         ctx.req.params.data = Some(params);
 
         let method_key = ctx.req.method.to_str();
 
         // 执行中间件
         if let Some(mws_map) = &node.middlewares {
-            println!("inside middleware!");
             let mws = mws_map.get(method_key).or_else(|| mws_map.get("*"));
             if let Some(mws) = mws {
                 for mw in mws {
-                    let cont = mw(ctx).await;
+                    let cont = mw(ctx);
                     if !cont {
                         // (mw.fallback)(ctx).await;
                         return false;
@@ -151,21 +148,15 @@ pub async fn handle_request(root: &TrieNode, ctx: &mut HTTPContext<'_>) -> bool 
 
         // 执行处理器
         if let Some(handlers_map) = &node.handlers {
-            println!("inside handlers!");
-
             let handler = handlers_map.get(method_key).or_else(|| handlers_map.get("*"));
 
             if let Some(handler) = handler {
-                println!("found handler!");
-                return handler(ctx).await;
+                return handler(ctx);
             } else {
-                println!("405 Method Not Allowed: {}", ctx.req.method.to_str());
             }
         } else {
-            println!("404 Not Found: {}", ctx.req.path);
         }
     } else {
-        println!("404 Not Found: {}", ctx.req.path);
     }
 
     false
@@ -195,14 +186,10 @@ mod tests {
         root.insert(
             "/hello",
             Some("GET"),
-            Arc::new(|ctx|
-                (
-                    async move {
-                        ctx.res.body.push("world".to_string());
-                        true
-                    }
-                ).boxed()
-            ),
+            Arc::new(|ctx| {
+                ctx.res.body.push("world".to_string());
+                true
+            }),
             None
         );
 
@@ -257,18 +244,13 @@ mod tests {
         root.insert(
             "/user/:id",
             Some("POST"),
-            Arc::new(|ctx|
-                (
-                    async move {
-                        // let data = ctx.req.params.data.as_ref().unwrap().get("id").unwrap().as_str();
+            Arc::new(|ctx| {
+                // let data = ctx.req.params.data.as_ref().unwrap().get("id").unwrap().as_str();
 
-                        // println!("id = {}", data);
-                        // ctx.res.body.push(data.clone().to_string().as_str());
-                        ctx.res.body.push("posted".to_string());
-                        true
-                    }
-                ).boxed()
-            ),
+                // ctx.res.body.push(data.clone().to_string().as_str());
+                ctx.res.body.push("posted".to_string());
+                true
+            }),
             None
         );
 
@@ -323,15 +305,10 @@ mod tests {
         // POST 路由，不带 middleware
         crate::route!(
             root,
-            crate::post!("/user/:id/profile", |ctx: &mut HTTPContext|
-                (
-                    async move {
-                        println!("POST Handler");
-                        ctx.res.body.push("macro".to_string());
-                        true
-                    }
-                ).boxed()
-            )
+            crate::post!("/user/:id/profile", |ctx: &mut HTTPContext| {
+                ctx.res.body.push("macro".to_string());
+                true
+            })
         );
 
         // 2️⃣ 起 TCP server
@@ -385,15 +362,10 @@ mod tests {
         // POST 路由，不带 middleware
         crate::route!(
             root,
-            crate::post!("/", |ctx: &mut HTTPContext|
-                (
-                    async move {
-                        println!("POST Handler");
-                        ctx.res.body.push("root".to_string());
-                        true
-                    }
-                ).boxed()
-            )
+            crate::post!("/", |ctx: &mut HTTPContext| {
+                ctx.res.body.push("root".to_string());
+                true
+            })
         );
 
         // 2️⃣ 起 TCP server

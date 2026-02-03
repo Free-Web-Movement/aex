@@ -35,14 +35,9 @@ impl<'a> Request<'a> {
     pub fn parse_request_line(line: &str) -> Option<(String, String, String)> {
         // let mut parts = line.split(" ");
         let mut parts = line.split_whitespace();
-        println!("parts {:?}", parts);
-
         let method = parts.next()?.to_string();
         let path = parts.next()?.to_string();
         let version = parts.next()?.to_string();
-
-        println!("method = {}, path = {}, version = {}", method, path, version);
-
         Some((method, path, version))
     }
 
@@ -55,27 +50,17 @@ impl<'a> Request<'a> {
         let mut request_line = String::new();
         reader.read_line(&mut request_line).await.unwrap_or_default();
 
-        println!("request: {}", request_line);
-
         // 调用优化后的函数
         // 调用有名函数，解析失败直接返回 None (即服务器错误)
         let (method_str, path, version) = Self::parse_request_line(&request_line).unwrap();
-
-        println!("Received HTTP request from {}: {:?} {} {}", peer_addr, method_str, path, version);
 
         // 解析 HttpMethod
         let method = HttpMethod::from_str(&method_str).expect(
             &format!("Unsupported HTTP method: {}", method_str)
         );
 
-        println!("Received HTTP request from {}: {} {} {}", peer_addr, method_str, path, version);
-
         // 2️⃣ 读取 headers
         let headers = Self::read_headers(&mut reader).await;
-
-        for (k, v) in &headers {
-            println!("{:?}:{}", k, v);
-        }
 
         // 解析 Cookie
         let cookies = headers
