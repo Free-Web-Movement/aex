@@ -6,7 +6,7 @@ use aex::{
     get ,
     route,
     server::HTTPServer,
-    trie::{ NodeType, TrieNode }, // 👈 关键：TrieRouter
+    router::{ NodeType, Router }, // 👈 关键：TrieRouter
 };
 
 #[derive(Parser, Debug)]
@@ -26,7 +26,7 @@ async fn main() -> anyhow::Result<()> {
     let addr: SocketAddr = format!("{}:{}", opt.ip, opt.port).parse()?;
 
     // 1️⃣ 构建 TrieRouter
-    let mut route = TrieNode::new(NodeType::Static("root".into()));
+    let mut route = Router::new(NodeType::Static("root".into()));
 
     route!(
         route,

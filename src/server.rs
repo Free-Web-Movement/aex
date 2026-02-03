@@ -2,7 +2,7 @@ use std::{ io::{ self, Write }, net::SocketAddr, sync::Arc };
 use tokio::net::{ TcpListener, TcpStream };
 use tokio::io::{ BufReader, BufWriter };
 
-use crate::trie::{ TrieNode, handle_request };
+use crate::router::{ Router, handle_request };
 use crate::handler::HTTPContext;
 use crate::req::Request;
 use crate::res::Response;
@@ -10,11 +10,11 @@ use crate::res::Response;
 /// HTTPServer：无锁、并发、mut-less
 pub struct HTTPServer {
     pub addr: SocketAddr,
-    pub router: Arc<TrieNode>, // Trie 路由
+    pub router: Arc<Router>, // Trie 路由
 }
 
 impl HTTPServer {
-    pub fn new(addr: SocketAddr, router: TrieNode) -> Self {
+    pub fn new(addr: SocketAddr, router: Router) -> Self {
         Self {
             addr,
             router: Arc::new(router),
@@ -41,7 +41,7 @@ impl HTTPServer {
 
     /// 处理 TCP 连接
     async fn handle_connection(
-        router: Arc<TrieNode>,
+        router: Arc<Router>,
         stream: TcpStream,
         peer_addr: SocketAddr
     ) -> std::io::Result<()> {
@@ -72,7 +72,7 @@ impl HTTPServer {
 
 #[cfg(test)]
 mod tests {
-    use std:: sync::Arc ;
+    use std::sync::Arc;
     use tokio::io::{ BufReader, BufWriter, AsyncReadExt, AsyncWriteExt };
     use tokio::net::{ TcpListener, TcpStream };
     use std::net::SocketAddr;
@@ -81,11 +81,11 @@ mod tests {
         handler::HTTPContext,
         res::Response,
         req::Request,
-        trie::{ TrieNode, NodeType, handle_request },
+        router::{ Router, NodeType, handle_request },
     };
 
     /// 简单帮助函数：生成 HTTPServer 并在 background 运行
-    async fn spawn_server(root: TrieNode) -> SocketAddr {
+    async fn spawn_server(root: Router) -> SocketAddr {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let router = Arc::new(root);
@@ -123,7 +123,7 @@ mod tests {
     #[tokio::test]
     async fn test_trie_server_get() {
         // 构建 Trie
-        let mut root = TrieNode::new(NodeType::Static("root".into()));
+        let mut root = Router::new(NodeType::Static("root".into()));
         root.insert(
             "/hello",
             Some("GET"),
@@ -151,7 +151,7 @@ mod tests {
     #[tokio::test]
     async fn test_trie_server_post() {
         // 构建 Trie
-        let mut root = TrieNode::new(NodeType::Static("root".into()));
+        let mut root = Router::new(NodeType::Static("root".into()));
         root.insert(
             "/user/:id/profile",
             Some("POST"),
@@ -177,7 +177,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_trie_server_dynamic_param() {
-        let mut root = TrieNode::new(NodeType::Static("root".into()));
+        let mut root = Router::new(NodeType::Static("root".into()));
 
         root.insert(
             "/user/:id",

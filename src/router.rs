@@ -10,16 +10,16 @@ pub enum NodeType {
 }
 
 /// Trie 树节点
-pub struct TrieNode {
+pub struct Router {
     pub node_type: NodeType,
-    pub children: HashMap<String, TrieNode>,
+    pub children: HashMap<String, Router>,
     pub middlewares: Option<HashMap<String, Vec<Arc<Executor>>>>, // 方法级中间件
     pub handlers: Option<HashMap<String, Arc<Executor>>>, // 方法级处理器
 }
 
-pub type Router = TrieNode;
+// pub type Router = Router;
 
-impl TrieNode {
+impl Router {
     pub fn new(node_type: NodeType) -> Self {
         Self {
             node_type,
@@ -52,7 +52,7 @@ impl TrieNode {
             node = node.children
                 .entry(key.clone())
                 .or_insert_with(|| {
-                    TrieNode::new(
+                    Router::new(
                         if key == "*" {
                             NodeType::Wildcard
                         } else if key == ":" {
@@ -86,7 +86,7 @@ impl TrieNode {
         &'a self,
         segs: &[&str],
         params: &mut HashMap<String, String>
-    ) -> Option<&'a TrieNode> {
+    ) -> Option<&'a Router> {
         if segs.is_empty() {
             return Some(self);
         }
@@ -123,7 +123,7 @@ impl TrieNode {
 // --------------------------------------
 // 执行路由
 // --------------------------------------
-pub async fn handle_request(root: &TrieNode, ctx: &mut HTTPContext<'_>) -> bool {
+pub async fn handle_request(root: &Router, ctx: &mut HTTPContext<'_>) -> bool {
     let segments: Vec<&str> = ctx.req.path.trim_start_matches('/').split('/').collect();
     let mut params = HashMap::new();
 
@@ -165,14 +165,13 @@ pub async fn handle_request(root: &TrieNode, ctx: &mut HTTPContext<'_>) -> bool 
 #[cfg(test)]
 mod tests {
     use std::{ collections::HashMap, sync::Arc };
-    use futures::FutureExt;
     use tokio::io::{ BufReader, BufWriter };
 
     use crate::{
         handler::HTTPContext,
         req::Request,
         res::Response,
-        trie::{ NodeType, TrieNode, handle_request },
+        router::{ NodeType, Router, handle_request },
     };
 
     #[tokio::test]
@@ -181,7 +180,7 @@ mod tests {
         use tokio::io::{ AsyncReadExt, AsyncWriteExt };
 
         // 1️⃣ 构建 Trie
-        let mut root = TrieNode::new(NodeType::Static("root".into()));
+        let mut root = Router::new(NodeType::Static("root".into()));
 
         root.insert(
             "/hello",
@@ -239,7 +238,7 @@ mod tests {
         use tokio::io::{ AsyncReadExt, AsyncWriteExt };
 
         // 1️⃣ 构建 Trie
-        let mut root = TrieNode::new(NodeType::Static("root".into()));
+        let mut root = Router::new(NodeType::Static("root".into()));
 
         root.insert(
             "/user/:id",
@@ -300,7 +299,7 @@ mod tests {
         use tokio::io::{ AsyncReadExt, AsyncWriteExt };
         // use crate::make_method_macro;
         // 1️⃣ 构建 Trie
-        let mut root = TrieNode::new(NodeType::Static("root".into()));
+        let mut root = Router::new(NodeType::Static("root".into()));
 
         // POST 路由，不带 middleware
         crate::route!(
@@ -357,7 +356,7 @@ mod tests {
         use tokio::io::{ AsyncReadExt, AsyncWriteExt };
         // use crate::make_method_macro;
         // 1️⃣ 构建 Trie
-        let mut root = TrieNode::new(NodeType::Static("root".into()));
+        let mut root = Router::new(NodeType::Static("root".into()));
 
         // POST 路由，不带 middleware
         crate::route!(

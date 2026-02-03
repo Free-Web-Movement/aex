@@ -4,5 +4,5 @@ pub mod req;
 pub mod res;
 pub mod server;
 pub mod handler;
-pub mod trie;
+pub mod router;
 pub mod macros;
