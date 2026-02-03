@@ -1,7 +1,6 @@
-use std::{ collections::HashMap, net::SocketAddr, sync::Arc };
+use std::{ collections::HashMap, net::SocketAddr };
 use regex::Regex;
-use serde_json::Map;
-use tokio::{ io::{ BufReader, BufWriter }, net::TcpStream, sync::Mutex };
+use tokio::{ io::{ BufReader, BufWriter }, net::TcpStream };
 
 use crate::{
     handler::{ HTTPContext, Handler },
@@ -12,6 +11,8 @@ use crate::{
 };
 use crate::handler::Executor;
 
+use std:: sync::Arc;
+
 macro_rules! http_methods {
     ($($fn_name:ident => $method:expr),+ $(,)?) => {
         $(
@@ -19,7 +20,7 @@ macro_rules! http_methods {
             pub fn $fn_name(
                 &mut self,
                 paths: Vec<&str>,
-                executors: Vec<Executor>,
+                executors: Vec<Arc<Executor>>,
             ) -> &mut Self {
                 self.add(paths, vec![$method], executors)
             }
@@ -40,7 +41,7 @@ pub struct RouteEntry {
 #[derive(Clone)]
 pub struct Router {
     pub routes: Vec<RouteEntry>,
-    pub executors: Vec<Executor>,
+    pub executors: Vec<Arc<Executor>>,
 }
 
 impl Router {
@@ -66,7 +67,7 @@ impl Router {
         &mut self,
         paths: Vec<&str>,
         methods: Vec<&str>,
-        executors: Vec<Executor>
+        executors: Vec<Arc<Executor>>
     ) -> &mut Self {
         for path in paths {
             let (regex_str, param_names) = Params::parse_path_regex(path);
@@ -94,11 +95,10 @@ impl Router {
         self
     }
 
-    pub async fn process(&self, ctx: Arc<Mutex<HTTPContext>>) {
+    pub async fn process(&self, ctx: &mut HTTPContext) {
         // 先读取 path / method（只读，不跨 await）
         let (req_path, req_method) = {
-            let ctx_guard = ctx.lock().await;
-            let req = ctx_guard.req.lock().await;
+            let req = &ctx.req;
             (req.path.clone(), req.method.clone())
         };
         for route in &self.routes {
@@ -112,20 +112,19 @@ impl Router {
                 }
 
                 {
-                    let ctx_guard = ctx.lock().await;
-                    let mut req = ctx_guard.req.lock().await;
+                    let req = &mut ctx.req;
                     req.params.data = Some(path_params);
                 }
 
                 // ---------- 取 executors（必须 clone，不能跨 await 持 borrow） ----------
 
-                let executors: Vec<Executor> = route.handler
+                let executors: Vec<Arc<Executor>> = route.handler
                     .get_executors(Some(&req_method))
                     .clone();
 
                 // ---------- 串行执行 middleware ----------
                 for exec in executors {
-                    let continue_chain = exec(ctx.clone()).await;
+                    let continue_chain = exec(ctx).await;
                     if !continue_chain {
                         break;
                     }
@@ -174,21 +173,19 @@ impl Router {
         let route: &RouteEntry = matched_route.unwrap();
 
         // 4️⃣ 生成 Request 对象
-        let req = Arc::new(Mutex::new(Request::new(reader, peer_addr, &route.raw_path).await));
-        let res = Arc::new(Mutex::new(Response::new(writer, peer_addr)));
+        let req = Request::new(reader, peer_addr, &route.raw_path).await;
+        let res = Response::new(writer, peer_addr);
 
-        let ctx = Arc::new(
-            Mutex::new(HTTPContext {
-                req,
-                res,
-                global: Map::new(),
-                local: Map::new(),
-            })
-        );
+        let mut ctx = HTTPContext {
+            req,
+            res,
+            global: HashMap::new(),
+            local: HashMap::new(),
+        };
 
         // 5️⃣ 执行全局 middleware
         for exec in &self.executors {
-            if !exec(ctx.clone()).await {
+            if !exec(&mut ctx).await {
                 return;
             }
         }
@@ -197,8 +194,7 @@ impl Router {
 
         let method;
         {
-            let ctx_guard = ctx.lock().await;
-            let mut req = ctx_guard.req.lock().await;
+            let req = &mut ctx.req;
             let data = Params::extract_params(
                 &url.unwrap().to_string(),
                 &route.raw_path
@@ -211,7 +207,7 @@ impl Router {
         // 7️⃣ 执行路径相关 middleware
         let executors = route.handler.get_executors(Some(&method)).clone();
         for exec in executors {
-            if !exec(ctx.clone()).await {
+            if !exec(&mut ctx).await {
                 break;
             }
         }

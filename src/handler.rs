@@ -1,27 +1,31 @@
-use std::{ collections::HashMap, sync::Arc };
+use std::{ any::{Any, TypeId}, collections::HashMap, sync::Arc };
 use futures::{ future::BoxFuture };
-use tokio::sync::Mutex;
 
 use crate::{ protocol::method::HttpMethod, req::Request, res::Response };
 
 // HTTP 上下文
 pub struct HTTPContext {
-    pub req: Arc<Mutex<Request>>,
-    pub res: Arc<Mutex<Response>>,
-    pub global: serde_json::Map<String, serde_json::Value>,
-    pub local: serde_json::Map<String, serde_json::Value>,
+    pub req: Request,
+    pub res: Response,
+    pub global: HashMap<TypeId, Box<dyn Any + Send + Sync>>,
+    pub local: HashMap<TypeId, Box<dyn Any + Send + Sync>>,
 }
 
 // Executor 类型，使用 Arc 包装 trait object
-pub type Executor = Arc<
-    dyn (Fn(Arc<Mutex<HTTPContext>>) -> BoxFuture<'static, bool>) + Send + Sync
->;
+// pub type Executor = Arc<
+//     dyn (Fn(&mut HTTPContext) -> BoxFuture<'static, bool>) + Send + Sync
+// >;
+
+pub type Executor =
+    dyn for<'a> Fn(&'a mut HTTPContext) -> BoxFuture<'a, bool>
+        + Send
+        + Sync;
 
 // 保存参数名和 executor 的结构
 #[derive(Clone)]
-pub struct HandlerMapValue {
+pub struct  HandlerMapValue {
     pub parameters: Vec<String>,
-    pub executors: Vec<Executor>, 
+    pub executors: Vec<Arc<Executor>>, 
 }
 
 impl HandlerMapValue {
@@ -53,7 +57,7 @@ impl Handler {
         &mut self,
         params: &mut Vec<String>,
         method: Option<HttpMethod>,
-        executor: Executor
+        executor: Arc<Executor>
     ) -> &mut Self {
         match method {
             Some(m) => {
@@ -74,7 +78,7 @@ impl Handler {
         &mut self,
         params: &mut Vec<String>,
         method: Option<HttpMethod>,
-        executors: Vec<Executor>
+        executors: Vec<Arc<Executor>>
     ) -> &mut Self {
         match method {
             Some(m) => {
@@ -91,7 +95,7 @@ impl Handler {
     }
 
     /// 获取指定 method 的 executor，如果没有则返回 fallback
-    pub fn get_executors(&self, method: Option<&HttpMethod>) -> &Vec<Executor> {
+    pub fn get_executors(&self, method: Option<&HttpMethod>) -> &Vec<Arc<Executor>> {
         match method {
             Some(m) => {
                 self.methods

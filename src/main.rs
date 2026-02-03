@@ -4,7 +4,6 @@ use std::sync::Arc;
 
 use clap::Parser;
 use futures::future::FutureExt;
-use tokio::sync::Mutex;
 
 use aex::{
     handler::{ Executor, HTTPContext }, protocol::status::StatusCode, res::Response, router::Router, server::HTTPServer
@@ -21,18 +20,13 @@ struct Opt {
 }
 
 /// Hello world executor
-fn hello_world_executor() -> Executor {
-    Arc::new(|ctx: Arc<Mutex<HTTPContext>>| {
+fn hello_world_executor() -> Arc<Executor> {
+    Arc::new(|ctx: &mut HTTPContext| {
         (
-            async move {
-                let res = {
-                    let ctx_guard = ctx.lock().await;
-                    ctx_guard.res.clone()
-                };
-
-                let mut res = res.lock().await;
+            async {
+                let writer = &mut ctx.res.writer;
                 let headers = HashMap::<String, String>::new();
-                let _ = Response::send_bytes(&mut res.writer, StatusCode::Ok, headers, b"Hello world!").await;
+                let _ = Response::send_bytes(writer, StatusCode::Ok, headers, b"Hello world!").await;
 
                 // false = 终止 middleware 链
                 false
