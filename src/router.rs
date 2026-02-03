@@ -95,7 +95,7 @@ impl Router {
         self
     }
 
-    pub async fn process(&self, ctx: &mut HTTPContext) {
+    pub async fn process(&self, ctx: &mut HTTPContext<'_>) {
         // 先读取 path / method（只读，不跨 await）
         let (req_path, req_method) = {
             let req = &ctx.req;
@@ -174,7 +174,7 @@ impl Router {
 
         // 4️⃣ 生成 Request 对象
         let req = Request::new(reader, peer_addr, &route.raw_path).await;
-        let res = Response::new(writer, peer_addr);
+        let res = Response::new(&mut writer);
 
         let mut ctx = HTTPContext {
             req,

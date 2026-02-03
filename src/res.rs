@@ -1,4 +1,4 @@
-use std::{ collections::HashMap, net::SocketAddr, path::Path };
+use std::{ collections::HashMap, path::Path };
 use tokio::{ fs::File, io::{ AsyncReadExt, AsyncWriteExt, BufWriter } };
 use crate::protocol::{ header::HeaderKey, media_type::MediaType };
 use crate::protocol::status::StatusCode;
@@ -8,18 +8,20 @@ use tokio::net::tcp::OwnedWriteHalf;
 const HTTP_BUFFER: usize = 8 * 1024;
 
 /// HTTP 响应结构
-pub struct Response {
-    pub writer: BufWriter<OwnedWriteHalf>,
-    peer_addr: SocketAddr,
+pub struct Response<'a> {
+    pub writer: &'a mut BufWriter<OwnedWriteHalf>,
+    pub headers: HashMap<HeaderKey, String>,
+    pub body: Vec<&'a str>,
+    // peer_addr: SocketAddr,
 }
 
-impl Response {
-    pub fn new(writer: BufWriter<OwnedWriteHalf>, peer_addr: SocketAddr) -> Self {
-        Response { writer, peer_addr }
+impl<'a> Response<'a> {
+    pub fn new(writer: &'a mut BufWriter<OwnedWriteHalf>) -> Self {
+        Response { writer, headers: HashMap::new(), body: vec![] }
     }
     /// 直接写入字符串（不封装 HTTP 响应）
     pub async fn write_str<S: AsRef<str>>(
-        mut writer: BufWriter<OwnedWriteHalf>,
+        writer: &mut BufWriter<OwnedWriteHalf>,
         s: S
     ) -> std::io::Result<()> {
         writer.write_all(s.as_ref().as_bytes()).await?;
@@ -28,7 +30,7 @@ impl Response {
 
     /// 直接写入字节（不封装 HTTP 响应）
     pub async fn write_bytes(
-        mut writer: BufWriter<OwnedWriteHalf>,
+        writer: &mut BufWriter<OwnedWriteHalf>,
         bytes: &[u8]
     ) -> std::io::Result<()> {
         writer.write_all(bytes).await?;

@@ -4,9 +4,9 @@ use futures::{ future::BoxFuture };
 use crate::{ protocol::method::HttpMethod, req::Request, res::Response };
 
 // HTTP 上下文
-pub struct HTTPContext {
+pub struct HTTPContext<'a> {
     pub req: Request,
-    pub res: Response,
+    pub res: Response<'a>,
     pub global: HashMap<TypeId, Box<dyn Any + Send + Sync>>,
     pub local: HashMap<TypeId, Box<dyn Any + Send + Sync>>,
 }
@@ -20,6 +20,35 @@ pub type Executor =
     dyn for<'a> Fn(&'a mut HTTPContext) -> BoxFuture<'a, bool>
         + Send
         + Sync;
+
+pub type Fallback =
+    dyn for<'a> Fn(&'a mut HTTPContext) -> BoxFuture<'a, ()>
+        + Send
+        + Sync;
+
+
+pub struct Middleware {
+  pub executor: Arc<Executor>,
+  pub fallback: Arc<Fallback>
+}
+
+pub type ExecutorArc = Arc<Executor>;
+pub type FallbackArc = Arc<Fallback>;
+
+
+impl Middleware {
+    pub fn new<E, F>(executor: E, fallback: F) -> Self
+    where
+        E: for<'a> Fn(&'a mut HTTPContext) -> BoxFuture<'a, bool> + Send + Sync + 'static,
+        F: for<'a> Fn(&'a mut HTTPContext) -> BoxFuture<'a, ()> + Send + Sync + 'static,
+    {
+        Self {
+            executor: Arc::new(executor),
+            fallback: Arc::new(fallback),
+        }
+    }
+}
+
 
 // 保存参数名和 executor 的结构
 #[derive(Clone)]
