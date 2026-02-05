@@ -199,15 +199,15 @@ mod tests {
         tokio::spawn(async move {
             let (stream, peer_addr) = listener.accept().await.unwrap();
             let (reader, writer) = stream.into_split();
-            let mut reader = BufReader::new(reader);
+            let reader = BufReader::new(reader);
 
             let mut writer = BufWriter::new(writer);
 
             // 4️⃣ 生成 Request 对象
-            let req = Request::new(&mut reader, peer_addr, "").await;
+            let req = Request::new(reader, peer_addr, "").await;
             let res = Response::new(&mut writer);
             let mut ctx = HTTPContext {
-                req,
+                req: req.expect("REASON"),
                 res,
                 global: HashMap::new(),
                 local: HashMap::new(),
@@ -260,15 +260,15 @@ mod tests {
         tokio::spawn(async move {
             let (stream, peer_addr) = listener.accept().await.unwrap();
             let (reader, writer) = stream.into_split();
-            let mut reader = BufReader::new(reader);
+            let reader = BufReader::new(reader);
 
             let mut writer = BufWriter::new(writer);
 
             // 4️⃣ 生成 Request 对象
-            let req = Request::new(&mut reader, peer_addr, "").await;
+            let req = Request::new(reader, peer_addr, "").await;
             let res = Response::new(&mut writer);
             let mut ctx = HTTPContext {
-                req,
+                req: req.expect("REASON"),
                 res,
                 global: HashMap::new(),
                 local: HashMap::new(),
@@ -317,15 +317,15 @@ mod tests {
         tokio::spawn(async move {
             let (stream, peer_addr) = listener.accept().await.unwrap();
             let (reader, writer) = stream.into_split();
-            let mut reader = BufReader::new(reader);
+            let reader = BufReader::new(reader);
 
             let mut writer = BufWriter::new(writer);
 
             // 4️⃣ 生成 Request 对象
-            let req = Request::new(&mut reader, peer_addr, "").await;
+            let req = Request::new(reader, peer_addr, "").await;
             let res = Response::new(&mut writer);
             let mut ctx = HTTPContext {
-                req,
+                req: req.expect("REASON"),
                 res,
                 global: HashMap::new(),
                 local: HashMap::new(),
@@ -374,15 +374,15 @@ mod tests {
         tokio::spawn(async move {
             let (stream, peer_addr) = listener.accept().await.unwrap();
             let (reader, writer) = stream.into_split();
-            let mut reader = BufReader::new(reader);
+            let reader = BufReader::new(reader);
 
             let mut writer = BufWriter::new(writer);
 
             // 4️⃣ 生成 Request 对象
-            let req = Request::new(&mut reader, peer_addr, "").await;
+            let req = Request::new(reader, peer_addr, "").await;
             let res = Response::new(&mut writer);
             let mut ctx = HTTPContext {
-                req,
+                req: req.expect("REASON"),
                 res,
                 global: HashMap::new(),
                 local: HashMap::new(),

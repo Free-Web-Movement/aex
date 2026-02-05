@@ -44,17 +44,17 @@ impl HTTPServer {
         router: Arc<Router>,
         stream: TcpStream,
         peer_addr: SocketAddr
-    ) -> std::io::Result<()> {
+    ) -> anyhow::Result<()> {
         let (reader, writer) = stream.into_split();
-        let mut reader = BufReader::new(reader);
+        let reader = BufReader::new(reader);
         let mut writer = BufWriter::new(writer);
 
         // 构建 Request
-        let req = Request::new(&mut reader, peer_addr, "").await;
+        let req = Request::new(reader, peer_addr, "").await;
         let res = Response::new(&mut writer);
 
         let mut ctx = HTTPContext {
-            req,
+            req: req?,
             res,
             global: Default::default(),
             local: Default::default(),
@@ -96,14 +96,14 @@ mod tests {
                 let router = router.clone();
                 tokio::spawn(async move {
                     let (reader, writer) = stream.into_split();
-                    let mut reader = BufReader::new(reader);
+                    let reader = BufReader::new(reader);
                     let mut writer = BufWriter::new(writer);
 
-                    let req = Request::new(&mut reader, peer_addr, "").await;
+                    let req = Request::new(reader, peer_addr, "").await;
                     let res = Response::new(&mut writer);
 
                     let mut ctx = HTTPContext {
-                        req,
+                        req: req.expect("REASON"),
                         res,
                         global: Default::default(),
                         local: Default::default(),
