@@ -123,7 +123,7 @@ impl Router {
 // --------------------------------------
 // 执行路由
 // --------------------------------------
-pub async fn handle_request(root: &Router, ctx: &mut HTTPContext<'_>) -> bool {
+pub async fn handle_request(root: &Router, ctx: &mut HTTPContext) -> bool {
     let segments: Vec<&str> = ctx.req.path.trim_start_matches('/').split('/').collect();
     let mut params = HashMap::new();
 
@@ -201,11 +201,11 @@ mod tests {
             let (reader, writer) = stream.into_split();
             let reader = BufReader::new(reader);
 
-            let mut writer = BufWriter::new(writer);
+            let writer = BufWriter::new(writer);
 
             // 4️⃣ 生成 Request 对象
             let req = Request::new(reader, peer_addr, "").await;
-            let res = Response::new(&mut writer);
+            let res = Response::new(writer);
             let mut ctx = HTTPContext {
                 req: req.expect("REASON"),
                 res,
@@ -217,7 +217,7 @@ mod tests {
 
             // 5️⃣ 写回响应
             let resp_bytes = ctx.res.body.join("\r\n");
-            Response::<'_>::write_str(&mut writer, &resp_bytes).await
+            Response::write_str(&mut ctx.res.writer, &resp_bytes).await
         });
 
         // 6️⃣ 客户端发请求
@@ -262,11 +262,11 @@ mod tests {
             let (reader, writer) = stream.into_split();
             let reader = BufReader::new(reader);
 
-            let mut writer = BufWriter::new(writer);
+            let writer = BufWriter::new(writer);
 
             // 4️⃣ 生成 Request 对象
             let req = Request::new(reader, peer_addr, "").await;
-            let res = Response::new(&mut writer);
+            let res = Response::new(writer);
             let mut ctx = HTTPContext {
                 req: req.expect("REASON"),
                 res,
@@ -278,7 +278,7 @@ mod tests {
 
             // 5️⃣ 写回响应
             let resp_bytes = ctx.res.body.join("\r\n");
-            Response::<'_>::write_str(&mut writer, &resp_bytes).await
+            Response::write_str(&mut ctx.res.writer, &resp_bytes).await
         });
 
         // 6️⃣ 客户端发请求
@@ -319,11 +319,11 @@ mod tests {
             let (reader, writer) = stream.into_split();
             let reader = BufReader::new(reader);
 
-            let mut writer = BufWriter::new(writer);
+            let writer = BufWriter::new(writer);
 
             // 4️⃣ 生成 Request 对象
             let req = Request::new(reader, peer_addr, "").await;
-            let res = Response::new(&mut writer);
+            let res = Response::new(writer);
             let mut ctx = HTTPContext {
                 req: req.expect("REASON"),
                 res,
@@ -335,7 +335,7 @@ mod tests {
 
             // 5️⃣ 写回响应
             let resp_bytes = ctx.res.body.join("\r\n");
-            Response::<'_>::write_str(&mut writer, &resp_bytes).await
+            Response::write_str(&mut ctx.res.writer, &resp_bytes).await
         });
 
         // 6️⃣ 客户端发请求
@@ -376,11 +376,11 @@ mod tests {
             let (reader, writer) = stream.into_split();
             let reader = BufReader::new(reader);
 
-            let mut writer = BufWriter::new(writer);
+            let writer = BufWriter::new(writer);
 
             // 4️⃣ 生成 Request 对象
             let req = Request::new(reader, peer_addr, "").await;
-            let res = Response::new(&mut writer);
+            let res = Response::new(writer);
             let mut ctx = HTTPContext {
                 req: req.expect("REASON"),
                 res,
@@ -392,7 +392,7 @@ mod tests {
 
             // 5️⃣ 写回响应
             let resp_bytes = ctx.res.body.join("\r\n");
-            Response::<'_>::write_str(&mut writer, &resp_bytes).await
+            Response::write_str(&mut ctx.res.writer, &resp_bytes).await
         });
 
         // 6️⃣ 客户端发请求

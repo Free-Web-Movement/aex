@@ -6,14 +6,14 @@ use std::net::SocketAddr;
 use std::collections::HashMap;
 use std::time::Duration;
 
-use anyhow::{ Context, Result, bail };
+use anyhow::{ Context, bail };
 
-const HTTP_BUFFER: usize = 8 * 1024;
 use crate::params::Params;
 use crate::protocol::content_type::ContentType;
 use crate::protocol::header::HeaderKey;
 use crate::protocol::method::HttpMethod;
 use crate::protocol::media_type::MediaType;
+use crate::websocket::WebSocket;
 
 static MAX_CAPACITY: i32 = 1024;
 static TIME_LIMIT: i32 = 500;
@@ -32,10 +32,11 @@ pub struct Request {
     pub cookies: HashMap<String, String>,
     pub reader: BufReader<OwnedReadHalf>,
     pub peer_addr: SocketAddr,
+    pub is_websocket: bool,
 }
 
 impl Request {
-      #[inline]
+    #[inline]
     pub async fn read_line_with_limit(
         reader: &mut BufReader<OwnedReadHalf>,
         time_limit: Duration,
@@ -151,6 +152,8 @@ impl Request {
         // 8️⃣ params
         let params = Params::new(path.clone(), route_pattern.to_string());
 
+        let is_websocket = WebSocket::check(method, &headers);
+
         Ok(Request {
             method,
             path,
@@ -165,42 +168,9 @@ impl Request {
             body,
             reader,
             peer_addr,
+            is_websocket
         })
     }
-
-    // /// 从 BufReader 中 peek 出 HTTP 请求行的 URL（path + query）
-    // /// ⚠️ 不消费流，后续 Request::new 可以正常读取
-    // pub async fn peek_url(reader: &mut BufReader<OwnedReadHalf>) -> Result<Option<String>> {
-    //     let mut buf = [0u8; HTTP_BUFFER]; // peek 缓冲大小，可根据需要调整
-
-    //     // 获取 TcpStream 参考，直接 peek
-    //     let stream = reader.get_mut();
-    //     let n = stream.peek(&mut buf).await?;
-
-    //     if n == 0 {
-    //         return Ok(None); // 连接关闭
-    //     }
-
-    //     // 转成 UTF-8
-    //     let s = match str::from_utf8(&buf[..n]) {
-    //         Ok(s) => s,
-    //         Err(_) => {
-    //             return Ok(None);
-    //         }
-    //     };
-
-    //     // HTTP 请求行通常形如 "GET /path?query HTTP/1.1\r\n"
-    //     if let Some(end) = s.find("\r\n") {
-    //         let request_line = &s[..end];
-    //         let parts: Vec<&str> = request_line.split_whitespace().collect();
-    //         if parts.len() >= 2 {
-    //             let path = parts[1];
-    //             return Ok(Some(path.to_string()));
-    //         }
-    //     }
-
-    //     Ok(None)
-    // }
 
     /// 将 Cookie header 转换为 HashMap
     fn parse_cookies_raw(header_value: &str) -> HashMap<String, String> {
@@ -259,4 +229,26 @@ impl Request {
 
         Ok(headers_map)
     }
+
+    // /// 判断请求是否是 WebSocket 握手
+    // pub fn check_websocket(method: HttpMethod, headers: &HashMap<HeaderKey, String>) -> bool {
+    //     // 必须是 GET
+    //     if method != HttpMethod::GET {
+    //         return false;
+    //     }
+
+    //     // Upgrade 头必须存在且值为 websocket
+    //     let upgrade = headers
+    //         .get(&HeaderKey::Upgrade)
+    //         .map(|v| v.eq_ignore_ascii_case("websocket"))
+    //         .unwrap_or(false);
+
+    //     // Connection 头包含 Upgrade
+    //     let connection = headers
+    //         .get(&HeaderKey::Connection)
+    //         .map(|v| v.to_ascii_lowercase().contains("upgrade"))
+    //         .unwrap_or(false);
+
+    //     upgrade && connection
+    // }
 }

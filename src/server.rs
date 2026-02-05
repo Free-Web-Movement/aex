@@ -2,7 +2,7 @@ use std::{ io::{ self, Write }, net::SocketAddr, sync::Arc };
 use tokio::net::{ TcpListener, TcpStream };
 use tokio::io::{ BufReader, BufWriter };
 
-use crate::router::{ Router, handle_request };
+use crate::{ router::{ Router, handle_request }, websocket::WebSocket };
 use crate::handler::HTTPContext;
 use crate::req::Request;
 use crate::res::Response;
@@ -47,24 +47,48 @@ impl HTTPServer {
     ) -> anyhow::Result<()> {
         let (reader, writer) = stream.into_split();
         let reader = BufReader::new(reader);
-        let mut writer = BufWriter::new(writer);
+        let writer = BufWriter::new(writer);
 
         // 构建 Request
-        let req = Request::new(reader, peer_addr, "").await;
-        let res = Response::new(&mut writer);
+        let req = Request::new(reader, peer_addr, "").await?;
+        let res = Response::new(writer);
 
-        let mut ctx = HTTPContext {
-            req: req?,
-            res,
-            global: Default::default(),
-            local: Default::default(),
-        };
+        if !req.is_websocket {
+            let mut ctx = HTTPContext {
+                req,
+                res,
+                global: Default::default(),
+                local: Default::default(),
+            };
 
-        // Trie 路由处理
-        handle_request(&router, &mut ctx).await;
+            // Trie 路由处理
+            handle_request(&router, &mut ctx).await;
 
-        // 写回响应
-        let _ = ctx.res.send().await;
+            // 写回响应
+            let _ = ctx.res.send().await;
+        } else {
+            let mut ws = WebSocket {
+                headers: req.headers.clone(),
+                reader: req.reader,
+                writer: res.writer,
+            };
+
+            // 完成握手
+            ws.handshake(&req.headers).await?;
+
+            // 开始收发消息
+            while let Ok((opcode, msg)) = ws.read_full().await {
+                match opcode {
+                    0x1 => println!("Text: {}", String::from_utf8_lossy(&msg)),
+                    0x2 => println!("Binary: {:?}", msg),
+                    0x8 => {
+                        ws.close(1000, Some("bye")).await?;
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+        }
 
         Ok(())
     }
@@ -97,13 +121,13 @@ mod tests {
                 tokio::spawn(async move {
                     let (reader, writer) = stream.into_split();
                     let reader = BufReader::new(reader);
-                    let mut writer = BufWriter::new(writer);
+                    let writer = BufWriter::new(writer);
 
                     let req = Request::new(reader, peer_addr, "").await;
-                    let res = Response::new(&mut writer);
+                    let res = Response::new(writer);
 
                     let mut ctx = HTTPContext {
-                        req: req.expect("REASON"),
+                        req: req.expect("Request is illegal!"),
                         res,
                         global: Default::default(),
                         local: Default::default(),
@@ -112,7 +136,7 @@ mod tests {
                     handle_request(&router, &mut ctx).await;
 
                     let resp_str = ctx.res.body.join("\r\n");
-                    Response::<'_>::write_str(&mut writer, &resp_str).await.unwrap();
+                    Response::write_str(&mut ctx.res.writer, &resp_str).await.unwrap();
                 });
             }
         });

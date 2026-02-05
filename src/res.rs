@@ -8,16 +8,16 @@ use tokio::net::tcp::OwnedWriteHalf;
 const HTTP_BUFFER: usize = 8 * 1024;
 
 /// HTTP 响应结构
-pub struct Response<'a> {
+pub struct Response {
     pub status: StatusCode,
-    pub writer: &'a mut BufWriter<OwnedWriteHalf>,
+    pub writer: BufWriter<OwnedWriteHalf>,
     pub headers: HashMap<HeaderKey, String>,
     pub body: Vec<String>,
     // peer_addr: SocketAddr,
 }
 
-impl<'a> Response<'a> {
-    pub fn new(writer: &'a mut BufWriter<OwnedWriteHalf>) -> Self {
+impl Response {
+    pub fn new(writer: BufWriter<OwnedWriteHalf>) -> Self {
         Response { status: StatusCode::Ok, writer, headers: HashMap::new(), body: vec![] }
     }
 
