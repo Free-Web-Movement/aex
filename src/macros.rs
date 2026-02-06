@@ -1,6 +1,4 @@
-use std::sync::Arc;
-use crate::types::{HTTPContext, Executor};
-use futures::FutureExt; // for `.boxed()`
+ // for `.boxed()`
 
 // -----------------------------
 // 通用方法宏生成器（内部使用）

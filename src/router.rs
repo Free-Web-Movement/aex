@@ -169,10 +169,7 @@ mod tests {
     use tokio::io::{ BufReader, BufWriter };
 
     use crate::{
-        types::HTTPContext,
-        req::Request,
-        res::Response,
-        router::{ NodeType, Router, handle_request },
+        all, connect, delete, get, head, options, patch, post, protocol::method::HttpMethod, put, req::Request, res::Response, route, router::{ NodeType, Router, handle_request }, trace, types::HTTPContext
     };
 
     #[tokio::test]

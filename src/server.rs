@@ -212,3 +212,128 @@ mod tests {
         assert!(resp_str.contains("42"));
     }
 }
+
+#[cfg(test)]
+mod tcp_macro_tests {
+    use super::*;
+    use crate::{ get, route };
+    use crate::types::{ HTTPContext };
+    use crate::protocol::method::HttpMethod;
+    use crate::protocol::header::HeaderKey;
+    use crate::router::{ Router, NodeType };
+    use crate::websocket::WebSocket;
+    use futures::FutureExt;
+    use std::sync::Arc;
+    use tokio::io::{ BufReader, BufWriter, AsyncReadExt, AsyncWriteExt };
+    use tokio::net::{ TcpListener, TcpStream };
+    use std::collections::HashMap;
+
+    async fn setup_server() -> (TcpListener, u16) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        (listener, port)
+    }
+
+    async fn create_client(port: u16) -> TcpStream {
+        TcpStream::connect(("127.0.0.1", port)).await.unwrap()
+    }
+
+    #[tokio::test]
+    async fn test_tcp_macro_ws() {
+        // 准备 Router
+        let mut root = Router::new(NodeType::Static("root".into()));
+
+        // WebSocket 中间件
+        let ws_middleware = WebSocket {
+            on_text: Some(
+                Arc::new(|_ws, _ctx, msg| {
+                    (
+                        async move {
+                            assert_eq!(msg, "ping");
+                            true
+                        }
+                    ).boxed()
+                })
+            ),
+            on_binary: None,
+        };
+
+        // 使用宏注册路由并添加 ws_middleware
+        route!(
+            root,
+            get!(
+                "/hello",
+                |ctx: &mut HTTPContext| {
+                    (
+                        async move {
+                            ctx.res.body.push("HTTP GET".into());
+                            true
+                        }
+                    ).boxed()
+                },
+                [WebSocket::to_middleware(ws_middleware)]
+            )
+        );
+
+        // 启动 TCP 服务
+        let (listener, port) = setup_server().await;
+        let server_task = tokio::spawn(async move {
+            let (stream, peer_addr) = listener.accept().await.unwrap();
+            let (reader, writer) = stream.into_split();
+            let reader = BufReader::new(reader);
+            let writer = BufWriter::new(writer);
+
+            // 构建 HTTPContext
+            let req = Request::new(reader, peer_addr, "").await.unwrap();
+            let res = Response::new(writer);
+            let mut ctx = HTTPContext {
+                req,
+                res,
+                global: Default::default(),
+                local: Default::default(),
+            };
+
+            handle_request(&root, &mut ctx).await;
+
+            // 写回响应
+            let _ = ctx.res.send().await;
+        });
+
+        // 启动客户端
+        let client_task = tokio::spawn(async move {
+            let mut stream = create_client(port).await;
+            let (mut reader, mut writer) = stream.split();
+            let mut buf_reader = BufReader::new(reader);
+            let mut buf_writer = BufWriter::new(writer);
+
+            // 发送 HTTP GET /hello
+            let req =
+                "GET /hello HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n";
+            buf_writer.write_all(req.as_bytes()).await.unwrap();
+            buf_writer.flush().await.unwrap();
+
+            // 读取服务端 handshake
+            let mut buf = vec![0u8; 1024];
+            let n = buf_reader.read(&mut buf).await.unwrap();
+            let resp = String::from_utf8_lossy(&buf[..n]);
+            assert!(resp.contains("101 Switching Protocols"));
+
+            // 发送一个 masked text frame "ping"
+            let payload = b"ping";
+            let mask = [1, 2, 3, 4];
+            let mut frame = vec![0x81, 0x80 | (payload.len() as u8)];
+            frame.extend_from_slice(&mask);
+            frame.extend(
+                payload
+                    .iter()
+                    .enumerate()
+                    .map(|(i, b)| b ^ mask[i % 4])
+                    .collect::<Vec<_>>()
+            );
+            buf_writer.write_all(&frame).await.unwrap();
+            buf_writer.flush().await.unwrap();
+        });
+
+        tokio::join!(server_task, client_task);
+    }
+}
