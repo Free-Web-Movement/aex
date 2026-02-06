@@ -3,7 +3,7 @@ pub mod params;
 pub mod req;
 pub mod res;
 pub mod server;
-pub mod handler;
+pub mod types;
 pub mod router;
 pub mod macros;
 pub mod websocket;

@@ -168,7 +168,7 @@ impl Request {
             body,
             reader,
             peer_addr,
-            is_websocket
+            is_websocket,
         })
     }
 
@@ -229,26 +229,284 @@ impl Request {
 
         Ok(headers_map)
     }
+}
 
-    // /// 判断请求是否是 WebSocket 握手
-    // pub fn check_websocket(method: HttpMethod, headers: &HashMap<HeaderKey, String>) -> bool {
-    //     // 必须是 GET
-    //     if method != HttpMethod::GET {
-    //         return false;
-    //     }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::net::TcpListener;
+    use tokio::io::AsyncWriteExt;
+    use std::net::SocketAddr;
+    use std::collections::HashMap;
+    use anyhow::Result;
 
-    //     // Upgrade 头必须存在且值为 websocket
-    //     let upgrade = headers
-    //         .get(&HeaderKey::Upgrade)
-    //         .map(|v| v.eq_ignore_ascii_case("websocket"))
-    //         .unwrap_or(false);
+    const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
 
-    //     // Connection 头包含 Upgrade
-    //     let connection = headers
-    //         .get(&HeaderKey::Connection)
-    //         .map(|v| v.to_ascii_lowercase().contains("upgrade"))
-    //         .unwrap_or(false);
+    async fn spawn_request_server(request_bytes: &[u8], route: &str) -> Request {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr: SocketAddr = listener.local_addr().unwrap();
 
-    //     upgrade && connection
-    // }
+        // let patten = route.clone();
+        let route = route.to_string();
+
+        let server = tokio::spawn(async move {
+            let (socket, peer_addr) = listener.accept().await.unwrap();
+            let reader = BufReader::new(socket.into_split().0);
+            Request::new(reader, peer_addr, &route).await.unwrap()
+        });
+
+        let mut client = tokio::net::TcpStream::connect(addr).await.unwrap();
+        client.write_all(request_bytes).await.unwrap();
+
+        server.await.unwrap()
+    }
+    #[tokio::test]
+    async fn test_request_basic_get() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr: SocketAddr = listener.local_addr().unwrap();
+
+        // server task
+        let server = tokio::spawn(async move {
+            let (socket, peer_addr) = listener.accept().await.unwrap();
+            let reader = BufReader::new(socket.into_split().0);
+            Request::new(reader, peer_addr, "/").await.unwrap()
+        });
+
+        // client request
+        let mut client = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let request_str =
+            "\
+GET /hello HTTP/1.1\r\n\
+Host: localhost\r\n\
+Cookie: foo=bar; hello=world\r\n\
+Content-Length: 5\r\n\
+Content-Type: text/plain\r\n\
+Transfer-Encoding: chunked\r\n\
+\r\n\
+abcde";
+        client.write_all(request_str.as_bytes()).await.unwrap();
+
+        let req = server.await.unwrap();
+
+        assert_eq!(req.method, HttpMethod::GET);
+        assert_eq!(req.path, "/hello");
+        assert_eq!(req.headers.get(&HeaderKey::Host).unwrap(), "localhost");
+        assert_eq!(req.cookies.get("foo").unwrap(), "bar");
+        assert_eq!(req.cookies.get("hello").unwrap(), "world");
+        assert_eq!(req.body, b"abcde");
+        assert!(req.is_chunked);
+        assert_eq!(req.transfer_encoding.unwrap(), "chunked");
+        assert_eq!(req.content_type.top_level, MediaType::Text);
+        assert_eq!(req.content_type.sub_type, "plain");
+        assert!(!req.is_websocket);
+    }
+
+    #[tokio::test]
+    async fn test_request_post_multipart() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr: SocketAddr = listener.local_addr().unwrap();
+
+        let server = tokio::spawn(async move {
+            let (socket, peer_addr) = listener.accept().await.unwrap();
+            let reader = BufReader::new(socket.into_split().0);
+            Request::new(reader, peer_addr, "/upload").await.unwrap()
+        });
+
+        let mut client = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let boundary = "----WebKitFormBoundary7MA4YWxkTrZu0gW";
+        let request_str =
+            format!("\
+POST /upload HTTP/1.1\r\n\
+Host: localhost\r\n\
+Content-Length: 4\r\n\
+Content-Type: multipart/form-data; boundary={}\r\n\
+\r\n\
+abcd", boundary);
+
+        client.write_all(request_str.as_bytes()).await.unwrap();
+
+        let req = server.await.unwrap();
+
+        assert_eq!(req.method, HttpMethod::POST);
+        assert_eq!(req.path, "/upload");
+        assert_eq!(req.multipart_boundary.unwrap(), boundary);
+        assert_eq!(req.body, b"abcd");
+        assert_eq!(req.content_type.top_level, MediaType::Multipart);
+        assert_eq!(req.content_type.sub_type, "form-data");
+    }
+
+    #[tokio::test]
+    async fn test_request_websocket_detection() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr: SocketAddr = listener.local_addr().unwrap();
+
+        let server = tokio::spawn(async move {
+            let (socket, peer_addr) = listener.accept().await.unwrap();
+            let reader = BufReader::new(socket.into_split().0);
+            Request::new(reader, peer_addr, "/ws").await.unwrap()
+        });
+
+        let mut client = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let request_str =
+            "\
+GET /ws HTTP/1.1\r\n\
+Host: localhost\r\n\
+Upgrade: websocket\r\n\
+Connection: Upgrade\r\n\
+Sec-WebSocket-Key: abc123==\r\n\
+Sec-WebSocket-Version: 13\r\n\
+\r\n";
+        client.write_all(request_str.as_bytes()).await.unwrap();
+
+        let req = server.await.unwrap();
+
+        assert!(req.is_websocket);
+        assert_eq!(req.path, "/ws");
+        assert_eq!(req.method, HttpMethod::GET);
+    }
+
+    #[tokio::test]
+    async fn test_parse_request_line_directly() {
+        let line = "POST /api/v1/resource HTTP/1.1\r\n";
+        let parsed = Request::parse_request_line(line).unwrap();
+        assert_eq!(parsed.0, "POST");
+        assert_eq!(parsed.1, "/api/v1/resource");
+        assert_eq!(parsed.2, "HTTP/1.1");
+    }
+
+    #[tokio::test]
+    async fn test_parse_cookies_raw() {
+        let header = "a=1; b=2; c=3";
+        let map = Request::parse_cookies_raw(header);
+        assert_eq!(map.get("a").unwrap(), "1");
+        assert_eq!(map.get("b").unwrap(), "2");
+        assert_eq!(map.get("c").unwrap(), "3");
+    }
+
+    #[tokio::test]
+    async fn test_get_length() {
+        let mut headers = HashMap::new();
+        headers.insert(HeaderKey::ContentLength, "42".to_string());
+        let len = Request::get_length(&headers);
+        assert_eq!(len, 42);
+    }
+
+    #[tokio::test]
+    async fn test_basic_get() {
+        let request = b"GET /hello HTTP/1.1\r\nHost: localhost\r\n\r\n";
+        let req = spawn_request_server(request, "/").await;
+        assert_eq!(req.method, HttpMethod::GET);
+        assert_eq!(req.path, "/hello");
+        assert_eq!(req.headers.get(&HeaderKey::Host).unwrap(), "localhost");
+        assert_eq!(req.body.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_post_with_body_and_cookies() {
+        let request =
+            b"POST /submit HTTP/1.1\r\n\
+Host: localhost\r\n\
+Content-Length: 3\r\n\
+Cookie: a=1; b=2\r\n\
+Content-Type: text/plain\r\n\
+\r\n\
+abc";
+        let req = spawn_request_server(request, "/submit").await;
+        assert_eq!(req.method, HttpMethod::POST);
+        assert_eq!(req.body, b"abc");
+        assert_eq!(req.cookies.get("a").unwrap(), "1");
+        assert_eq!(req.cookies.get("b").unwrap(), "2");
+        assert_eq!(req.content_type.top_level, MediaType::Text);
+        assert_eq!(req.content_type.sub_type, "plain");
+    }
+
+    #[tokio::test]
+    async fn test_multipart_boundary_detection() {
+        let boundary = "----boundary123";
+        let request =
+            format!("POST /upload HTTP/1.1\r\n\
+Content-Length: 0\r\n\
+Content-Type: multipart/form-data; boundary={}\r\n\r\n", boundary).into_bytes();
+        let req = spawn_request_server(&request, "/upload").await;
+        assert_eq!(req.multipart_boundary.unwrap(), boundary);
+        assert_eq!(req.content_type.top_level, MediaType::Multipart);
+        assert_eq!(req.content_type.sub_type, "form-data");
+    }
+
+    #[tokio::test]
+    async fn test_websocket_detection() {
+        let request =
+            b"GET /ws HTTP/1.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: abc123==\r\nSec-WebSocket-Version: 13\r\n\r\n";
+        let req = spawn_request_server(request, "/ws").await;
+        assert!(req.is_websocket);
+    }
+
+    #[tokio::test]
+    async fn test_line_too_long() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server = tokio::spawn(async move {
+            let (socket, peer) = listener.accept().await.unwrap();
+            let mut reader = BufReader::new(socket.into_split().0);
+            let res = Request::read_line_with_limit(&mut reader, TIMEOUT, 5).await;
+            assert!(res.is_err());
+        });
+
+        let mut client = tokio::net::TcpStream::connect(addr).await.unwrap();
+        client.write_all(b"this line is definitely too long\n").await.unwrap();
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_connection_closed() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server = tokio::spawn(async move {
+            let (socket, _) = listener.accept().await.unwrap();
+            let mut reader = BufReader::new(socket.into_split().0);
+            let res = Request::read_line_with_limit(&mut reader, TIMEOUT, 1024).await;
+            assert!(res.is_err());
+        });
+
+        let _client = tokio::net::TcpStream::connect(addr).await.unwrap();
+        // 直接 drop client，模拟连接关闭
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_invalid_http_method() {
+        let request = b"FOO /bar HTTP/1.1\r\nHost: localhost\r\n\r\n";
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server = tokio::spawn(async move {
+            let (socket, peer) = listener.accept().await.unwrap();
+            let reader = BufReader::new(socket.into_split().0);
+            let res = Request::new(reader, peer, "/bar").await;
+            assert!(res.is_err());
+        });
+
+        let mut client = tokio::net::TcpStream::connect(addr).await.unwrap();
+        client.write_all(request).await.unwrap();
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_non_utf8_request_line() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server = tokio::spawn(async move {
+            let (socket, peer) = listener.accept().await.unwrap();
+            let mut reader = BufReader::new(socket.into_split().0);
+            let res = Request::read_first_line(&mut reader).await;
+            assert!(res.is_err());
+        });
+
+        let mut client = tokio::net::TcpStream::connect(addr).await.unwrap();
+        client.write_all(&[0xff, 0xfe, 0xfd, b'\n']).await.unwrap();
+        server.await.unwrap();
+    }
 }

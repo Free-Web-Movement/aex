@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use crate::handler::{HTTPContext, Executor};
+use crate::types::{HTTPContext, Executor};
 use futures::FutureExt; // for `.boxed()`
 
 // -----------------------------
@@ -9,7 +9,7 @@ use futures::FutureExt; // for `.boxed()`
 macro_rules! make_method_macro {
     ($method_str:expr, $path:expr, $handler:expr $(, $middleware:expr)?) => {{
         use std::sync::Arc;
-        use $crate::handler::{HTTPContext, Executor};
+        use $crate::types::{HTTPContext, Executor};
 
         let handler_arc: Arc<Executor> = Arc::new($handler);
 

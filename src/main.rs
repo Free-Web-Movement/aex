@@ -1,13 +1,14 @@
-use std::net::SocketAddr;
+use std::{ net::SocketAddr};
 
 use clap::Parser;
 
 use aex::{
-    get ,
+    get,
     route,
     server::HTTPServer,
     router::{ NodeType, Router }, // 👈 关键：TrieRouter
 };
+use futures::FutureExt;
 
 #[derive(Parser, Debug)]
 #[command(name = "aex")]
@@ -31,13 +32,15 @@ async fn main() -> anyhow::Result<()> {
     route!(
         route,
         get!("/", |ctx: &mut HTTPContext| {
-            // ctx.res.status = StatusCode::Ok;
-            // ctx.res.headers.insert(HeaderKey::ContentType, "text/plain".into());
+            Box::pin(async move {
+                // ctx.res.status = StatusCode::Ok;
+                // ctx.res.headers.insert(HeaderKey::ContentType, "text/plain".into());
 
-            ctx.res.body.push("Hello world!".to_string());
+                ctx.res.body.push("Hello world!".to_string());
 
-            // false = 不继续 middleware（如果你还保留这个语义）
-            true
+                // false = 不继续 middleware（如果你还保留这个语义）
+                true
+            }).boxed()
         })
     );
 

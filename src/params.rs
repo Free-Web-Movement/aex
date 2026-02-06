@@ -166,4 +166,115 @@ mod tests {
         assert_eq!(params.query.get("q").unwrap(), &vec!["rust".to_string()]);
         assert_eq!(params.query.get("sort").unwrap(), &vec!["asc".to_string()]);
     }
+
+        #[test]
+    fn test_parse_form_single() {
+        let mut params = Params::new("/submit".to_string(), "/submit".to_string());
+        let body = "name=alice&age=20";
+        params.set_form(body);
+
+        let form = params.form.as_ref().unwrap();
+        assert_eq!(form.get("name").unwrap(), &vec!["alice".to_string()]);
+        assert_eq!(form.get("age").unwrap(), &vec!["20".to_string()]);
+    }
+
+    #[test]
+    fn test_parse_form_array() {
+        let mut params = Params::new("/submit".to_string(), "/submit".to_string());
+        let body = "tag=rust&tag=tokio&tag=async";
+        params.set_form(body);
+
+        let form = params.form.as_ref().unwrap();
+        assert_eq!(form.get("tag").unwrap(), &vec![
+            "rust".to_string(),
+            "tokio".to_string(),
+            "async".to_string()
+        ]);
+    }
+
+    #[test]
+    fn test_parse_form_special_chars() {
+        let mut params = Params::new("/submit".to_string(), "/submit".to_string());
+        let body = "name=Alice+Bob&city=New+York&desc=Rust%20lang";
+        params.set_form(body);
+
+        let form = params.form.as_ref().unwrap();
+        assert_eq!(form.get("name").unwrap(), &vec!["Alice Bob".to_string()]);
+        assert_eq!(form.get("city").unwrap(), &vec!["New York".to_string()]);
+        assert_eq!(form.get("desc").unwrap(), &vec!["Rust lang".to_string()]);
+    }
+
+    #[test]
+    fn test_parse_form_parse_form_static() {
+        let body = "a=1&a=2&b=3";
+        let map = Params::parse_form(body);
+        assert_eq!(map.get("a").unwrap(), &vec!["1".to_string(), "2".to_string()]);
+        assert_eq!(map.get("b").unwrap(), &vec!["3".to_string()]);
+    }
+
+
+    #[test]
+    fn test_parse_pairs_empty() {
+        let map = Params::parse_pairs("");
+        assert!(map.is_empty());
+    }
+
+    #[test]
+    fn test_parse_pairs_single() {
+        let map = Params::parse_pairs("key=value");
+        assert_eq!(map.get("key").unwrap(), &vec!["value".to_string()]);
+    }
+
+    #[test]
+    fn test_parse_pairs_multiple_values() {
+        let map = Params::parse_pairs("a=1&a=2&b=3");
+        assert_eq!(map.get("a").unwrap(), &vec!["1".to_string(), "2".to_string()]);
+        assert_eq!(map.get("b").unwrap(), &vec!["3".to_string()]);
+    }
+
+    #[test]
+    fn test_parse_pairs_no_value() {
+        let map = Params::parse_pairs("key=&empty");
+        assert_eq!(map.get("key").unwrap(), &vec!["".to_string()]);
+        assert_eq!(map.get("empty").unwrap(), &vec!["".to_string()]);
+    }
+
+    #[test]
+    fn test_parse_pairs_special_chars() {
+        let map = Params::parse_pairs("name=Alice+Bob&city=New%20York&desc=Rust%26Tokio");
+        assert_eq!(map.get("name").unwrap(), &vec!["Alice Bob".to_string()]);
+        assert_eq!(map.get("city").unwrap(), &vec!["New York".to_string()]);
+        assert_eq!(map.get("desc").unwrap(), &vec!["Rust&Tokio".to_string()]);
+    }
+
+    #[test]
+    fn test_parse_query_empty() {
+        let url = "/path";
+        let map = Params::parse_query(url);
+        assert!(map.is_empty());
+    }
+
+    #[test]
+    fn test_parse_query_with_question_only() {
+        let url = "/path?";
+        let map = Params::parse_query(url);
+        assert!(map.is_empty());
+    }
+
+    #[test]
+    fn test_parse_query_normal() {
+        let url = "/search?q=rust&sort=asc&sort=desc";
+        let map = Params::parse_query(url);
+        assert_eq!(map.get("q").unwrap(), &vec!["rust".to_string()]);
+        assert_eq!(map.get("sort").unwrap(), &vec!["asc".to_string(), "desc".to_string()]);
+    }
+
+    #[test]
+    fn test_parse_query_special_chars() {
+        let url = "/search?q=Alice+Bob&city=New%20York";
+        let map = Params::parse_query(url);
+        assert_eq!(map.get("q").unwrap(), &vec!["Alice Bob".to_string()]);
+        assert_eq!(map.get("city").unwrap(), &vec!["New York".to_string()]);
+    }
+    
 }

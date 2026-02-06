@@ -2,8 +2,8 @@ use std::{ io::{ self, Write }, net::SocketAddr, sync::Arc };
 use tokio::net::{ TcpListener, TcpStream };
 use tokio::io::{ BufReader, BufWriter };
 
-use crate::{ router::{ Router, handle_request }, websocket::WebSocket };
-use crate::handler::HTTPContext;
+use crate::{ router::{ Router, handle_request } };
+use crate::types::HTTPContext;
 use crate::req::Request;
 use crate::res::Response;
 
@@ -52,43 +52,17 @@ impl HTTPServer {
         // 构建 Request
         let req = Request::new(reader, peer_addr, "").await?;
         let res = Response::new(writer);
+        let mut ctx = HTTPContext {
+            req,
+            res,
+            global: Default::default(),
+            local: Default::default(),
+        };
 
-        if !req.is_websocket {
-            let mut ctx = HTTPContext {
-                req,
-                res,
-                global: Default::default(),
-                local: Default::default(),
-            };
+        handle_request(&router, &mut ctx).await;
 
-            // Trie 路由处理
-            handle_request(&router, &mut ctx).await;
-
-            // 写回响应
-            let _ = ctx.res.send().await;
-        } else {
-            let mut ws = WebSocket {
-                headers: req.headers.clone(),
-                reader: req.reader,
-                writer: res.writer,
-            };
-
-            // 完成握手
-            ws.handshake(&req.headers).await?;
-
-            // 开始收发消息
-            while let Ok((opcode, msg)) = ws.read_full().await {
-                match opcode {
-                    0x1 => println!("Text: {}", String::from_utf8_lossy(&msg)),
-                    0x2 => println!("Binary: {:?}", msg),
-                    0x8 => {
-                        ws.close(1000, Some("bye")).await?;
-                        break;
-                    }
-                    _ => {}
-                }
-            }
-        }
+        // 写回响应
+        let _ = ctx.res.send().await;
 
         Ok(())
     }
@@ -97,12 +71,13 @@ impl HTTPServer {
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
+    use futures::FutureExt;
     use tokio::io::{ BufReader, BufWriter, AsyncReadExt, AsyncWriteExt };
     use tokio::net::{ TcpListener, TcpStream };
     use std::net::SocketAddr;
 
     use crate::{
-        handler::HTTPContext,
+        types::HTTPContext,
         res::Response,
         req::Request,
         router::{ Router, NodeType, handle_request },
@@ -152,8 +127,10 @@ mod tests {
             "/hello",
             Some("GET"),
             Arc::new(|ctx| {
-                ctx.res.body.push("world".to_string());
-                true
+                Box::pin(async move {
+                    ctx.res.body.push("world".to_string());
+                    true
+                }).boxed()
             }),
             None
         );
@@ -180,8 +157,10 @@ mod tests {
             "/user/:id/profile",
             Some("POST"),
             Arc::new(|ctx| {
-                ctx.res.body.push("posted".to_string());
-                true
+                Box::pin(async move {
+                    ctx.res.body.push("posted".to_string());
+                    true
+                }).boxed()
             }),
             None
         );
@@ -207,15 +186,16 @@ mod tests {
             "/user/:id",
             Some("GET"),
             Arc::new(|ctx| {
-                // 假设 ctx.req.params.data 是 HashMap<String, String>，这里不生成新 String
-
-                if let Some(params) = &ctx.req.params.data {
-                    if let Some(id) = params.get("id") {
-                        // 直接使用原始 &str
-                        ctx.res.body.push(id.to_string()); // 生命周期和 params 一致
+                Box::pin(async move {
+                    // 假设 ctx.req.params.data 是 HashMap<String, String>，这里不生成新 String
+                    if let Some(params) = &ctx.req.params.data {
+                        if let Some(id) = params.get("id") {
+                            // 直接使用原始 &str
+                            ctx.res.body.push(id.to_string()); // 生命周期和 params 一致
+                        }
                     }
-                }
-                true
+                    true
+                }).boxed()
             }),
             None
         );

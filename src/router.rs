@@ -1,5 +1,5 @@
 use std::{ collections::HashMap, sync::Arc };
-use crate::handler::{ Executor, HTTPContext };
+use crate::types::{ Executor, HTTPContext };
 
 /// 节点类型
 #[derive(Clone, Debug)]
@@ -137,7 +137,7 @@ pub async fn handle_request(root: &Router, ctx: &mut HTTPContext) -> bool {
             let mws = mws_map.get(method_key).or_else(|| mws_map.get("*"));
             if let Some(mws) = mws {
                 for mw in mws {
-                    let cont = mw(ctx);
+                    let cont = mw(ctx).await;
                     if !cont {
                         // (mw.fallback)(ctx).await;
                         return false;
@@ -151,7 +151,7 @@ pub async fn handle_request(root: &Router, ctx: &mut HTTPContext) -> bool {
             let handler = handlers_map.get(method_key).or_else(|| handlers_map.get("*"));
 
             if let Some(handler) = handler {
-                return handler(ctx);
+                return handler(ctx).await;
             } else {
             }
         } else {
@@ -165,10 +165,11 @@ pub async fn handle_request(root: &Router, ctx: &mut HTTPContext) -> bool {
 #[cfg(test)]
 mod tests {
     use std::{ collections::HashMap, sync::Arc };
+    use futures::FutureExt;
     use tokio::io::{ BufReader, BufWriter };
 
     use crate::{
-        handler::HTTPContext,
+        types::HTTPContext,
         req::Request,
         res::Response,
         router::{ NodeType, Router, handle_request },
@@ -186,8 +187,10 @@ mod tests {
             "/hello",
             Some("GET"),
             Arc::new(|ctx| {
-                ctx.res.body.push("world".to_string());
-                true
+                Box::pin(async move {
+                    ctx.res.body.push("world".to_string());
+                    true
+                }).boxed()
             }),
             None
         );
@@ -244,11 +247,10 @@ mod tests {
             "/user/:id",
             Some("POST"),
             Arc::new(|ctx| {
-                // let data = ctx.req.params.data.as_ref().unwrap().get("id").unwrap().as_str();
-
-                // ctx.res.body.push(data.clone().to_string().as_str());
-                ctx.res.body.push("posted".to_string());
-                true
+                Box::pin(async move {
+                    ctx.res.body.push("posted".to_string());
+                    true
+                }).boxed()
             }),
             None
         );
@@ -305,8 +307,10 @@ mod tests {
         crate::route!(
             root,
             crate::post!("/user/:id/profile", |ctx: &mut HTTPContext| {
-                ctx.res.body.push("macro".to_string());
-                true
+                Box::pin(async move {
+                    ctx.res.body.push("macro".to_string());
+                    true
+                }).boxed()
             })
         );
 
@@ -362,8 +366,10 @@ mod tests {
         crate::route!(
             root,
             crate::post!("/", |ctx: &mut HTTPContext| {
-                ctx.res.body.push("root".to_string());
-                true
+                Box::pin(async move {
+                    ctx.res.body.push("root".to_string());
+                    true
+                }).boxed()
             })
         );
 

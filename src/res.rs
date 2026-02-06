@@ -179,3 +179,190 @@ impl Response {
         writer.flush().await
     }
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::net::{ TcpListener, TcpStream };
+    use tokio::io::{ AsyncReadExt, BufWriter };
+    use serde_json::json;
+    use std::collections::HashMap;
+    use std::fs::write;
+    use std::path::PathBuf;
+
+    async fn spawn_response_server<F>(handler: F) -> String
+    where
+        F: FnOnce(BufWriter<OwnedWriteHalf>) -> tokio::task::JoinHandle<()> + Send + 'static,
+    {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server = tokio::spawn(async move {
+            let (socket, _) = listener.accept().await.unwrap();
+            let (_, write_half) = socket.into_split();
+            let writer = BufWriter::new(write_half);
+            handler(writer).await;
+        });
+
+        let mut client = TcpStream::connect(addr).await.unwrap();
+        let mut buf = Vec::new();
+        client.read_to_end(&mut buf).await.unwrap();
+
+        server.await.unwrap();
+        String::from_utf8_lossy(&buf).to_string()
+    }
+
+    #[tokio::test]
+    async fn test_write_str() {
+        let resp = spawn_response_server(|mut writer| {
+            tokio::spawn(async move {
+                Response::write_str(&mut writer, "hello").await.unwrap();
+            })
+        })
+        .await;
+
+        assert_eq!(resp, "hello");
+    }
+
+    #[tokio::test]
+    async fn test_write_bytes() {
+        let resp = spawn_response_server(|mut writer| {
+            tokio::spawn(async move {
+                Response::write_bytes(&mut writer, b"abc").await.unwrap();
+            })
+        })
+        .await;
+
+        assert_eq!(resp.as_bytes(), b"abc");
+    }
+
+    #[tokio::test]
+    async fn test_send_str() {
+        let resp = spawn_response_server(|mut writer| {
+            tokio::spawn(async move {
+                Response::send_str(
+                    &mut writer,
+                    StatusCode::Ok,
+                    HashMap::new(),
+                    "hi"
+                )
+                .await
+                .unwrap();
+            })
+        })
+        .await;
+
+        assert!(resp.starts_with("HTTP/1.1 200 OK"));
+        assert!(resp.contains("Content-Length: 2"));
+        assert!(resp.ends_with("\r\n\r\nhi"));
+    }
+
+    #[tokio::test]
+    async fn test_send_bytes() {
+        let resp = spawn_response_server(|mut writer| {
+            tokio::spawn(async move {
+                Response::send_bytes(
+                    &mut writer,
+                    StatusCode::Created,
+                    HashMap::new(),
+                    b"bin"
+                )
+                .await
+                .unwrap();
+            })
+        })
+        .await;
+
+        assert!(resp.contains("201 Created"));
+        assert!(resp.ends_with("\r\n\r\nbin"));
+    }
+
+    #[tokio::test]
+    async fn test_send_json() {
+        let resp = spawn_response_server(|mut writer| {
+            tokio::spawn(async move {
+                Response::send_json(
+                    &mut writer,
+                    StatusCode::Ok,
+                    HashMap::new(),
+                    &json!({ "a": 1 })
+                )
+                .await
+                .unwrap();
+            })
+        })
+        .await;
+
+        assert!(resp.contains("Content-Type: application/json"));
+        assert!(resp.ends_with("\r\n\r\n{\"a\":1}"));
+    }
+
+    #[tokio::test]
+    async fn test_send_status() {
+        let resp = spawn_response_server(|mut writer| {
+            tokio::spawn(async move {
+                Response::send_status(
+                    &mut writer,
+                    StatusCode::NoContent,
+                    None
+                )
+                .await
+                .unwrap();
+            })
+        })
+        .await;
+
+        assert!(resp.contains("204 No Content"));
+        assert!(resp.contains("Content-Length: 0"));
+    }
+
+    #[tokio::test]
+    async fn test_response_send() {
+        let resp = spawn_response_server(|mut writer| {
+            tokio::spawn(async move {
+                let mut res = Response::new(writer);
+                res.status = StatusCode::Accepted;
+                res.headers.insert(
+                    HeaderKey::ContentType,
+                    "text/plain".into()
+                );
+                res.body.push("ok".into());
+                res.send().await.unwrap();
+            })
+        })
+        .await;
+
+        assert!(resp.contains("202 Accepted"));
+        assert!(resp.contains("Content-Type: text/plain"));
+        assert!(resp.ends_with("\r\n\r\nok"));
+    }
+
+    #[tokio::test]
+    async fn test_send_file() {
+        let tmp = PathBuf::from("test_response_file.txt");
+        let cloned = tmp.clone();
+        write(&tmp, "FILE").unwrap();
+
+        let resp = spawn_response_server(move |mut writer| {
+            let path = tmp.clone();
+            tokio::spawn(async move {
+                Response::send_file(
+                    &mut writer,
+                    StatusCode::Ok,
+                    HashMap::new(),
+                    path
+                )
+                .await
+                .unwrap();
+            })
+        })
+        .await;
+
+        assert!(resp.contains("Content-Length: 4"));
+        assert!(resp.contains("Content-Type: text/plain"));
+        assert!(resp.ends_with("FILE"));
+
+        let _ = std::fs::remove_file(cloned);
+    }
+}
