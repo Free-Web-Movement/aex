@@ -152,14 +152,10 @@ pub async fn handle_request(root: &Router, ctx: &mut HTTPContext) -> bool {
 
             if let Some(handler) = handler {
                 return handler(ctx).await;
-            } else {
             }
-        } else {
         }
-    } else {
     }
-
-    false
+    true
 }
 
 #[cfg(test)]
@@ -169,7 +165,22 @@ mod tests {
     use tokio::io::{ BufReader, BufWriter };
 
     use crate::{
-        all, connect, delete, get, head, options, patch, post, protocol::method::HttpMethod, put, req::Request, res::Response, route, router::{ NodeType, Router, handle_request }, trace, types::HTTPContext
+        all,
+        connect,
+        delete,
+        get,
+        head,
+        options,
+        patch,
+        post,
+        protocol::method::HttpMethod,
+        put,
+        req::Request,
+        res::Response,
+        route,
+        router::{ NodeType, Router, handle_request },
+        trace,
+        types::HTTPContext,
     };
 
     #[tokio::test]
@@ -216,8 +227,9 @@ mod tests {
             handle_request(&root, &mut ctx).await;
 
             // 5️⃣ 写回响应
-            let resp_bytes = ctx.res.body.join("\r\n");
-            Response::write_str(&mut ctx.res.writer, &resp_bytes).await
+            // let resp_bytes = ctx.res.body.join("\r\n");
+            ctx.res.send().await
+            // Response::write_str(&mut ctx.res.writer, &resp_bytes).await
         });
 
         // 6️⃣ 客户端发请求
@@ -274,10 +286,11 @@ mod tests {
             };
             // 4️⃣ 走 Trie
             handle_request(&root, &mut ctx).await;
+            ctx.res.send().await
 
             // 5️⃣ 写回响应
-            let resp_bytes = ctx.res.body.join("\r\n");
-            Response::write_str(&mut ctx.res.writer, &resp_bytes).await
+            // let resp_bytes = ctx.res.body.join("\r\n");
+            // Response::write_str(&mut ctx.res.writer, &resp_bytes).await
         });
 
         // 6️⃣ 客户端发请求
@@ -334,9 +347,7 @@ mod tests {
             // 4️⃣ 走 Trie
             handle_request(&root, &mut ctx).await;
 
-            // 5️⃣ 写回响应
-            let resp_bytes = ctx.res.body.join("\r\n");
-            Response::write_str(&mut ctx.res.writer, &resp_bytes).await
+            ctx.res.send().await
         });
 
         // 6️⃣ 客户端发请求
@@ -393,10 +404,10 @@ mod tests {
             // 4️⃣ 走 Trie
             handle_request(&root, &mut ctx).await;
 
-            // 5️⃣ 写回响应
-            let resp_bytes = ctx.res.body.join("\r\n");
-            Response::write_str(&mut ctx.res.writer, &resp_bytes).await
+            ctx.res.send().await
         });
+
+
 
         // 6️⃣ 客户端发请求
         let mut client = TcpStream::connect(addr).await.unwrap();
@@ -410,3 +421,5 @@ mod tests {
         assert!(resp_str.contains("root"));
     }
 }
+
+

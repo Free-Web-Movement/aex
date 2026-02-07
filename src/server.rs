@@ -59,10 +59,11 @@ impl HTTPServer {
             local: Default::default(),
         };
 
-        handle_request(&router, &mut ctx).await;
-
-        // 写回响应
-        let _ = ctx.res.send().await;
+        // 如果返回true启动默认处理机制，即统一发送body与header。
+        if handle_request(&router, &mut ctx).await {
+            // 写回响应
+            let _ = ctx.res.send().await;
+        }
 
         Ok(())
     }
@@ -109,9 +110,7 @@ mod tests {
                     };
 
                     handle_request(&router, &mut ctx).await;
-
-                    let resp_str = ctx.res.body.join("\r\n");
-                    Response::write_str(&mut ctx.res.writer, &resp_str).await.unwrap();
+                    ctx.res.send().await
                 });
             }
         });
@@ -218,15 +217,12 @@ mod tcp_macro_tests {
     use super::*;
     use crate::{ get, route };
     use crate::types::{ HTTPContext };
-    use crate::protocol::method::HttpMethod;
-    use crate::protocol::header::HeaderKey;
     use crate::router::{ Router, NodeType };
     use crate::websocket::WebSocket;
     use futures::FutureExt;
     use std::sync::Arc;
     use tokio::io::{ BufReader, BufWriter, AsyncReadExt, AsyncWriteExt };
     use tokio::net::{ TcpListener, TcpStream };
-    use std::collections::HashMap;
 
     async fn setup_server() -> (TcpListener, u16) {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -302,7 +298,7 @@ mod tcp_macro_tests {
         // 启动客户端
         let client_task = tokio::spawn(async move {
             let mut stream = create_client(port).await;
-            let (mut reader, mut writer) = stream.split();
+            let (reader, writer) = stream.split();
             let mut buf_reader = BufReader::new(reader);
             let mut buf_writer = BufWriter::new(writer);
 

@@ -36,23 +36,23 @@ impl Response {
         Self::send_inner(&mut self.writer, self.status, string_headers, &full_body).await
     }
 
-    /// 直接写入字符串（不封装 HTTP 响应）
-    pub async fn write_str<S: AsRef<str>>(
-        writer: &mut BufWriter<OwnedWriteHalf>,
-        s: S
-    ) -> std::io::Result<()> {
-        writer.write_all(s.as_ref().as_bytes()).await?;
-        writer.flush().await
-    }
+    // /// 直接写入字符串（不封装 HTTP 响应）
+    // pub async fn write_str<S: AsRef<str>>(
+    //     writer: &mut BufWriter<OwnedWriteHalf>,
+    //     s: S
+    // ) -> std::io::Result<()> {
+    //     writer.write_all(s.as_ref().as_bytes()).await?;
+    //     writer.flush().await
+    // }
 
-    /// 直接写入字节（不封装 HTTP 响应）
-    pub async fn write_bytes(
-        writer: &mut BufWriter<OwnedWriteHalf>,
-        bytes: &[u8]
-    ) -> std::io::Result<()> {
-        writer.write_all(bytes).await?;
-        writer.flush().await
-    }
+    // /// 直接写入字节（不封装 HTTP 响应）
+    // pub async fn write_bytes(
+    //     writer: &mut BufWriter<OwnedWriteHalf>,
+    //     bytes: &[u8]
+    // ) -> std::io::Result<()> {
+    //     writer.write_all(bytes).await?;
+    //     writer.flush().await
+    // }
 
     /// 核心发送方法，内部统一处理 header 拼接、Content-Length 和 flush
     async fn send_inner(
@@ -211,30 +211,6 @@ mod tests {
 
         server.await.unwrap();
         String::from_utf8_lossy(&buf).to_string()
-    }
-
-    #[tokio::test]
-    async fn test_write_str() {
-        let resp = spawn_response_server(|mut writer| {
-            tokio::spawn(async move {
-                Response::write_str(&mut writer, "hello").await.unwrap();
-            })
-        })
-        .await;
-
-        assert_eq!(resp, "hello");
-    }
-
-    #[tokio::test]
-    async fn test_write_bytes() {
-        let resp = spawn_response_server(|mut writer| {
-            tokio::spawn(async move {
-                Response::write_bytes(&mut writer, b"abc").await.unwrap();
-            })
-        })
-        .await;
-
-        assert_eq!(resp.as_bytes(), b"abc");
     }
 
     #[tokio::test]
