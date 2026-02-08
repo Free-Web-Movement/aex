@@ -101,8 +101,36 @@ impl HttpMethod {
             HttpMethod::UNLINK => "UNLINK",
         }
     }
-}
 
+    /// 判断一段字符串是否以合法 HTTP Method 开头
+    #[inline]
+    pub fn is_prefixed(s: &str) -> bool {
+        // 找到第一个空格，HTTP 请求行一定是 "METHOD SP ..."
+        let method = match s.find(' ') {
+            Some(pos) => &s[..pos],
+            None => {
+                return false;
+            }
+        };
+
+        HttpMethod::from_str(method).is_some()
+    }
+
+    #[inline]
+    pub fn is_prefixed_bytes(buf: &[u8]) -> bool {
+        for &method in HTTP_METHODS.iter() {
+            let m = method.as_bytes();
+            if
+                buf.len() > m.len() &&
+                buf[m.len()] == b' ' &&
+                buf[..m.len()].eq_ignore_ascii_case(m)
+            {
+                return true;
+            }
+        }
+        false
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -187,5 +215,65 @@ mod tests {
             let method = HttpMethod::from_str(method_str).unwrap();
             assert_eq!(method.to_str(), method_str);
         }
+    }
+
+    #[test]
+    fn test_is_prefixed_str() {
+        // --- 正常 HTTP 请求 ---
+        assert!(HttpMethod::is_prefixed("GET / HTTP/1.1"));
+        assert!(HttpMethod::is_prefixed("POST /api HTTP/1.0"));
+        assert!(HttpMethod::is_prefixed("DELETE /x"));
+
+        // --- 大小写不敏感 ---
+        assert!(HttpMethod::is_prefixed("get /"));
+        assert!(HttpMethod::is_prefixed("pAtCh /test"));
+
+        // --- 所有已注册方法都应该识别 ---
+        for &method in HTTP_METHODS.iter() {
+            let req = format!("{method} /");
+            assert!(HttpMethod::is_prefixed(&req), "method {method} should be recognized");
+        }
+
+        // --- 非 HTTP ---
+        assert!(!HttpMethod::is_prefixed("FOOBAR /"));
+        assert!(!HttpMethod::is_prefixed("HELLO WORLD"));
+        assert!(!HttpMethod::is_prefixed(""));
+
+        // --- 边界情况 ---
+        assert!(!HttpMethod::is_prefixed("GET")); // 没有空格
+        assert!(!HttpMethod::is_prefixed("GET/")); // 不是 method + space
+        assert!(!HttpMethod::is_prefixed("/ GET")); // method 不在开头
+    }
+    #[test]
+    fn test_is_prefixed_bytes() {
+        // --- 正常 HTTP ---
+        assert!(HttpMethod::is_prefixed_bytes(b"GET / HTTP/1.1\r\n"));
+        assert!(HttpMethod::is_prefixed_bytes(b"POST /api"));
+
+        // --- 大小写不敏感 ---
+        assert!(HttpMethod::is_prefixed_bytes(b"get /"));
+        assert!(HttpMethod::is_prefixed_bytes(b"pAtCh /x"));
+
+        // --- 所有方法 ---
+        for &method in HTTP_METHODS.iter() {
+            let mut buf = method.as_bytes().to_vec();
+            buf.push(b' ');
+            buf.push(b'/');
+
+            assert!(
+                HttpMethod::is_prefixed_bytes(&buf),
+                "method {method} should be recognized in bytes"
+            );
+        }
+
+        // --- 非 HTTP ---
+        assert!(!HttpMethod::is_prefixed_bytes(b"FOOBAR /"));
+        assert!(!HttpMethod::is_prefixed_bytes(b"HELLO"));
+        assert!(!HttpMethod::is_prefixed_bytes(b""));
+
+        // --- 边界 ---
+        assert!(!HttpMethod::is_prefixed_bytes(b"GET")); // 无空格
+        assert!(!HttpMethod::is_prefixed_bytes(b"GET/")); // 无分隔
+        assert!(!HttpMethod::is_prefixed_bytes(b"/GET ")); // 不在开头
     }
 }
