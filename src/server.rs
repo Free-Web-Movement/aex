@@ -1,5 +1,5 @@
 use std::{ io::{ self, Write }, net::SocketAddr, sync::Arc };
-use tokio::net::{ TcpListener, TcpStream };
+use tokio::net::{ TcpListener, TcpStream, tcp::{ OwnedReadHalf, OwnedWriteHalf } };
 use tokio::io::{ BufReader, BufWriter };
 
 use crate::{ router::{ Router, handle_request } };
@@ -29,26 +29,36 @@ impl HTTPServer {
 
         loop {
             let (stream, peer_addr) = listener.accept().await?;
-            let router = self.router.clone();
+            let (mut reader, writer) = stream.into_split();
+            if Request::is_http_connection(&mut reader).await.unwrap() {
+                let router = self.router.clone();
 
-            tokio::spawn(async move {
-                if let Err(err) = Self::handle_connection(router, stream, peer_addr).await {
-                    eprintln!("[ERROR] Connection {}: {}", peer_addr, err);
-                }
-            });
+                tokio::spawn(async move {
+                    let reader = BufReader::new(reader);
+                    let writer = BufWriter::new(writer);
+
+                    if
+                        let Err(err) = Self::handle_connection(
+                            router,
+                            reader,
+                            writer,
+                            peer_addr
+                        ).await
+                    {
+                        eprintln!("[ERROR] Connection {}: {}", peer_addr, err);
+                    }
+                });
+            }
         }
     }
 
     /// 处理 TCP 连接
     async fn handle_connection(
         router: Arc<Router>,
-        stream: TcpStream,
+        reader: BufReader<OwnedReadHalf>,
+        writer: BufWriter<OwnedWriteHalf>,
         peer_addr: SocketAddr
     ) -> anyhow::Result<()> {
-        let (reader, writer) = stream.into_split();
-        let reader = BufReader::new(reader);
-        let writer = BufWriter::new(writer);
-
         // 构建 Request
         let req = Request::new(reader, peer_addr, "").await?;
         let res = Response::new(writer);

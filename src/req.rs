@@ -42,7 +42,7 @@ impl Request {
         time_limit: Duration,
         capacity_limit: usize
     ) -> anyhow::Result<Vec<u8>> {
-        let mut buf = Vec::with_capacity(128);
+        let mut buf = Vec::with_capacity(capacity_limit);
 
         let n = timeout(time_limit, reader.read_until(b'\n', &mut buf)).await.map_err(|_|
             anyhow::anyhow!("read line timeout")
@@ -229,12 +229,25 @@ impl Request {
 
         Ok(headers_map)
     }
+
+    pub async fn is_http_connection(reader: &mut OwnedReadHalf) -> anyhow::Result<bool> {
+        let mut buf = [0u8; MAX_CAPACITY as usize];
+
+        let n = reader.peek(&mut buf).await?;
+
+        if n == 0 {
+            return Ok(false);
+        }
+
+        let s = std::str::from_utf8(&buf[..n]).unwrap_or("");
+        Ok(HttpMethod::is_prefixed(s))
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tokio::net::TcpListener;
+    use tokio::net::{TcpListener, TcpStream};
     use tokio::io::AsyncWriteExt;
     use std::net::SocketAddr;
     use std::collections::HashMap;
@@ -508,5 +521,65 @@ Content-Type: multipart/form-data; boundary={}\r\n\r\n", boundary).into_bytes();
         let mut client = tokio::net::TcpStream::connect(addr).await.unwrap();
         client.write_all(&[0xff, 0xfe, 0xfd, b'\n']).await.unwrap();
         server.await.unwrap();
+    }
+
+    async fn setup_connection(payload: Vec<u8>) -> OwnedReadHalf {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        // client
+        tokio::spawn(async move {
+            let mut stream = TcpStream::connect(addr).await.unwrap();
+            stream.write_all(&payload).await.unwrap();
+            // 不 close，保证 peek 可读
+        });
+
+        // server
+        let (stream, _) = listener.accept().await.unwrap();
+        let (read_half, _) = stream.into_split();
+        read_half
+    }
+
+    #[tokio::test]
+    async fn test_is_http_connection_true() {
+        let payload = b"GET / HTTP/1.1\r\nHost: example.com\r\n\r\n";
+        let mut reader = setup_connection(payload.to_vec()).await;
+
+        let result = Request::is_http_connection(&mut reader)
+            .await
+            .unwrap();
+
+        assert!(result);
+    }
+
+    #[tokio::test]
+    async fn test_is_http_connection_false() {
+        let payload = b"\x16\x03\x01\x02\x00"; // TLS ClientHello 头
+        let mut reader = setup_connection(payload.to_vec()).await;
+
+        let result = Request::is_http_connection(&mut reader)
+            .await
+            .unwrap();
+
+        assert!(!result);
+    }
+
+    #[tokio::test]
+    async fn test_is_http_connection_empty() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        tokio::spawn(async move {
+            let _ = TcpStream::connect(addr).await.unwrap();
+            // 立刻 drop，不写数据
+        });
+
+        let (stream, _) = listener.accept().await.unwrap();
+        let (mut reader, _) = stream.into_split();
+
+        let result = Request::is_http_connection(&mut reader)
+            .await
+            .unwrap();
+
+        assert!(!result);
     }
 }
