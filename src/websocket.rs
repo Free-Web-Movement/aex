@@ -345,7 +345,7 @@ mod tests {
     use crate::protocol::method::HttpMethod;
     use crate::req::Request;
     use crate::res::Response;
-    use crate::types::{ HTTPContext };
+    use crate::types::{ HTTPContext, TypeMap };
     use tokio::net::{ TcpListener, TcpStream };
     use tokio::io::{ BufReader, BufWriter, AsyncReadExt, AsyncWriteExt };
     use std::collections::HashMap;
@@ -384,8 +384,8 @@ mod tests {
             let mut ctx = HTTPContext {
                 req,
                 res,
-                global: Default::default(),
-                local: Default::default(),
+                global: Arc::new(Mutex::new(TypeMap::new())),
+                local: TypeMap::new(),
             };
 
             let ws = WebSocket {
@@ -489,8 +489,8 @@ mod tests {
             let mut ctx = HTTPContext {
                 req,
                 res,
-                global: Default::default(),
-                local: Default::default(),
+                global: Arc::new(Mutex::new(TypeMap::new())),
+                local: TypeMap::new(),
             };
 
             let ws = WebSocket {
@@ -626,8 +626,8 @@ mod tests {
             let mut ctx = HTTPContext {
                 req,
                 res,
-                global: Default::default(),
-                local: Default::default(),
+                global: Arc::new(Mutex::new(TypeMap::new())),
+                local: TypeMap::new(),
             };
 
             let ws = WebSocket {
@@ -782,8 +782,8 @@ mod tests {
                 let mut ctx = HTTPContext {
                     req,
                     res,
-                    global: Default::default(),
-                    local: Default::default(),
+                global: Arc::new(Mutex::new(TypeMap::new())),
+                local: TypeMap::new(),
                 };
 
                 handle_request(&root, &mut ctx).await;

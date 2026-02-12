@@ -1,8 +1,8 @@
 use std::{ io::{ self, Write }, net::SocketAddr, sync::Arc };
-use tokio::net::{ TcpListener, TcpStream, tcp::{ OwnedReadHalf, OwnedWriteHalf } };
+use tokio::{net::{ TcpListener, TcpStream, tcp::{ OwnedReadHalf, OwnedWriteHalf } }, sync::Mutex};
 use tokio::io::{ BufReader, BufWriter };
 
-use crate::{ router::{ Router, handle_request } };
+use crate::{ router::{ Router, handle_request }, types::TypeMap };
 use crate::types::HTTPContext;
 use crate::req::Request;
 use crate::res::Response;
@@ -65,8 +65,8 @@ impl HTTPServer {
         let mut ctx = HTTPContext {
             req,
             res,
-            global: Default::default(),
-            local: Default::default(),
+                global: Arc::new(Mutex::new(TypeMap::new())),
+                local: TypeMap::new(),
         };
 
         // 如果返回true启动默认处理机制，即统一发送body与header。
@@ -85,8 +85,10 @@ mod tests {
     use futures::FutureExt;
     use tokio::io::{ BufReader, BufWriter, AsyncReadExt, AsyncWriteExt };
     use tokio::net::{ TcpListener, TcpStream };
+    use tokio::sync::Mutex;
     use std::net::SocketAddr;
 
+    use crate::types::TypeMap;
     use crate::{
         types::HTTPContext,
         res::Response,
@@ -115,8 +117,8 @@ mod tests {
                     let mut ctx = HTTPContext {
                         req: req.expect("Request is illegal!"),
                         res,
-                        global: Default::default(),
-                        local: Default::default(),
+                global: Arc::new(Mutex::new(TypeMap::new())),
+                local: TypeMap::new(),
                     };
 
                     handle_request(&router, &mut ctx).await;
@@ -295,8 +297,8 @@ mod tcp_macro_tests {
             let mut ctx = HTTPContext {
                 req,
                 res,
-                global: Default::default(),
-                local: Default::default(),
+                global: Arc::new(Mutex::new(TypeMap::new())),
+                local: TypeMap::new(),
             };
 
             handle_request(&root, &mut ctx).await;

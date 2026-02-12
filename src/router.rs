@@ -162,7 +162,7 @@ pub async fn handle_request(root: &Router, ctx: &mut HTTPContext) -> bool {
 mod tests {
     use std::{ collections::HashMap, sync::Arc };
     use futures::FutureExt;
-    use tokio::io::{ BufReader, BufWriter };
+    use tokio::{io::{ BufReader, BufWriter }, sync::Mutex};
 
     use crate::{
         all,
@@ -180,7 +180,7 @@ mod tests {
         route,
         router::{ NodeType, Router, handle_request },
         trace,
-        types::HTTPContext,
+        types::{HTTPContext, TypeMap},
     };
 
     #[tokio::test]
@@ -220,8 +220,8 @@ mod tests {
             let mut ctx = HTTPContext {
                 req: req.expect("REASON"),
                 res,
-                global: HashMap::new(),
-                local: HashMap::new(),
+                global: Arc::new(Mutex::new(TypeMap::new())),
+                local: TypeMap::new(),
             };
             // 4️⃣ 走 Trie
             handle_request(&root, &mut ctx).await;
@@ -281,8 +281,8 @@ mod tests {
             let mut ctx = HTTPContext {
                 req: req.expect("REASON"),
                 res,
-                global: HashMap::new(),
-                local: HashMap::new(),
+                global: Arc::new(Mutex::new(TypeMap::new())),
+                local: TypeMap::new(),
             };
             // 4️⃣ 走 Trie
             handle_request(&root, &mut ctx).await;
@@ -341,8 +341,8 @@ mod tests {
             let mut ctx = HTTPContext {
                 req: req.expect("REASON"),
                 res,
-                global: HashMap::new(),
-                local: HashMap::new(),
+                global: Arc::new(Mutex::new(TypeMap::new())),
+                local: TypeMap::new(),
             };
             // 4️⃣ 走 Trie
             handle_request(&root, &mut ctx).await;
@@ -398,8 +398,8 @@ mod tests {
             let mut ctx = HTTPContext {
                 req: req.expect("REASON"),
                 res,
-                global: HashMap::new(),
-                local: HashMap::new(),
+                global: Arc::new(Mutex::new(TypeMap::new())),
+                local: TypeMap::new(),
             };
             // 4️⃣ 走 Trie
             handle_request(&root, &mut ctx).await;
