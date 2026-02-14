@@ -24,8 +24,7 @@ url = "2.5.8"
 lazy_static = "1.5.0"
 sha1 = "0.10.6"
 base64 = "0.22.1"
-zz_validator = "0.1.0"
-
+zz-validator = "0.1.0"
 
 [profile.release]
 opt-level = "z"
