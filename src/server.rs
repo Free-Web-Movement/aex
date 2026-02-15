@@ -1,5 +1,5 @@
 use std::{ io::{ self, Write }, net::SocketAddr, sync::Arc };
-use tokio::{net::{ TcpListener, TcpStream, tcp::{ OwnedReadHalf, OwnedWriteHalf } }, sync::Mutex};
+use tokio::{ net::{ TcpListener, TcpStream, tcp::{ OwnedReadHalf, OwnedWriteHalf } }, sync::Mutex };
 use tokio::io::{ BufReader, BufWriter };
 
 use crate::{ router::{ Router, handle_request }, types::TypeMap };
@@ -65,8 +65,8 @@ impl HTTPServer {
         let mut ctx = HTTPContext {
             req,
             res,
-                global: Arc::new(Mutex::new(TypeMap::new())),
-                local: TypeMap::new(),
+            global: Arc::new(Mutex::new(TypeMap::new())),
+            local: TypeMap::new(),
         };
 
         // 如果返回true启动默认处理机制，即统一发送body与header。
@@ -117,8 +117,8 @@ mod tests {
                     let mut ctx = HTTPContext {
                         req: req.expect("Request is illegal!"),
                         res,
-                global: Arc::new(Mutex::new(TypeMap::new())),
-                local: TypeMap::new(),
+                        global: Arc::new(Mutex::new(TypeMap::new())),
+                        local: TypeMap::new(),
                     };
 
                     handle_request(&router, &mut ctx).await;
@@ -230,7 +230,7 @@ mod tcp_macro_tests {
     use crate::{ get, route };
     use crate::types::{ HTTPContext };
     use crate::router::{ Router, NodeType };
-    use crate::websocket::WebSocket;
+    use crate::middlewares::websocket::WebSocket;
     use futures::FutureExt;
     use std::sync::Arc;
     use tokio::io::{ BufReader, BufWriter, AsyncReadExt, AsyncWriteExt };

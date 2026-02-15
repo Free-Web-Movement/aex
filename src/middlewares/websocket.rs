@@ -1,5 +1,4 @@
 use std::{ collections::HashMap, sync::Arc };
-use futures::FutureExt;
 use tokio::{
     io::{ AsyncReadExt, AsyncWriteExt, BufReader, BufWriter },
     net::tcp::{ OwnedReadHalf, OwnedWriteHalf },
@@ -342,7 +341,6 @@ impl WebSocket {
 mod tests {
     use super::*;
     use crate::protocol::header::HeaderKey;
-    use crate::protocol::method::HttpMethod;
     use crate::req::Request;
     use crate::res::Response;
     use crate::types::{ HTTPContext, TypeMap };
@@ -419,7 +417,7 @@ mod tests {
         });
 
         let client_task = tokio::spawn(async move {
-            let mut stream = create_client(port).await;
+            let stream = create_client(port).await;
             let (reader, writer) = stream.into_split();
             let mut reader = BufReader::new(reader);
             let mut writer = BufWriter::new(writer);
@@ -702,7 +700,6 @@ mod tests {
     #[cfg(test)]
     mod websocket_router_test {
         use super::*;
-        use crate::{ get, route, router };
         use crate::types::{ HTTPContext };
         use crate::req::Request;
         use crate::res::Response;
@@ -795,7 +792,7 @@ mod tests {
 
             // Client task: 发起 WebSocket handshake + 发送消息
             let client_task = tokio::spawn(async move {
-                let mut stream = create_client(port).await;
+                let stream = create_client(port).await;
                 let (reader, writer) = stream.into_split();
                 let mut reader = BufReader::new(reader);
                 let mut writer = BufWriter::new(writer);

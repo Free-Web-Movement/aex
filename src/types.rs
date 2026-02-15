@@ -7,7 +7,7 @@ use std::{
 use futures::future::BoxFuture;
 use tokio::sync::Mutex;
 
-use crate::{req::Request, res::Response, websocket::WebSocket};
+use crate::{req::Request, res::Response, middlewares::websocket::WebSocket};
 
 pub trait ContextKey: 'static {
     type Value: 'static;

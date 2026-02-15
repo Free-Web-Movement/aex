@@ -122,7 +122,7 @@ macro_rules! exe {
     // 带有 pre 处理的分支
     (|$ctx:ident, $data:ident| $body:block, |$pre_ctx:ident| $pre:block) => {{
         use std::sync::Arc;
-        use futures::future::{BoxFuture, FutureExt};
+        use futures::future::FutureExt;
         use $crate::types::{HTTPContext, Executor};
 
         // 显式指定闭包的生命周期约束
@@ -146,12 +146,32 @@ macro_rules! exe {
     // 仅 body 的分支
     (|$ctx:ident| $body:block) => {{
         use std::sync::Arc;
-        use futures::future::{BoxFuture, FutureExt};
+        use futures::future::FutureExt;
         use $crate::types::{HTTPContext, Executor};
 
         let executor: Arc<Executor> = Arc::new(move |$ctx: &mut HTTPContext| {
             async move { $body }.boxed()
         });
         executor
+    }};
+}
+
+
+#[macro_export]
+macro_rules! validator {
+    ( $( $key:ident => $dsl:expr ),* $(,)? ) => {{
+        use std::collections::HashMap;
+        use std::sync::Arc;
+        use $crate::middlewares::validator::to_validator;
+        use $crate::types::Executor;
+
+        let mut dsl_map: HashMap<String, String> = HashMap::new();
+
+        $(
+            dsl_map.insert(stringify!($key).to_string(), $dsl.to_string());
+        )*
+
+        let mw: Arc<Executor> = to_validator(dsl_map);
+        mw
     }};
 }

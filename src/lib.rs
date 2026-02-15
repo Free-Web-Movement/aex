@@ -6,4 +6,4 @@ pub mod server;
 pub mod types;
 pub mod router;
 pub mod macros;
-pub mod websocket;
+pub mod middlewares;

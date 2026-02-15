@@ -13,7 +13,7 @@ use crate::protocol::content_type::ContentType;
 use crate::protocol::header::HeaderKey;
 use crate::protocol::method::HttpMethod;
 use crate::protocol::media_type::MediaType;
-use crate::websocket::WebSocket;
+use crate::middlewares::websocket::WebSocket;
 
 static MAX_CAPACITY: i32 = 1024;
 static TIME_LIMIT: i32 = 500;
@@ -28,7 +28,7 @@ pub struct Request {
     pub params: Params, // 动态 path params
     pub headers: HashMap<HeaderKey, String>,
     pub content_type: ContentType,
-    pub body: Vec<u8>,
+    pub length: usize,
     pub cookies: HashMap<String, String>,
     pub reader: BufReader<OwnedReadHalf>,
     pub peer_addr: SocketAddr,
@@ -125,12 +125,6 @@ impl Request {
             .and_then(|s| s.trim().parse::<usize>().ok())
             .unwrap_or(0);
 
-        // 6️⃣ body
-        let mut body = vec![0u8; length];
-        if length > 0 {
-            reader.read_exact(&mut body).await?;
-        }
-
         // 7️⃣ content_type
         let content_type = headers
             .get(&HeaderKey::ContentType)
@@ -165,7 +159,7 @@ impl Request {
             is_chunked,
             transfer_encoding,
             multipart_boundary,
-            body,
+            length,
             reader,
             peer_addr,
             is_websocket,
@@ -251,7 +245,6 @@ mod tests {
     use tokio::io::AsyncWriteExt;
     use std::net::SocketAddr;
     use std::collections::HashMap;
-    use anyhow::Result;
 
     const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
 
@@ -306,7 +299,7 @@ abcde";
         assert_eq!(req.headers.get(&HeaderKey::Host).unwrap(), "localhost");
         assert_eq!(req.cookies.get("foo").unwrap(), "bar");
         assert_eq!(req.cookies.get("hello").unwrap(), "world");
-        assert_eq!(req.body, b"abcde");
+        // assert_eq!(req.body, b"abcde");
         assert!(req.is_chunked);
         assert_eq!(req.transfer_encoding.unwrap(), "chunked");
         assert_eq!(req.content_type.top_level, MediaType::Text);
@@ -343,7 +336,7 @@ abcd", boundary);
         assert_eq!(req.method, HttpMethod::POST);
         assert_eq!(req.path, "/upload");
         assert_eq!(req.multipart_boundary.unwrap(), boundary);
-        assert_eq!(req.body, b"abcd");
+        // assert_eq!(req.body, b"abcd");
         assert_eq!(req.content_type.top_level, MediaType::Multipart);
         assert_eq!(req.content_type.sub_type, "form-data");
     }
@@ -411,7 +404,7 @@ Sec-WebSocket-Version: 13\r\n\
         assert_eq!(req.method, HttpMethod::GET);
         assert_eq!(req.path, "/hello");
         assert_eq!(req.headers.get(&HeaderKey::Host).unwrap(), "localhost");
-        assert_eq!(req.body.len(), 0);
+        // assert_eq!(req.body.len(), 0);
     }
 
     #[tokio::test]
@@ -426,7 +419,7 @@ Content-Type: text/plain\r\n\
 abc";
         let req = spawn_request_server(request, "/submit").await;
         assert_eq!(req.method, HttpMethod::POST);
-        assert_eq!(req.body, b"abc");
+        // assert_eq!(req.body, b"abc");
         assert_eq!(req.cookies.get("a").unwrap(), "1");
         assert_eq!(req.cookies.get("b").unwrap(), "2");
         assert_eq!(req.content_type.top_level, MediaType::Text);

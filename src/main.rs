@@ -3,12 +3,7 @@ use std::{ net::SocketAddr, sync::Arc };
 use clap::Parser;
 
 use aex::{
-    get,
-    route,
-    router::{ NodeType, Router },
-    server::HTTPServer,
-    types::{ BinaryHandler, HTTPContext, TextHandler },
-    websocket::WebSocket, // 👈 关键：TrieRouter
+    get, middlewares::websocket::WebSocket, route, router::{ NodeType, Router }, server::HTTPServer, types::{ BinaryHandler, HTTPContext, TextHandler }
 };
 use futures::FutureExt;
 
