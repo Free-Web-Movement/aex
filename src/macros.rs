@@ -1,11 +1,12 @@
- // for `.boxed()`
+// for `.boxed()`
 
 // -----------------------------
 // 通用方法宏生成器（内部使用）
 // -----------------------------
 #[macro_export]
 macro_rules! make_method_macro {
-    ($method_str:expr, $path:expr, $handler:expr $(, $middleware:expr)?) => {{
+    ($method_str:expr, $path:expr, $handler:expr $(, $middleware:expr)?) => {
+        {
         use std::sync::Arc;
         use $crate::types::{HTTPContext, Executor};
 
@@ -18,9 +19,9 @@ macro_rules! make_method_macro {
         )))?;
 
         ($method_str, $path, handler_arc, mw_arc_opt)
-    }};
+        }
+    };
 }
-
 
 // -----------------------------
 // HTTP 方法宏
@@ -103,7 +104,8 @@ macro_rules! all {
 // -----------------------------
 #[macro_export]
 macro_rules! route {
-    ($root:expr, $method_macro:expr) => {{
+    ($root:expr, $method_macro:expr) => {
+        {
         let (method, path, handler, middleware) = $method_macro;
         $root.insert(
             path,
@@ -111,5 +113,45 @@ macro_rules! route {
             handler,
             middleware,
         );
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! exe {
+    // 带有 pre 处理的分支
+    (|$ctx:ident, $data:ident| $body:block, |$pre_ctx:ident| $pre:block) => {{
+        use std::sync::Arc;
+        use futures::future::{BoxFuture, FutureExt};
+        use $crate::types::{HTTPContext, Executor};
+
+        // 显式指定闭包的生命周期约束
+        let executor: Arc<Executor> = Arc::new(move |$ctx: &mut HTTPContext| {
+            // 1. 同步执行 pre
+            let $data = {
+                let $pre_ctx: &mut HTTPContext = &mut *$ctx;
+                $pre
+            };
+
+            // 2. 将异步块包装并显式绑定生命周期
+            async move {
+                let _ = &$data; // 强制捕获 data
+                $body
+            }
+            .boxed() // 相当于 Box::pin(async move { ... })
+        });
+        executor
+    }};
+
+    // 仅 body 的分支
+    (|$ctx:ident| $body:block) => {{
+        use std::sync::Arc;
+        use futures::future::{BoxFuture, FutureExt};
+        use $crate::types::{HTTPContext, Executor};
+
+        let executor: Arc<Executor> = Arc::new(move |$ctx: &mut HTTPContext| {
+            async move { $body }.boxed()
+        });
+        executor
     }};
 }

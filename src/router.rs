@@ -160,14 +160,15 @@ pub async fn handle_request(root: &Router, ctx: &mut HTTPContext) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use std::{ collections::HashMap, sync::Arc };
+    use std::{ collections::HashMap, fmt::format, sync::Arc };
     use futures::FutureExt;
-    use tokio::{io::{ BufReader, BufWriter }, sync::Mutex};
+    use tokio::{ io::{ BufReader, BufWriter }, sync::Mutex };
 
     use crate::{
         all,
         connect,
         delete,
+        exe,
         get,
         head,
         options,
@@ -180,7 +181,7 @@ mod tests {
         route,
         router::{ NodeType, Router, handle_request },
         trace,
-        types::{HTTPContext, TypeMap},
+        types::{ HTTPContext, TypeMap, to_executor },
     };
 
     #[tokio::test]
@@ -407,8 +408,6 @@ mod tests {
             ctx.res.send().await
         });
 
-
-
         // 6️⃣ 客户端发请求
         let mut client = TcpStream::connect(addr).await.unwrap();
         client.write_all(b"POST / HTTP/1.1\r\nHost: x\r\n\r\n").await.unwrap();
@@ -420,6 +419,208 @@ mod tests {
         // 7️⃣ 断言
         assert!(resp_str.contains("root"));
     }
+
+    #[tokio::test]
+    async fn test_http_server_with_middlewares() {
+        use tokio::net::{ TcpListener, TcpStream };
+        use tokio::io::{ AsyncReadExt, AsyncWriteExt };
+
+        let mut root = Router::new(NodeType::Static("root".into()));
+
+        let mw1 = to_executor(|ctx: &mut HTTPContext| {
+            Box::pin(async move {
+                ctx.res.body.push("mw1".to_string());
+                true
+            })
+        });
+
+        let mw2 = to_executor(|ctx: &mut HTTPContext| {
+            Box::pin(async move {
+                ctx.res.body.push("mw2".to_string());
+                true
+            })
+        });
+
+        let handler = to_executor(|ctx: &mut HTTPContext| {
+            Box::pin(async move {
+                ctx.res.body.push("handler".to_string());
+                true
+            })
+        });
+
+        root.insert("/mw", Some("GET"), handler, Some(vec![mw1, mw2]));
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        tokio::spawn(async move {
+            let (stream, peer_addr) = listener.accept().await.unwrap();
+            let (reader, writer) = stream.into_split();
+            let reader = BufReader::new(reader);
+            let writer = BufWriter::new(writer);
+
+            let req = Request::new(reader, peer_addr, "").await;
+            let res = Response::new(writer);
+            let mut ctx = HTTPContext {
+                req: req.expect("REASON"),
+                res,
+                global: Arc::new(Mutex::new(TypeMap::new())),
+                local: TypeMap::new(),
+            };
+
+            handle_request(&root, &mut ctx).await;
+            ctx.res.send().await
+        });
+
+        let mut client = TcpStream::connect(addr).await.unwrap();
+        client.write_all(b"GET /mw HTTP/1.1\r\nHost: x\r\n\r\n").await.unwrap();
+
+        let mut resp = vec![0; 1024];
+        let n = client.read(&mut resp).await.unwrap();
+        let resp_str = std::str::from_utf8(&resp[..n]).unwrap();
+
+        assert!(resp_str.contains("mw1"));
+        assert!(resp_str.contains("mw2"));
+        assert!(resp_str.contains("handler"));
+    }
+
+    #[tokio::test]
+    async fn test_http_server_middleware_break() {
+        use tokio::net::{ TcpListener, TcpStream };
+        use tokio::io::{ AsyncReadExt, AsyncWriteExt };
+
+        let mut root = Router::new(NodeType::Static("root".into()));
+
+        let mw_block = to_executor(|ctx: &mut HTTPContext| {
+            Box::pin(async move {
+                ctx.res.body.push("blocked".to_string());
+                false // 中断
+            })
+        });
+
+        let handler = to_executor(|ctx: &mut HTTPContext| {
+            Box::pin(async move {
+                ctx.res.body.push("handler".to_string());
+                true
+            })
+        });
+
+        root.insert("/stop", Some("GET"), handler, Some(vec![mw_block]));
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        tokio::spawn(async move {
+            let (stream, peer_addr) = listener.accept().await.unwrap();
+            let (reader, writer) = stream.into_split();
+            let reader = BufReader::new(reader);
+            let writer = BufWriter::new(writer);
+
+            let req = Request::new(reader, peer_addr, "").await;
+            let res = Response::new(writer);
+            let mut ctx = HTTPContext {
+                req: req.expect("REASON"),
+                res,
+                global: Arc::new(Mutex::new(TypeMap::new())),
+                local: TypeMap::new(),
+            };
+
+            handle_request(&root, &mut ctx).await;
+            ctx.res.send().await
+        });
+
+        let mut client = TcpStream::connect(addr).await.unwrap();
+        client.write_all(b"GET /stop HTTP/1.1\r\nHost: x\r\n\r\n").await.unwrap();
+
+        let mut resp = vec![0; 1024];
+        let n = client.read(&mut resp).await.unwrap();
+        let resp_str = std::str::from_utf8(&resp[..n]).unwrap();
+
+        assert!(resp_str.contains("blocked"));
+        assert!(!resp_str.contains("handler"));
+    }
+#[tokio::test]
+async fn test_route_with_exe_macro_and_pre() {
+    use tokio::net::{ TcpListener, TcpStream };
+    use tokio::io::{ AsyncReadExt, AsyncWriteExt, BufReader, BufWriter };
+    use tokio::sync::Mutex;
+    use std::sync::Arc;
+    use crate::types::{ HTTPContext, TypeMap };
+    use crate::req::Request;
+    use crate::res::Response;
+    use crate::router::{ Router, NodeType, handle_request };
+
+    // ----------------------
+    // 1️⃣ 构建 Router
+    // ----------------------
+    let mut root = Router::new(NodeType::Static("root".into()));
+
+    // middleware 使用 exe! + pre
+    let middleware = exe!(
+        |ctx, data| {
+            // body 捕获 pre 返回值 `data`
+            ctx.res.body.push(format!("{}-mw", data));
+            true
+        },
+        |ctx| {
+            // pre 在 Box 外执行
+            ctx.res.body.push("pre".to_string());
+            // 返回给 body 使用
+            "data".to_string()
+        }
+    );
+
+    // handler
+    let handler = exe!(|ctx| {
+        ctx.res.body.push("handler".to_string());
+        true
+    });
+
+    root.insert("/test", Some("GET"), handler, Some(vec![middleware]));
+
+    // ----------------------
+    // 2️⃣ 启动 TCP server
+    // ----------------------
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+
+    tokio::spawn(async move {
+        let (stream, peer_addr) = listener.accept().await.unwrap();
+        let (reader, writer) = stream.into_split();
+        let reader = BufReader::new(reader);
+        let writer = BufWriter::new(writer);
+
+        let req = Request::new(reader, peer_addr, "").await.unwrap();
+        let res = Response::new(writer);
+
+        let mut ctx = HTTPContext {
+            req,
+            res,
+            global: Arc::new(Mutex::new(TypeMap::new())),
+            local: TypeMap::new(),
+        };
+
+        handle_request(&root, &mut ctx).await;
+        ctx.res.send().await;
+    });
+
+    // ----------------------
+    // 3️⃣ 客户端请求
+    // ----------------------
+    let mut client = TcpStream::connect(addr).await.unwrap();
+    client.write_all(b"GET /test HTTP/1.1\r\nHost: x\r\n\r\n").await.unwrap();
+
+    let mut resp = vec![0; 1024];
+    let n = client.read(&mut resp).await.unwrap();
+    let resp_str = std::str::from_utf8(&resp[..n]).unwrap();
+
+    // ----------------------
+    // 4️⃣ 断言
+    // ----------------------
+    // 预期执行顺序：pre -> body -> handler
+    assert!(resp_str.contains("pre"));
+    assert!(resp_str.contains("data-mw"));
+    assert!(resp_str.contains("handler"));
 }
 
-
+}
