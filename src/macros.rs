@@ -175,3 +175,12 @@ macro_rules! validator {
         mw
     }};
 }
+
+// 文件：src/macros.rs
+
+#[macro_export]
+macro_rules! v {
+    ($($tokens:tt)*) => {
+        $crate::validator!($($tokens)*)
+    };
+}

@@ -204,7 +204,7 @@ mod tests {
         res::Response,
         router::{ NodeType, Router, handle_request },
         types::{ HTTPContext, TypeMap, to_executor },
-        validator,
+        v,
     };
 
     #[tokio::test]
@@ -660,7 +660,7 @@ mod tests {
         // 修改点：DSL 字符串前后添加了 ()，这是你 Parser 的预期格式
         // ----------------------
         let middleware =
-            validator! {
+            v! {
         params => "(id:int[1,100])",
         body   => "(name:string[3,20])",
         query  => "(active?:bool)"
