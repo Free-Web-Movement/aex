@@ -1,19 +1,22 @@
 use std::{ io::{ self, Write }, net::SocketAddr, sync::Arc };
-use tokio::{ net::{ TcpListener, TcpStream, tcp::{ OwnedReadHalf, OwnedWriteHalf } }, sync::Mutex };
+use tokio::{
+    net::{ TcpListener, TcpStream, tcp::{ self, OwnedReadHalf, OwnedWriteHalf } },
+    sync::Mutex,
+};
 use tokio::io::{ BufReader, BufWriter };
 
-use crate::{ router::{ Router, handle_request }, types::TypeMap };
+use crate::{ listeners::Listener, router::{ Router, handle_request }, types::TypeMap };
 use crate::types::HTTPContext;
 use crate::req::Request;
 use crate::res::Response;
 
 /// HTTPServer：无锁、并发、mut-less
-pub struct HTTPServer {
+pub struct AexServer {
     pub addr: SocketAddr,
     pub router: Arc<Router>, // Trie 路由
 }
 
-impl HTTPServer {
+impl AexServer {
     pub fn new(addr: SocketAddr, router: Router) -> Self {
         Self {
             addr,
@@ -22,23 +25,22 @@ impl HTTPServer {
     }
 
     /// 启动服务器
-    pub async fn run(&self) -> std::io::Result<()> {
-        let listener = TcpListener::bind(self.addr).await?;
-        println!("HTTPServer listening on {}", self.addr);
-        io::stdout().flush().unwrap();
+    pub async fn run(self: Arc<Self>) -> anyhow::Result<()> {
+        let mut tcp_handler = crate::listeners::TCPHandler {
+            addr: self.addr,
+            listener: None,
+        };
+        tcp_handler.listen().await?;
+        tcp_handler.accept(move |socket, peer_addr| {
+            let router = self.router.clone();
+            async move {
+                let (mut reader, writer) = socket.into_split();
 
-        loop {
-            let (stream, peer_addr) = listener.accept().await?;
-            let (mut reader, writer) = stream.into_split();
-            if Request::is_http_connection(&mut reader).await.unwrap() {
-                let router = self.router.clone();
-
-                tokio::spawn(async move {
+                if Request::is_http_connection(&mut reader).await.unwrap_or_default() {
                     let reader = BufReader::new(reader);
                     let writer = BufWriter::new(writer);
-
                     if
-                        let Err(err) = Self::handle_connection(
+                        let Err(err) = Self::handle_http_connection(
                             router,
                             reader,
                             writer,
@@ -47,13 +49,16 @@ impl HTTPServer {
                     {
                         eprintln!("[ERROR] Connection {}: {}", peer_addr, err);
                     }
-                });
+                } else {
+                    eprintln!("[ERROR] Connection {}: Not an HTTP request", peer_addr);
+                }
             }
-        }
+        }).await?;
+        Ok(())
     }
 
     /// 处理 TCP 连接
-    async fn handle_connection(
+    async fn handle_http_connection(
         router: Arc<Router>,
         reader: BufReader<OwnedReadHalf>,
         writer: BufWriter<OwnedWriteHalf>,
