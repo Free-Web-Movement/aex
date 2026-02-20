@@ -26,6 +26,7 @@ sha1 = "0.10.6"
 base64 = "0.22.1"
 zz-validator = "0.1.0"
 async-trait = "0.1.89"
+bytes = "1.11.1"
 
 [profile.release]
 opt-level = "z"

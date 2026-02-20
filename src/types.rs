@@ -1,11 +1,9 @@
 use std::{
-    any::{Any, TypeId},
-    collections::HashMap,
-    sync::Arc,
+    any::{Any, TypeId}, collections::HashMap, net::SocketAddr, pin::Pin, sync::Arc
 };
 
 use futures::future::BoxFuture;
-use tokio::sync::Mutex;
+use tokio::{net::{UdpSocket, tcp::{OwnedReadHalf, OwnedWriteHalf}}, sync::Mutex};
 
 use crate::{req::Request, res::Response, middlewares::websocket::WebSocket};
 
@@ -67,3 +65,19 @@ where
 {
     Arc::new(f)
 }
+
+
+use bytes::BytesMut;
+
+/// C: 业务指令/数据对象 (Command/Message)
+pub trait Codec: Sized {
+    fn decode(src: &mut BytesMut) -> Option<Self>;
+    fn encode(self, dst: &mut BytesMut);
+}
+
+pub type StreamExecutor = Box<dyn Fn(OwnedReadHalf, OwnedWriteHalf) -> Pin<Box<dyn Future<Output = anyhow::Result<bool>> + Send>> + Send + Sync>;
+
+pub type PacketExecutor = Box<dyn Fn(Vec<u8>, SocketAddr, Arc<UdpSocket>) -> Pin<Box<dyn Future<Output = anyhow::Result<bool>> + Send>> 
+    + Send 
+    + Sync
+>;

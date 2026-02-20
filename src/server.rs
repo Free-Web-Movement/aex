@@ -1,6 +1,6 @@
-use std::{ io::{ self, Write }, net::SocketAddr, sync::Arc };
+use std::{ net::SocketAddr, sync::Arc };
 use tokio::{
-    net::{ TcpListener, TcpStream, tcp::{ self, OwnedReadHalf, OwnedWriteHalf } },
+    net::tcp::{ OwnedReadHalf, OwnedWriteHalf },
     sync::Mutex,
 };
 use tokio::io::{ BufReader, BufWriter };
@@ -57,7 +57,7 @@ impl AexServer {
         Ok(())
     }
 
-    /// 处理 TCP 连接
+    /// 处理 HTTP 连接
     async fn handle_http_connection(
         router: Arc<Router>,
         reader: BufReader<OwnedReadHalf>,
