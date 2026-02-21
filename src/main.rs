@@ -1,6 +1,6 @@
 use std::{ net::SocketAddr, sync::Arc };
 
-use aex::{get, http::{middlewares::websocket::WebSocket, router::{NodeType, Router}, types::TextHandler}, route, server::AexServer};
+use aex::{get, http::{middlewares::websocket::WebSocket, router::{NodeType, Router}, types::TextHandler}, route, server::{AexServer, HTTPServer}, tcp::types::{Command, Frame, RawCodec}};
 use clap::Parser;
 use aex::http::types::{HTTPContext, BinaryHandler};
 use futures::FutureExt;
@@ -92,8 +92,7 @@ async fn main() -> anyhow::Result<()> {
     // );
 
     // 2️⃣ 启动 HTTPServer（直接吃 trie）
-    let server = Arc::new(AexServer::new(addr, route));
-
-    server.run().await?;
+    let server = HTTPServer::new(addr);
+    server.http(route).start().await?;
     Ok(())
 }

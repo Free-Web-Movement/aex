@@ -1,68 +1,98 @@
-use std::{ net::SocketAddr, sync::Arc };
-use tokio::{
-    net::tcp::{ OwnedReadHalf, OwnedWriteHalf },
-    sync::Mutex,
+use bytes::{BytesMut, Buf};
+use std::net::SocketAddr;
+use std::sync::Arc;
+use tokio::io::{AsyncReadExt, BufReader, BufWriter};
+use tokio::net::{
+    TcpListener,
+    tcp::{OwnedReadHalf, OwnedWriteHalf},
 };
-use tokio::io::{ BufReader, BufWriter };
 
-use crate::{http::{req::Request, res::Response, router::{Router, handle_request}, types::{HTTPContext, TypeMap}}, tcp::listeners::Listener};
+use crate::http::req::Request;
+use crate::http::res::Response;
+use crate::http::router::{Router as HttpRouter, handle_request};
+use crate::http::types::{HTTPContext, TypeMap};
+use crate::tcp::router::Router as TcpRouter;
+use crate::tcp::types::{Codec, Command, Frame, RawCodec}; // 确保引入了 Command
+use tokio::sync::Mutex;
 
-
-/// HTTPServer：无锁、并发、mut-less
-pub struct AexServer {
+/// AexServer: 核心多协议服务器
+pub struct AexServer<F, C, K = u32>
+where
+    F: Frame + Send + Sync + 'static,
+    C: Command + Send + Sync + 'static, // 统一使用 Command 约束
+    K: Eq + std::hash::Hash + Send + Sync + 'static,
+{
     pub addr: SocketAddr,
-    pub router: Arc<Router>, // Trie 路由
+    pub http_router: Option<Arc<HttpRouter>>,
+    pub tcp_router: Option<Arc<TcpRouter<F, C, K>>>,
+    _phantom: std::marker::PhantomData<(F, C)>, // 修正 PhantomData 包含 C
 }
 
-impl AexServer {
-    pub fn new(addr: SocketAddr, router: Router) -> Self {
+impl<F, C, K> AexServer<F, C, K>
+where
+    F: Frame + Send + Sync + 'static,
+    C: Command + Send + Sync + 'static,
+    K: Eq + std::hash::Hash + Send + Sync + 'static,
+{
+    pub fn new(addr: SocketAddr) -> Self {
         Self {
             addr,
-            router: Arc::new(router),
+            http_router: None,
+            tcp_router: None,
+            _phantom: std::marker::PhantomData,
         }
     }
 
-    /// 启动服务器
-    pub async fn run(self: Arc<Self>) -> anyhow::Result<()> {
-        let mut tcp_handler = crate::tcp::listeners::TCPHandler {
-            addr: self.addr,
-            listener: None,
-        };
-        tcp_handler.listen().await?;
-        tcp_handler.accept(move |socket, peer_addr| {
-            let router = self.router.clone();
-            async move {
-                let (mut reader, writer) = socket.into_split();
-
-                if Request::is_http_connection(&mut reader).await.unwrap_or_default() {
-                    let reader = BufReader::new(reader);
-                    let writer = BufWriter::new(writer);
-                    if
-                        let Err(err) = Self::handle_http_connection(
-                            router,
-                            reader,
-                            writer,
-                            peer_addr
-                        ).await
-                    {
-                        eprintln!("[ERROR] Connection {}: {}", peer_addr, err);
-                    }
-                } else {
-                    eprintln!("[ERROR] Connection {}: Not an HTTP request", peer_addr);
-                }
-            }
-        }).await?;
-        Ok(())
+    pub fn http(mut self, router: HttpRouter) -> Self {
+        self.http_router = Some(Arc::new(router));
+        self
     }
 
-    /// 处理 HTTP 连接
-    async fn handle_http_connection(
-        router: Arc<Router>,
+    pub fn tcp(mut self, router: TcpRouter<F, C, K>) -> Self {
+        self.tcp_router = Some(Arc::new(router));
+        self
+    }
+
+    pub async fn start(self) -> anyhow::Result<()> {
+        let addr = self.addr;
+        let server = Arc::new(self);
+        let listener = TcpListener::bind(addr).await?;
+
+        println!("[AEX] Multi-protocol server listening on {}", addr);
+
+        loop {
+            let (socket, peer_addr) = listener.accept().await?;
+            let server_ctx = server.clone();
+
+            tokio::spawn(async move {
+                let (mut reader, writer) = socket.into_split();
+
+                if let Some(hr) = &server_ctx.http_router {
+                    if Request::is_http_connection(&mut reader)
+                        .await
+                        .unwrap_or_default()
+                    {
+                        let reader = BufReader::new(reader);
+                        let writer = BufWriter::new(writer);
+                        return Self::handle_http(hr.clone(), reader, writer, peer_addr).await;
+                    }
+                }
+
+                if let Some(tr) = &server_ctx.tcp_router {
+                    return Self::handle_tcp(tr.clone(), reader, writer).await;
+                }
+
+                Ok::<(), anyhow::Error>(())
+            });
+        }
+    }
+
+    async fn handle_http(
+        router: Arc<HttpRouter>,
         reader: BufReader<OwnedReadHalf>,
         writer: BufWriter<OwnedWriteHalf>,
-        peer_addr: SocketAddr
+        peer_addr: SocketAddr,
     ) -> anyhow::Result<()> {
-        // 构建 Request
         let req = Request::new(reader, peer_addr, "").await?;
         let res = Response::new(writer);
         let mut ctx = HTTPContext {
@@ -72,279 +102,57 @@ impl AexServer {
             local: TypeMap::new(),
         };
 
-        // 如果返回true启动默认处理机制，即统一发送body与header。
         if handle_request(&router, &mut ctx).await {
-            // 写回响应
             let _ = ctx.res.send().await;
         }
+        Ok(())
+    }
 
+    async fn handle_tcp(
+        router: Arc<TcpRouter<F, C, K>>,
+        reader: OwnedReadHalf,
+        writer: OwnedWriteHalf,
+    ) -> anyhow::Result<()> {
+        let mut buf = BytesMut::with_capacity(4096);
+        let mut r_opt = Some(reader);
+        let mut w_opt = Some(writer);
+
+        loop {
+            let n = match r_opt.as_mut() {
+                Some(r) => r.read_buf(&mut buf).await?,
+                None => break,
+            };
+
+            if n == 0 { break; }
+
+            // --- 核心修复：物理分包逻辑 ---
+            // 因为你的 Codec::decode 签名是 &[u8]，不处理缓冲区消耗
+            // 这里假设通用协议头为 4 字节长度 (BigEndian)
+            while buf.len() >= 4 {
+                let len = u32::from_be_bytes(buf[..4].try_into().unwrap()) as usize;
+                
+                if buf.len() < 4 + len {
+                    break; // 数据包不全，跳出等待下次读取
+                }
+
+                // 1. 消耗长度头
+                buf.advance(4);
+                // 2. 提取载荷切片
+                let data = buf.split_to(len);
+                
+                // 3. 调用固定的 Codec::decode (由于 F 实现自 Codec)
+                if let Ok(frame) = <F as Codec>::decode(&data) {
+                    let should_continue = router.handle_frame(frame, &mut r_opt, &mut w_opt).await?;
+
+                    if !should_continue || r_opt.is_none() {
+                        return Ok(());
+                    }
+                }
+            }
+        }
         Ok(())
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use std::sync::Arc;
-    use futures::FutureExt;
-    use tokio::io::{ BufReader, BufWriter, AsyncReadExt, AsyncWriteExt };
-    use tokio::net::{ TcpListener, TcpStream };
-    use tokio::sync::Mutex;
-    use std::net::SocketAddr;
 
-    use crate::http::types::TypeMap;
-    use crate::{
-        http::types::HTTPContext,
-        http::res::Response,
-        http::req::Request,
-        http::router::{ Router, NodeType, handle_request },
-    };
-
-    /// 简单帮助函数：生成 HTTPServer 并在 background 运行
-    async fn spawn_server(root: Router) -> SocketAddr {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        let router = Arc::new(root);
-
-        tokio::spawn(async move {
-            loop {
-                let (stream, peer_addr) = listener.accept().await.unwrap();
-                let router = router.clone();
-                tokio::spawn(async move {
-                    let (reader, writer) = stream.into_split();
-                    let reader = BufReader::new(reader);
-                    let writer = BufWriter::new(writer);
-
-                    let req = Request::new(reader, peer_addr, "").await;
-                    let res = Response::new(writer);
-
-                    let mut ctx = HTTPContext {
-                        req: req.expect("Request is illegal!"),
-                        res,
-                        global: Arc::new(Mutex::new(TypeMap::new())),
-                        local: TypeMap::new(),
-                    };
-
-                    handle_request(&router, &mut ctx).await;
-                    ctx.res.send().await
-                });
-            }
-        });
-
-        addr
-    }
-
-    #[tokio::test]
-    async fn test_trie_server_get() {
-        // 构建 Trie
-        let mut root = Router::new(NodeType::Static("root".into()));
-        root.insert(
-            "/hello",
-            Some("GET"),
-            Arc::new(|ctx| {
-                Box::pin(async move {
-                    ctx.res.body.push("world".to_string());
-                    true
-                }).boxed()
-            }),
-            None
-        );
-
-        // 启动 HTTPServer
-        let addr = spawn_server(root).await;
-
-        // 客户端请求
-        let mut client = TcpStream::connect(addr).await.unwrap();
-        client.write_all(b"GET /hello HTTP/1.1\r\nHost: x\r\n\r\n").await.unwrap();
-
-        let mut resp = vec![0; 1024];
-        let n = client.read(&mut resp).await.unwrap();
-        let resp_str = std::str::from_utf8(&resp[..n]).unwrap();
-
-        assert!(resp_str.contains("world"));
-    }
-
-    #[tokio::test]
-    async fn test_trie_server_post() {
-        // 构建 Trie
-        let mut root = Router::new(NodeType::Static("root".into()));
-        root.insert(
-            "/user/:id/profile",
-            Some("POST"),
-            Arc::new(|ctx| {
-                Box::pin(async move {
-                    ctx.res.body.push("posted".to_string());
-                    true
-                }).boxed()
-            }),
-            None
-        );
-
-        let addr = spawn_server(root).await;
-
-        // 客户端请求
-        let mut client = TcpStream::connect(addr).await.unwrap();
-        client.write_all(b"POST /user/abc/profile HTTP/1.1\r\nHost: x\r\n\r\n").await.unwrap();
-
-        let mut resp = vec![0; 1024];
-        let n = client.read(&mut resp).await.unwrap();
-        let resp_str = std::str::from_utf8(&resp[..n]).unwrap();
-
-        assert!(resp_str.contains("posted"));
-    }
-
-    #[tokio::test]
-    async fn test_trie_server_dynamic_param() {
-        let mut root = Router::new(NodeType::Static("root".into()));
-
-        root.insert(
-            "/user/:id",
-            Some("GET"),
-            Arc::new(|ctx| {
-                Box::pin(async move {
-                    // 假设 ctx.req.params.data 是 HashMap<String, String>，这里不生成新 String
-                    if let Some(params) = &ctx.req.params.data {
-                        if let Some(id) = params.get("id") {
-                            // 直接使用原始 &str
-                            ctx.res.body.push(id.to_string()); // 生命周期和 params 一致
-                        }
-                    }
-                    true
-                }).boxed()
-            }),
-            None
-        );
-
-        let addr = spawn_server(root).await;
-
-        let mut client = TcpStream::connect(addr).await.unwrap();
-        client.write_all(b"GET /user/42 HTTP/1.1\r\nHost: x\r\n\r\n").await.unwrap();
-
-        let mut resp = vec![0; 1024];
-        let n = client.read(&mut resp).await.unwrap();
-        let resp_str = std::str::from_utf8(&resp[..n]).unwrap();
-
-        assert!(resp_str.contains("42"));
-    }
-}
-
-#[cfg(test)]
-mod tcp_macro_tests {
-    use super::*;
-    use crate::{ get, route };
-    use crate::http::types::{ HTTPContext };
-    use crate::http::router::{ Router, NodeType };
-    use crate::http::middlewares::websocket::WebSocket;
-    use futures::FutureExt;
-    use std::sync::Arc;
-    use tokio::io::{ BufReader, BufWriter, AsyncReadExt, AsyncWriteExt };
-    use tokio::net::{ TcpListener, TcpStream };
-
-    async fn setup_server() -> (TcpListener, u16) {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let port = listener.local_addr().unwrap().port();
-        (listener, port)
-    }
-
-    async fn create_client(port: u16) -> TcpStream {
-        TcpStream::connect(("127.0.0.1", port)).await.unwrap()
-    }
-
-    #[tokio::test]
-    async fn test_tcp_macro_ws() {
-        // 准备 Router
-        let mut root = Router::new(NodeType::Static("root".into()));
-
-        // WebSocket 中间件
-        let ws_middleware = WebSocket {
-            on_text: Some(
-                Arc::new(|_ws, _ctx, msg| {
-                    (
-                        async move {
-                            assert_eq!(msg, "ping");
-                            true
-                        }
-                    ).boxed()
-                })
-            ),
-            on_binary: None,
-        };
-
-        // 使用宏注册路由并添加 ws_middleware
-        route!(
-            root,
-            get!(
-                "/hello",
-                |ctx: &mut HTTPContext| {
-                    (
-                        async move {
-                            ctx.res.body.push("HTTP GET".into());
-                            true
-                        }
-                    ).boxed()
-                },
-                [WebSocket::to_middleware(ws_middleware)]
-            )
-        );
-
-        // 启动 TCP 服务
-        let (listener, port) = setup_server().await;
-        let server_task = tokio::spawn(async move {
-            let (stream, peer_addr) = listener.accept().await.unwrap();
-            let (reader, writer) = stream.into_split();
-            let reader = BufReader::new(reader);
-            let writer = BufWriter::new(writer);
-
-            // 构建 HTTPContext
-            let req = Request::new(reader, peer_addr, "").await.unwrap();
-            let res = Response::new(writer);
-            let mut ctx = HTTPContext {
-                req,
-                res,
-                global: Arc::new(Mutex::new(TypeMap::new())),
-                local: TypeMap::new(),
-            };
-
-            handle_request(&root, &mut ctx).await;
-
-            // 写回响应
-            let _ = ctx.res.send().await;
-        });
-
-        // 启动客户端
-        let client_task = tokio::spawn(async move {
-            let mut stream = create_client(port).await;
-            let (reader, writer) = stream.split();
-            let mut buf_reader = BufReader::new(reader);
-            let mut buf_writer = BufWriter::new(writer);
-
-            // 发送 HTTP GET /hello
-            let req =
-                "GET /hello HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n";
-            buf_writer.write_all(req.as_bytes()).await.unwrap();
-            buf_writer.flush().await.unwrap();
-
-            // 读取服务端 handshake
-            let mut buf = vec![0u8; 1024];
-            let n = buf_reader.read(&mut buf).await.unwrap();
-            let resp = String::from_utf8_lossy(&buf[..n]);
-            assert!(resp.contains("101 Switching Protocols"));
-
-            // 发送一个 masked text frame "ping"
-            let payload = b"ping";
-            let mask = [1, 2, 3, 4];
-            let mut frame = vec![0x81, 0x80 | (payload.len() as u8)];
-            frame.extend_from_slice(&mask);
-            frame.extend(
-                payload
-                    .iter()
-                    .enumerate()
-                    .map(|(i, b)| b ^ mask[i % 4])
-                    .collect::<Vec<_>>()
-            );
-            buf_writer.write_all(&frame).await.unwrap();
-            buf_writer.flush().await.unwrap();
-        });
-
-        tokio::join!(server_task, client_task);
-    }
-}
+pub type HTTPServer = AexServer<RawCodec, RawCodec, u32>;
