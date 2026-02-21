@@ -58,37 +58,6 @@ impl<F, C, K> AexServer<F, C, K>
         self
     }
 
-    // pub async fn start(self) -> anyhow::Result<()> {
-    //     let addr = self.addr;
-    //     let server = Arc::new(self);
-    //     let listener = TcpListener::bind(addr).await?;
-
-    //     println!("[AEX] Multi-protocol server listening on {}", addr);
-
-    //     loop {
-    //         let (socket, peer_addr) = listener.accept().await?;
-    //         let server_ctx = server.clone();
-
-    //         tokio::spawn(async move {
-    //             let (mut reader, writer) = socket.into_split();
-
-    //             if let Some(hr) = &server_ctx.http_router {
-    //                 if Request::is_http_connection(&mut reader).await.unwrap_or_default() {
-    //                     let reader = BufReader::new(reader);
-    //                     let writer = BufWriter::new(writer);
-    //                     return Self::handle_http(hr.clone(), reader, writer, peer_addr).await;
-    //                 }
-    //             }
-
-    //             if let Some(tr) = &server_ctx.tcp_router {
-    //                 return Self::handle_tcp(tr.clone(), reader, writer).await;
-    //             }
-
-    //             Ok::<(), anyhow::Error>(())
-    //         });
-    //     }
-    // }
-
     /// 🚀 统一启动入口
     pub async fn start(self) -> anyhow::Result<()> {
         let server = Arc::new(self);

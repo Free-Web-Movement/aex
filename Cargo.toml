@@ -38,3 +38,6 @@ strip = true
 [[bin]]
 name = "http-server"
 path = "src/main.rs"
+
+[dev-dependencies]
+reqwest = "0.13.2"

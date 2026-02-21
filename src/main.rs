@@ -34,7 +34,7 @@ async fn main() -> anyhow::Result<()> {
     tcp_router.on(1001, |cmd, reader, writer| async move {
         println!("[TCP] Received 1001, payload len: {}", cmd.0.len());
         // 这里可以继续使用 reader/writer 进行长连接交互
-        true
+        Ok(true)
     });
 
     // --- 3. UDP 路由配置 (使用 RawCodec) ---

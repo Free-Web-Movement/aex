@@ -16,7 +16,7 @@ pub type CommandHandler<C> = Box<dyn Fn(
     C, 
     Box<dyn AsyncRead + Unpin + Send>, 
     Box<dyn AsyncWrite + Unpin + Send>
-) -> Pin<Box<dyn Future<Output = bool> + Send>> + Send + Sync>;
+) -> Pin<Box<dyn Future<Output = anyhow::Result<bool>> + Send>> + Send + Sync>;
 
 pub struct Router<F, C, K = u32> 
 where 
@@ -45,13 +45,17 @@ where
     }
 
     /// 修复语法：正确构建 Pin<Box<dyn Future>>
-    pub fn on<FFut, Fut>(&mut self, key: K, f: FFut)
-    where
-        FFut: Fn(C, Box<dyn AsyncRead + Unpin + Send>, Box<dyn AsyncWrite + Unpin + Send>) -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = bool> + Send + 'static,
-    {
-        self.handlers.insert(key, Box::new(move |cmd, r, w| Box::pin(f(cmd, r, w))));
-    }
+pub fn on<FFut, Fut>(&mut self, key: K, f: FFut)
+where
+    FFut: Fn(C, Box<dyn AsyncRead + Unpin + Send>, Box<dyn AsyncWrite + Unpin + Send>) -> Fut + Send + Sync + 'static,
+    // 💡 修改点：将 bool 改为 anyhow::Result<bool>
+    Fut: Future<Output = anyhow::Result<bool>> + Send + 'static,
+{
+    self.handlers.insert(
+        key, 
+        Box::new(move |cmd, r, w| Box::pin(f(cmd, r, w)))
+    );
+}
 
     /// 核心分发逻辑
     pub async fn handle_frame(
@@ -80,7 +84,7 @@ where
                     let w = writer.take().ok_or_else(|| anyhow::anyhow!("Writer already taken"))?;
                     
                     // 执行业务 Handler
-                    return Ok(handler(cmd, Box::new(r), Box::new(w)).await);
+                    return Ok(handler(cmd, Box::new(r), Box::new(w)).await?);
                 }
             }
         }
