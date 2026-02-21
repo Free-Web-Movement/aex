@@ -1,98 +1,57 @@
-use std::{ net::SocketAddr, sync::Arc };
-
-use aex::{get, http::{middlewares::websocket::WebSocket, router::{NodeType, Router}, types::TextHandler}, route, server::{AexServer, HTTPServer}, tcp::types::{Command, Frame, RawCodec}};
-use clap::Parser;
-use aex::http::types::{HTTPContext, BinaryHandler};
+use std::net::SocketAddr;
+use std::sync::Arc;
+use aex::{ get, route };
+use aex::tcp::types::{ RawCodec, Command };
+use aex::server::AexServer;
+use aex::http::router::{ NodeType, Router as HttpRouter };
+use aex::tcp::router::Router as TcpRouter;
+use aex::udp::router::Router as UdpRouter;
 use futures::FutureExt;
 
-pub async fn start_ws_main() {
-    let text_handler: TextHandler = Arc::new(|ws: &WebSocket, ctx: &mut HTTPContext, text: String| {
-        (
-            async move {
-                // processing here
-                true
-            }
-        ).boxed()
-    });
-
-    let binary_handler: BinaryHandler = Arc::new(
-        |ws: &WebSocket, ctx: &mut HTTPContext, data: Vec<u8>| {
-            (
-                async move {
-                    // processing here
-                    true
-                }
-            ).boxed()
-        }
-    );
-
-    let ws = WebSocket {
-        on_binary: Some(binary_handler),
-        on_text: Some(text_handler),
-    };
-
-    let ws_mw = WebSocket::to_middleware(ws);
-
-    let ws_params = get!(
-        "/",
-        |ctx|
-            (
-                async move {
-                    // ctx.res.body.push("Hello world!".to_string());
-                    true
-                }
-            ).boxed(),
-        [ws_mw]
-    );
-
-    let mut route = Router::new(NodeType::Static("root".into()));
-
-    route!(route, ws_params);
-}
-
-#[derive(Parser, Debug)]
-#[command(name = "aex")]
-struct Opt {
-    #[arg(long, default_value = "0.0.0.0")]
-    ip: String,
-
-    #[arg(long, default_value_t = 9000)]
-    port: u16,
-}
-
-#[tokio::main(flavor = "multi_thread")]
+#[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let opt = Opt::parse();
+    let addr: SocketAddr = "0.0.0.0:8080".parse()?;
 
-    let addr: SocketAddr = format!("{}:{}", opt.ip, opt.port).parse()?;
-
-    // 1️⃣ 构建 TrieRouter
-    let mut route = Router::new(NodeType::Static("root".into()));
+    // --- 1. HTTP 路由配置 ---
+    let mut http_router = HttpRouter::new(NodeType::Static("root".into()));
 
     route!(
-        route,
+        http_router,
         get!("/", |ctx: &mut HTTPContext| {
             Box::pin(async move {
                 ctx.res.body.push("Hello world!".to_string());
+                // false = 不继续 middleware（如果你还保留这个语义）
                 true
             }).boxed()
         })
     );
 
-    // route.insert(
-    //     "/",
-    //     Some("GET"),
-    //     Arc::new(|ctx: &mut HTTPContext| {
-    //         Box::pin(async move {
-    //             ctx.res.body.push("Hello world!".to_string());
-    //             true
-    //         }).boxed()
-    //     }),
-    //     None // 传入 WebSocket 中间件
-    // );
+    // --- 2. TCP 路由配置 (使用 RawCodec) ---
+    // 提取器：取二进制前4字节作为 ID
+    let mut tcp_router = TcpRouter::<RawCodec, RawCodec, u32>::new(|c| c.id());
 
-    // 2️⃣ 启动 HTTPServer（直接吃 trie）
-    let server = HTTPServer::new(addr);
-    server.http(route).start().await?;
+    // 注册 TCP 指令 1001
+    tcp_router.on(1001, |cmd, reader, writer| async move {
+        println!("[TCP] Received 1001, payload len: {}", cmd.0.len());
+        // 这里可以继续使用 reader/writer 进行长连接交互
+        true
+    });
+
+    // --- 3. UDP 路由配置 (使用 RawCodec) ---
+    let mut udp_router = UdpRouter::<RawCodec, RawCodec, u32>::new(|c| c.id());
+
+    // 注册 UDP 指令 2002
+    udp_router.on(2002, |payload, peer, socket| async move {
+        println!("[UDP] Received 2002 from {}, data: {:?}", peer, payload);
+        // UDP 回包示例
+        let response = b"UDP ACK".to_vec();
+        let _ = socket.send_to(&response, peer).await;
+        Ok(true)
+    });
+
+    // --- 4. 组装并启动服务器 ---
+    // 借力于 HTTPServer 类型别名或直接使用 AexServer
+    AexServer::new(addr).http(http_router).tcp(tcp_router).udp(udp_router).start().await?;
+
     Ok(())
 }

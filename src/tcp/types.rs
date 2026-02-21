@@ -20,7 +20,7 @@ use bincode::{config, decode_from_slice, encode_to_vec, Decode, Encode};
 
 #[inline]
 pub fn frame_config() -> impl bincode::config::Config {
-    config::standard().with_fixed_int_encoding().with_big_endian()
+    config::standard().with_fixed_int_encoding().with_big_endian().with_limit::<1024>() // 设置最大消息大小为 1024
 }
 
 /// ⚡ 修正后的 Codec trait
@@ -46,16 +46,6 @@ pub type StreamExecutor = Box<
     dyn Fn(
             OwnedReadHalf,
             OwnedWriteHalf,
-        ) -> Pin<Box<dyn Future<Output = anyhow::Result<bool>> + Send>>
-        + Send
-        + Sync,
->;
-
-pub type PacketExecutor = Box<
-    dyn Fn(
-            Vec<u8>,
-            SocketAddr,
-            Arc<UdpSocket>,
         ) -> Pin<Box<dyn Future<Output = anyhow::Result<bool>> + Send>>
         + Send
         + Sync,
