@@ -5,10 +5,8 @@ use tokio::{
 };
 use tokio::io::{ BufReader, BufWriter };
 
-use crate::{ listeners::Listener, router::{ Router, handle_request }, types::TypeMap };
-use crate::types::HTTPContext;
-use crate::req::Request;
-use crate::res::Response;
+use crate::{http::{req::Request, res::Response, router::{Router, handle_request}, types::{HTTPContext, TypeMap}}, tcp::listeners::Listener};
+
 
 /// HTTPServer：无锁、并发、mut-less
 pub struct AexServer {
@@ -26,7 +24,7 @@ impl AexServer {
 
     /// 启动服务器
     pub async fn run(self: Arc<Self>) -> anyhow::Result<()> {
-        let mut tcp_handler = crate::listeners::TCPHandler {
+        let mut tcp_handler = crate::tcp::listeners::TCPHandler {
             addr: self.addr,
             listener: None,
         };
@@ -93,12 +91,12 @@ mod tests {
     use tokio::sync::Mutex;
     use std::net::SocketAddr;
 
-    use crate::types::TypeMap;
+    use crate::http::types::TypeMap;
     use crate::{
-        types::HTTPContext,
-        res::Response,
-        req::Request,
-        router::{ Router, NodeType, handle_request },
+        http::types::HTTPContext,
+        http::res::Response,
+        http::req::Request,
+        http::router::{ Router, NodeType, handle_request },
     };
 
     /// 简单帮助函数：生成 HTTPServer 并在 background 运行
@@ -233,9 +231,9 @@ mod tests {
 mod tcp_macro_tests {
     use super::*;
     use crate::{ get, route };
-    use crate::types::{ HTTPContext };
-    use crate::router::{ Router, NodeType };
-    use crate::middlewares::websocket::WebSocket;
+    use crate::http::types::{ HTTPContext };
+    use crate::http::router::{ Router, NodeType };
+    use crate::http::middlewares::websocket::WebSocket;
     use futures::FutureExt;
     use std::sync::Arc;
     use tokio::io::{ BufReader, BufWriter, AsyncReadExt, AsyncWriteExt };

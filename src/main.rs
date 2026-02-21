@@ -1,10 +1,8 @@
 use std::{ net::SocketAddr, sync::Arc };
 
+use aex::{get, http::{middlewares::websocket::WebSocket, router::{NodeType, Router}, types::TextHandler}, route, server::AexServer};
 use clap::Parser;
-
-use aex::{
-    get, middlewares::websocket::WebSocket, route, router::{ NodeType, Router }, server::AexServer, types::{ BinaryHandler, HTTPContext, TextHandler }
-};
+use aex::http::types::{HTTPContext, BinaryHandler};
 use futures::FutureExt;
 
 pub async fn start_ws_main() {

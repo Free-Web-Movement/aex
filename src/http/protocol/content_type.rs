@@ -1,4 +1,5 @@
-use crate::protocol::media_type::MediaType;
+use crate::http::protocol::media_type::MediaType;
+
 
 /// ContentType 结构
 #[derive(Debug, Clone, PartialEq, Eq)]

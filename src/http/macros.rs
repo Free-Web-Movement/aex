@@ -8,7 +8,7 @@ macro_rules! make_method_macro {
     ($method_str:expr, $path:expr, $handler:expr $(, $middleware:expr)?) => {
         {
         use std::sync::Arc;
-        use $crate::types::{HTTPContext, Executor};
+        use $crate::http::types::{HTTPContext, Executor};
 
         let handler_arc: Arc<Executor> = Arc::new($handler);
 
@@ -123,7 +123,7 @@ macro_rules! exe {
     (|$ctx:ident, $data:ident| $body:block, |$pre_ctx:ident| $pre:block) => {{
         use std::sync::Arc;
         use futures::future::FutureExt;
-        use $crate::types::{HTTPContext, Executor};
+        use $crate::http::types::{HTTPContext, Executor};
 
         // 显式指定闭包的生命周期约束
         let executor: Arc<Executor> = Arc::new(move |$ctx: &mut HTTPContext| {
@@ -147,7 +147,7 @@ macro_rules! exe {
     (|$ctx:ident| $body:block) => {{
         use std::sync::Arc;
         use futures::future::FutureExt;
-        use $crate::types::{HTTPContext, Executor};
+        use $crate::http::types::{HTTPContext, Executor};
 
         let executor: Arc<Executor> = Arc::new(move |$ctx: &mut HTTPContext| {
             async move { $body }.boxed()
@@ -162,8 +162,8 @@ macro_rules! validator {
     ( $( $key:ident => $dsl:expr ),* $(,)? ) => {{
         use std::collections::HashMap;
         use std::sync::Arc;
-        use $crate::middlewares::validator::to_validator;
-        use $crate::types::Executor;
+        use $crate::http::middlewares::validator::to_validator;
+        use $crate::http::types::Executor;
 
         let mut dsl_map: HashMap<String, String> = HashMap::new();
 

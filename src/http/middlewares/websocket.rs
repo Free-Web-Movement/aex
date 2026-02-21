@@ -4,13 +4,11 @@ use tokio::{
     net::tcp::{ OwnedReadHalf, OwnedWriteHalf },
     sync::Mutex,
 };
-use crate::{
-    protocol::{ header::HeaderKey, method::HttpMethod },
-    types::{ BinaryHandler, Executor, HTTPContext, TextHandler },
-};
+use crate::http::{protocol::{header::HeaderKey, method::HttpMethod}, types::{ BinaryHandler, Executor, HTTPContext, TextHandler }};
 use sha1::{ Sha1, Digest };
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
+
 
 pub struct WebSocket {
     pub on_text: Option<TextHandler>,
@@ -339,11 +337,11 @@ impl WebSocket {
 
 #[cfg(test)]
 mod tests {
+    use crate::http::req::Request;
+    use crate::http::res::Response;
+    use crate::http::types::TypeMap;
+
     use super::*;
-    use crate::protocol::header::HeaderKey;
-    use crate::req::Request;
-    use crate::res::Response;
-    use crate::types::{ HTTPContext, TypeMap };
     use tokio::net::{ TcpListener, TcpStream };
     use tokio::io::{ BufReader, BufWriter, AsyncReadExt, AsyncWriteExt };
     use std::collections::HashMap;
@@ -700,16 +698,16 @@ mod tests {
     #[cfg(test)]
     mod websocket_router_test {
         use super::*;
-        use crate::types::{ HTTPContext };
-        use crate::req::Request;
-        use crate::res::Response;
+        use crate::http::types::{ HTTPContext };
+        use crate::http::req::Request;
+        use crate::http::res::Response;
         use tokio::net::{ TcpListener, TcpStream };
         use tokio::io::{ BufReader, BufWriter, AsyncReadExt, AsyncWriteExt };
         use std::sync::Arc;
         use futures::FutureExt;
 
         /// 假设你的 Router 支持 NodeType 和 insert 方法
-        use crate::router::{ NodeType, Router, handle_request };
+        use crate::http::router::{ NodeType, Router, handle_request };
 
         /// TCP server setup
         async fn setup_server() -> (TcpListener, u16) {

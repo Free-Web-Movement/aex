@@ -1,10 +1,10 @@
 use std::{collections::HashMap, sync::Arc};
 use zz_validator::{
     ast::{FieldRule, FieldType, Value},
-    parser::Parser,
-    validator::validate_object,
+    parser::Parser, validator::validate_object,
 };
-use crate::{exe, protocol::status::StatusCode, types::Executor};
+
+use crate::{exe, http::{protocol::status::StatusCode, types::Executor}};
 
 /// 核心优化点 1：基于引用的转换，避免不必要的 String 拷贝
 /// 使用 eq_ignore_ascii_case 替代 to_lowercase() 减少内存分配

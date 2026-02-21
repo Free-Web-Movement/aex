@@ -1,7 +1,7 @@
 use std::{ collections::HashMap, path::Path };
 use tokio::{ fs::File, io::{ AsyncReadExt, AsyncWriteExt, BufWriter } };
-use crate::protocol::{ header::HeaderKey, media_type::MediaType };
-use crate::protocol::status::StatusCode;
+use crate::http::protocol::{ header::HeaderKey, media_type::MediaType };
+use crate::http::protocol::status::StatusCode;
 use serde::Serialize;
 use tokio::net::tcp::OwnedWriteHalf;
 

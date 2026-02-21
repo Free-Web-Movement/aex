@@ -1,8 +1,8 @@
 use std::{ collections::HashMap, sync::Arc };
 use tokio::io::AsyncReadExt;
 
-use crate::{ params::Params, types::{ Executor, HTTPContext } };
-use crate::protocol::media_type::MediaType;
+use crate::{ http::params::Params, http::types::{ Executor, HTTPContext } };
+use crate::http::protocol::media_type::MediaType;
 
 /// 节点类型
 #[derive(Clone, Debug)]
@@ -200,10 +200,10 @@ mod tests {
 
     use crate::{
         exe,
-        req::Request,
-        res::Response,
-        router::{ NodeType, Router, handle_request },
-        types::{ HTTPContext, TypeMap, to_executor },
+        http::req::Request,
+        http::res::Response,
+        http::router::{ NodeType, Router, handle_request },
+        http::types::{ HTTPContext, TypeMap, to_executor },
         v,
     };
 
@@ -420,7 +420,7 @@ mod tests {
             let req = Request::new(reader, peer_addr, "").await;
             let res = Response::new(writer);
             let mut ctx = HTTPContext {
-                req: req.expect("REASON"),
+                req: req.expect("Not a valid HTTP request!"),
                 res,
                 global: Arc::new(Mutex::new(TypeMap::new())),
                 local: TypeMap::new(),
@@ -568,10 +568,10 @@ mod tests {
         use tokio::io::{ AsyncReadExt, AsyncWriteExt, BufReader, BufWriter };
         use tokio::sync::Mutex;
         use std::sync::Arc;
-        use crate::types::{ HTTPContext, TypeMap };
-        use crate::req::Request;
-        use crate::res::Response;
-        use crate::router::{ Router, NodeType, handle_request };
+        use crate::http::types::{ HTTPContext, TypeMap };
+        use crate::http::req::Request;
+        use crate::http::res::Response;
+        use crate::http::router::{ Router, NodeType, handle_request };
 
         // ----------------------
         // 1️⃣ 构建 Router

@@ -8,12 +8,12 @@ use std::time::Duration;
 
 use anyhow::{ Context, bail };
 
-use crate::params::Params;
-use crate::protocol::content_type::ContentType;
-use crate::protocol::header::HeaderKey;
-use crate::protocol::method::HttpMethod;
-use crate::protocol::media_type::MediaType;
-use crate::middlewares::websocket::WebSocket;
+use crate::http::middlewares::websocket::WebSocket;
+use crate::http::params::Params;
+use crate::http::protocol::content_type::ContentType;
+use crate::http::protocol::header::HeaderKey;
+use crate::http::protocol::method::HttpMethod;
+use crate::http::protocol::media_type::MediaType;
 
 static MAX_CAPACITY: i32 = 1024;
 static TIME_LIMIT: i32 = 500;
