@@ -5,10 +5,11 @@ use std::{
 };
 
 use dashmap::DashMap;
-use tokio::net::tcp::OwnedWriteHalf;
+use tokio::{net::tcp::OwnedWriteHalf, sync::{Mutex, RwLock}};
 use tokio_util::sync::CancellationToken;
 
 use crate::connection::{
+    node::Node as NodeIp,
     status::ConnectionStatus,
     types::{BiDirectionalConnections, ConnectionEntry, NetworkScope},
 };
@@ -18,6 +19,7 @@ pub struct ConnectionManager {
     pub(crate) cancel_token: CancellationToken,
     /// 入站连接池：其他节点连入 (Inbound)
     pub(crate) connections: DashMap<(IpAddr, NetworkScope), BiDirectionalConnections>,
+    // pub(crate) index_by_id: DashMap<Vec<u8>, SocketAddr>,
 }
 
 impl ConnectionManager {
@@ -25,29 +27,6 @@ impl ConnectionManager {
         Self {
             cancel_token: CancellationToken::new(),
             connections: DashMap::new(),
-        }
-    }
-
-    pub fn get_scope(ip: IpAddr) -> NetworkScope {
-        let is_internal = match ip {
-            IpAddr::V4(v4) => {
-                // IPv4: 检查回环、私有地址 (RFC1918)、链路本地 (169.254.x.x)
-                v4.is_loopback() || v4.is_private() || v4.is_link_local()
-            }
-            IpAddr::V6(v6) => {
-                // IPv6: 检查回环 (::1)、链路本地 (fe80::/10)
-                // 注意：v6.is_private() 目前在稳定版 Rust 中可能不可用
-                // 我们通过检查是否是 Unique Local Address (fc00::/7) 来判定私网
-                v6.is_loopback()
-                    || v6.is_unicast_link_local()
-                    || (v6.segments()[0] & 0xfe00) == 0xfc00
-            }
-        };
-
-        if is_internal {
-            NetworkScope::Intranet
-        } else {
-            NetworkScope::Extranet
         }
     }
 
@@ -63,7 +42,7 @@ impl ConnectionManager {
             return;
         }
 
-        let scope = Self::get_scope(ip);
+        let scope = NodeIp::get_scope(ip);
         let key = (ip, scope);
 
         // 获取当前时间戳
@@ -76,7 +55,8 @@ impl ConnectionManager {
 
         let entry = Arc::new(ConnectionEntry {
             addr,
-            writer: Arc::new(tokio::sync::Mutex::new(writer)),
+            node: Arc::new(RwLock::new(None)), // 初始时没有节点信息，握手完成后会填充
+            writer: Arc::new(Mutex::new(writer)),
             abort_handle: handle,
             connected_at: now, // 💡 记录建立时间
             cancel_token: child_token,
@@ -97,7 +77,7 @@ impl ConnectionManager {
 
     pub fn remove(&self, addr: SocketAddr, is_client: bool) {
         let ip = addr.ip();
-        let scope = Self::get_scope(ip);
+        let scope = NodeIp::get_scope(ip);
 
         if let Some(bi_conn) = self.connections.get(&(ip, scope)) {
             if is_client {
@@ -119,7 +99,7 @@ impl ConnectionManager {
     /// 返回值表示是否成功找到了该连接并执行了取消操作
     pub fn cancel_by_addr(&self, addr: SocketAddr) -> bool {
         let ip = addr.ip();
-        let scope = Self::get_scope(ip);
+        let scope = NodeIp::get_scope(ip);
         let key = (ip, scope);
 
         // 1. 定位到 IP 桶
@@ -156,7 +136,7 @@ impl ConnectionManager {
 
     /// 取消该 IP 下的所有连接（无论是哪个端口，无论是入站还是出站）
     pub fn cancel_all_by_ip(&self, ip: IpAddr) {
-        let scope = Self::get_scope(ip);
+        let scope = NodeIp::get_scope(ip);
         if let Some((_, bi_conn)) = self.connections.remove(&(ip, scope)) {
             // 遍历清理所有入站
             for r in bi_conn.clients {
@@ -299,7 +279,7 @@ impl ConnectionManager {
     /// 优雅地取消单个连接：先发信号，让任务自己处理后事
     pub fn cancel_gracefully(&self, addr: SocketAddr) -> bool {
         let ip = addr.ip();
-        let scope = Self::get_scope(ip);
+        let scope = NodeIp::get_scope(ip);
 
         if let Some(bi_conn) = self.connections.get(&(ip, scope)) {
             // 尝试在 clients 或 servers 中找到 entry

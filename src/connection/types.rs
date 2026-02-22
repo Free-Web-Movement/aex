@@ -1,12 +1,15 @@
+use crate::connection::node::Node;
 use dashmap::DashMap;
-use tokio_util::sync::CancellationToken;
+use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::net::tcp::OwnedWriteHalf;
+use tokio_util::sync::CancellationToken;
+use tokio::sync::{Mutex, RwLock};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum NetworkScope {
     Intranet, // 内网 (RFC1918, IPv6 LLA/ULA)
     Extranet, // 外网 (公网 IP)
@@ -14,6 +17,9 @@ pub enum NetworkScope {
 
 #[derive(Debug, Clone)]
 pub struct ConnectionEntry {
+    /// 💡 新增：节点的静态信息（ID, Version, 声明的 IPs 等）
+    /// 这个数据在握手成功后填入，并在连接生命周期内保持不变
+    pub node: Arc<RwLock<Option<Node>>>,
     pub addr: SocketAddr,
     pub writer: Arc<tokio::sync::Mutex<OwnedWriteHalf>>,
     pub abort_handle: tokio::task::AbortHandle,
@@ -24,6 +30,20 @@ pub struct ConnectionEntry {
 }
 
 impl ConnectionEntry {
+
+    pub fn new_empty_node(addr: SocketAddr, writer: OwnedWriteHalf, handle: tokio::task::AbortHandle, cancel_token: CancellationToken) -> Self {
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+        Self {
+            node: Arc::new(RwLock::new(None)),
+            addr,
+            writer: Arc::new(Mutex::new(writer)),
+            abort_handle: handle,
+            cancel_token,
+            connected_at: now,
+            last_seen: Arc::new(AtomicU64::new(now)),
+        }
+    }
+
     pub fn uptime_secs(&self) -> u64 {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -51,8 +71,20 @@ impl ConnectionEntry {
 
         false
     }
-}
 
+    /// 动态更新节点信息（例如收到对方的地址交换报文或心跳包时）
+    pub async fn update_node(&self, new_node: Node) {
+        let mut lock = self.node.write().await;
+        *lock = Some(new_node);
+    }
+
+    /// 尝试获取当前的节点 ID
+    pub async fn get_peer_id(&self) -> Option<Vec<u8>> {
+        let lock = self.node.read().await;
+        lock.as_ref().map(|n| n.id.clone())
+    }
+
+}
 
 impl Drop for ConnectionEntry {
     fn drop(&mut self) {
