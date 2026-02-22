@@ -28,6 +28,9 @@ zz-validator = "0.1.0"
 async-trait = "0.1.89"
 bytes = "1.11.1"
 bincode = "2.0.0-rc.3"
+tokio-util = "0.7.18"
+chrono = "0.4.43"
+dashmap = "6.1.0"
 
 [profile.release]
 opt-level = "z"
