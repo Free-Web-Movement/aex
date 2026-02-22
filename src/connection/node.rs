@@ -1,17 +1,20 @@
 use std::{
-    net::{IpAddr, Ipv4Addr, Ipv6Addr},
-    time::{SystemTime, UNIX_EPOCH},
+    collections::HashSet,
+    net::{ IpAddr, Ipv4Addr, Ipv6Addr },
+    time::{ SystemTime, UNIX_EPOCH },
 };
 
-use crate::connection::types::NetworkScope;
-use serde::{Deserialize, Serialize};
+use crate::connection::{ protocol::Protocol, types::NetworkScope };
+use serde::{ Deserialize, Serialize };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Node {
-    pub id: Vec<u8>,     // 节点 ID，通常是公钥的哈希
-    pub version: u32,    // 协议版本
+    pub id: Vec<u8>, // 节点 ID，通常是公钥的哈希
+    pub version: u32, // 协议版本
     pub started_at: u64, // 启动时间戳
-    pub port: u16,       // 监听端口,
+    pub port: u16, // 监听端口,
+    /// 💡 支持的协议列表，例如: ["tcp", "udp", "http", "ws"]
+    pub protocols: HashSet<Protocol>,
     pub(crate) ips: Vec<(NetworkScope, IpAddr)>,
 }
 
@@ -22,12 +25,26 @@ impl Node {
             id,
             version,
             port,
-            started_at: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs(),
+            started_at: SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs(),
             ips,
+            protocols: Self::default_protocols(),
         }
+    }
+
+    /// 默认支持的核心协议
+    pub fn default_protocols() -> HashSet<Protocol> {
+        let mut set = HashSet::new();
+        set.insert(Protocol::Tcp);
+        set.insert(Protocol::Udp);
+        set.insert(Protocol::Http);
+        set.insert(Protocol::Ws);
+        set
+    }
+
+    /// 允许在构造时指定特定协议
+    pub fn with_protocols(mut self, protocols: HashSet<Protocol>) -> Self {
+        self.protocols = protocols;
+        self
     }
 
     /// 自动化构造：从系统环境创建完整节点信息
@@ -36,11 +53,9 @@ impl Node {
             id,
             version,
             port,
-            started_at: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs(),
+            started_at: SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs(),
             ips: Vec::new(),
+            protocols: Self::default_protocols(),
         };
 
         // 探测本地网卡
@@ -68,9 +83,9 @@ impl Node {
                 // IPv6: 检查回环 (::1)、链路本地 (fe80::/10)
                 // 注意：v6.is_private() 目前在稳定版 Rust 中可能不可用
                 // 我们通过检查是否是 Unique Local Address (fc00::/7) 来判定私网
-                v6.is_loopback()
-                    || v6.is_unicast_link_local()
-                    || (v6.segments()[0] & 0xfe00) == 0xfc00
+                v6.is_loopback() ||
+                    v6.is_unicast_link_local() ||
+                    (v6.segments()[0] & 0xfe00) == 0xfc00
             }
         };
 
@@ -82,7 +97,10 @@ impl Node {
     }
 
     pub fn get_all(&self) -> Vec<IpAddr> {
-        self.ips.iter().map(|(_, addr)| *addr).collect()
+        self.ips
+            .iter()
+            .map(|(_, addr)| *addr)
+            .collect()
     }
 
     /// 根据 Scope 获取地址，可选匹配特定的地址族 (v4 或 v6)
@@ -124,16 +142,13 @@ impl Node {
     }
 
     pub fn get_extranet_ips_v4(&self) -> Vec<IpAddr> {
-        self.get_ips(
-            NetworkScope::Extranet,
-            Some(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0))),
-        )
+        self.get_ips(NetworkScope::Extranet, Some(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0))))
     }
 
     pub fn get_extranet_ips_v6(&self) -> Vec<IpAddr> {
         self.get_ips(
             NetworkScope::Extranet,
-            Some(IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 0))),
+            Some(IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 0)))
         )
     }
 
@@ -142,16 +157,13 @@ impl Node {
     }
 
     pub fn get_intranet_v4(&self) -> Vec<IpAddr> {
-        self.get_ips(
-            NetworkScope::Intranet,
-            Some(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0))),
-        )
+        self.get_ips(NetworkScope::Intranet, Some(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0))))
     }
 
     pub fn get_intranet_v6(&self) -> Vec<IpAddr> {
         self.get_ips(
             NetworkScope::Intranet,
-            Some(IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 0))),
+            Some(IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 0)))
         )
     }
 
