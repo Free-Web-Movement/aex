@@ -1,5 +1,9 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
+use aex::connection::context::{HttpMetadata, TypeMapExt};
+use aex::http::protocol::header::HeaderKey;
+use aex::http::protocol::media_type::{MediaType, SubMediaType};
+use aex::http::protocol::status::StatusCode;
 use aex::{ get, route };
 use aex::tcp::types::{ RawCodec, Command };
 use aex::server::AexServer;
@@ -19,7 +23,10 @@ async fn main() -> anyhow::Result<()> {
         http_router,
         get!("/", |ctx: &mut HTTPContext| {
             Box::pin(async move {
-                ctx.res.body.push("Hello world!".to_string());
+                let meta = &mut ctx.meta_out;
+                meta.status = StatusCode::Ok;
+                meta.headers.insert(HeaderKey::ContentType, SubMediaType::Plain.as_str().to_string());
+                meta.body = "Hello world!".to_string().into_bytes().to_vec();
                 // false = 不继续 middleware（如果你还保留这个语义）
                 true
             }).boxed()

@@ -1,6 +1,6 @@
 use std::{
     collections::HashSet,
-    net::{ IpAddr, Ipv4Addr, Ipv6Addr },
+    net::{ IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr },
     time::{ SystemTime, UNIX_EPOCH },
 };
 
@@ -29,6 +29,26 @@ impl Node {
             ips,
             protocols: Self::default_protocols(),
         }
+    }
+
+    pub fn from_addr(addr: SocketAddr, version: Option<u32>, id: Option<Vec<u8>>) -> Self {
+        let ip = addr.ip();
+        let port = addr.port();
+        
+        // 1. 自动计算 NetworkScope 并生成元组 Vec
+        let scope = crate::connection::node::NetworkScope::from_ip(&ip);
+        let ips = vec![(scope, ip)];
+
+        // 2. 生成默认 ID (示例：使用随机或固定长度 ID)
+        // 在实际应用中，这里可能需要持久化存储或硬件指纹
+        let id = id.unwrap_or(vec![0u8; 32]); 
+
+        Self::new(
+            port,
+            id,
+            version.unwrap_or(1),
+            ips
+        )
     }
 
     /// 默认支持的核心协议
@@ -66,34 +86,11 @@ impl Node {
                     continue;
                 }
 
-                let scope = Self::get_scope(ip);
+                let scope = NetworkScope::from_ip(&ip);
                 node.ips.push((scope, ip));
             }
         }
         node
-    }
-
-    pub fn get_scope(ip: IpAddr) -> NetworkScope {
-        let is_internal = match ip {
-            IpAddr::V4(v4) => {
-                // IPv4: 检查回环、私有地址 (RFC1918)、链路本地 (169.254.x.x)
-                v4.is_loopback() || v4.is_private() || v4.is_link_local()
-            }
-            IpAddr::V6(v6) => {
-                // IPv6: 检查回环 (::1)、链路本地 (fe80::/10)
-                // 注意：v6.is_private() 目前在稳定版 Rust 中可能不可用
-                // 我们通过检查是否是 Unique Local Address (fc00::/7) 来判定私网
-                v6.is_loopback() ||
-                    v6.is_unicast_link_local() ||
-                    (v6.segments()[0] & 0xfe00) == 0xfc00
-            }
-        };
-
-        if is_internal {
-            NetworkScope::Intranet
-        } else {
-            NetworkScope::Extranet
-        }
     }
 
     pub fn get_all(&self) -> Vec<IpAddr> {
@@ -129,13 +126,6 @@ impl Node {
             .map(|(_, addr)| *addr)
             .collect()
     }
-
-    // fn get_ips(&self, scope: NetworkScope) -> Vec<SocketAddr> {
-    //     self.ips
-    //         .iter()
-    //         .filter_map(|(s, addr)| if *s == scope { Some(*addr) } else { None })
-    //         .collect()
-    // }
 
     pub fn get_extranet_ips(&self) -> Vec<IpAddr> {
         self.get_ips(NetworkScope::Extranet, None)

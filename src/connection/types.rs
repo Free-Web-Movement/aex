@@ -15,6 +15,28 @@ pub enum NetworkScope {
     Extranet, // 外网 (公网 IP)
 }
 
+
+impl NetworkScope {
+    pub fn from_ip(ip: &std::net::IpAddr) -> Self {
+        match ip {
+            std::net::IpAddr::V4(v4) => {
+                if v4.is_loopback() || v4.is_private() || v4.is_link_local() {
+                    NetworkScope::Intranet
+                } else {
+                    NetworkScope::Extranet
+                }
+            }
+            std::net::IpAddr::V6(v6) => {
+                if v6.is_loopback() || v6.is_unicast_link_local() || (v6.segments()[0] & 0xfe00) == 0xfc00 {
+                    NetworkScope::Intranet
+                } else {
+                    NetworkScope::Extranet
+                }
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ConnectionEntry {
     /// 💡 新增：节点的静态信息（ID, Version, 声明的 IPs 等）

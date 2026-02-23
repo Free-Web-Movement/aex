@@ -1,17 +1,20 @@
 #[cfg(test)]
 mod aex_tests {
-    use super::*;
-    use std::net::SocketAddr;
-    use aex::{get, route};
+    use aex::connection::context::HTTPContext;
+    use aex::http::protocol::header::HeaderKey;
+    use aex::http::protocol::status::StatusCode;
     use aex::server::AexServer;
     use aex::tcp::types::{Codec, Command, Frame};
-    use futures::{FutureExt, future::BoxFuture};
+    use aex::{get, route};
+    use futures::FutureExt;
+    use std::net::SocketAddr;
+    use std::sync::Arc;
+    use tokio::io::AsyncWriteExt;
     use tokio::net::{TcpListener, TcpStream, UdpSocket};
-    use tokio::io::{AsyncWriteExt, AsyncReadExt};
-    use tokio::time::{sleep, Duration, timeout};
+    use tokio::time::{Duration, sleep, timeout};
 
     // 确保引入了 bincode 的宏
-    use bincode::{Encode, Decode};
+    use bincode::{Decode, Encode};
 
     use aex::http::router::{NodeType, Router as HttpRouter};
     use aex::tcp::router::Router as TcpRouter;
@@ -66,21 +69,34 @@ mod aex_tests {
 
             // 2. 注册 HTTP 路由
             let mut hr = HttpRouter::new(NodeType::Static("root".into()));
-            route!(
-                hr,
-                get!("/", |ctx: &mut HTTPContext| {
+
+            hr.insert(
+                "/",
+                Some("GET"),
+                Arc::new(|ctx: &mut HTTPContext| {
                     Box::pin(async move {
-                        ctx.res.body.push("Hello world!".to_string());
+                        let meta = &mut ctx.meta_out;
+                        meta.status = StatusCode::Ok;
+                        meta.headers
+                            .insert(HeaderKey::ContentType, "text/plain".to_string());
+                        meta.body = b"Hello world!".to_vec();
+
+                        println!("HTTP handler executed, meta prepared: {:?}", meta);
+
+                        println!(
+                            "Preparing to send response with local context: {:?}",
+                            ctx.meta_out
+                        );
                         true
-                    }).boxed()
-                })
+                    })
+                    .boxed()
+                }),
+                None,
             );
 
             // 3. 注册 TCP 路由 (ID 10)
             let mut tr = TcpRouter::new(|c: &MockProtocol| c.0[0] as u32);
-            tr.on(10, |_, _, _| async move {
-                Ok(true) 
-            });
+            tr.on(10, |_, _, _| async move { Ok(true) });
 
             // 4. 注册 UDP 路由 (ID 20)
             let mut ur = UdpRouter::new(|c: &MockProtocol| c.0[0] as u32);
@@ -103,19 +119,23 @@ mod aex_tests {
                     eprintln!("Server exit with error: {}", e);
                 }
             });
-            
+
             // 等待服务器就绪
             sleep(Duration::from_millis(300)).await;
 
             // --- 分支测试 A: HTTP 嗅探与响应 ---
             println!("Testing HTTP...");
-            let http_res = reqwest::get(format!("http://{}", actual_addr)).await.expect("HTTP request failed");
+            let http_res = reqwest::get(format!("http://{}", actual_addr))
+                .await
+                .expect("HTTP request failed");
             assert_eq!(http_res.status(), 200);
             assert_eq!(http_res.text().await.unwrap(), "Hello world!");
 
             // --- 分支测试 B: TCP 正常路由 ---
             println!("Testing TCP Normal...");
-            let mut tcp_conn = TcpStream::connect(actual_addr).await.expect("TCP connect failed");
+            let mut tcp_conn = TcpStream::connect(actual_addr)
+                .await
+                .expect("TCP connect failed");
             tcp_conn.write_all(&[10, 0, 0, 1]).await.unwrap(); // 发送 ID 10
             sleep(Duration::from_millis(100)).await;
 
@@ -128,7 +148,10 @@ mod aex_tests {
             // --- 分支测试 D: UDP 正常路由与回包 ---
             println!("Testing UDP...");
             let udp_client = UdpSocket::bind("127.0.0.1:0").await.unwrap();
-            udp_client.send_to(&[20, 0, 0, 2], actual_addr).await.unwrap(); // 发送 ID 20
+            udp_client
+                .send_to(&[20, 0, 0, 2], actual_addr)
+                .await
+                .unwrap(); // 发送 ID 20
             let mut buf = [0u8; 1024];
             let (len, _) = timeout(Duration::from_secs(2), udp_client.recv_from(&mut buf))
                 .await
@@ -138,11 +161,15 @@ mod aex_tests {
 
             // --- 分支测试 E: UDP 未匹配路由 ---
             println!("Testing UDP Mismatch...");
-            udp_client.send_to(&[99, 0, 0, 0], actual_addr).await.unwrap(); // ID 99
+            udp_client
+                .send_to(&[99, 0, 0, 0], actual_addr)
+                .await
+                .unwrap(); // ID 99
             sleep(Duration::from_millis(100)).await;
 
             println!("✅ 所有覆盖率分支已跑通，服务器运行平稳。");
-        }).await;
+        })
+        .await;
 
         if test_result.is_err() {
             panic!("Test timed out! Possible deadlock or server not responding.");

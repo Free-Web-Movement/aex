@@ -8,7 +8,8 @@ macro_rules! make_method_macro {
     ($method_str:expr, $path:expr, $handler:expr $(, $middleware:expr)?) => {
         {
         use std::sync::Arc;
-        use $crate::http::types::{HTTPContext, Executor};
+        use $crate::connection::context::HTTPContext;
+        use $crate::http::types::{Executor};
 
         let handler_arc: Arc<Executor> = Arc::new($handler);
 
@@ -104,8 +105,7 @@ macro_rules! all {
 // -----------------------------
 #[macro_export]
 macro_rules! route {
-    ($root:expr, $method_macro:expr) => {
-        {
+    ($root:expr, $method_macro:expr) => {{
         let (method, path, handler, middleware) = $method_macro;
         $root.insert(
             path,
@@ -113,17 +113,17 @@ macro_rules! route {
             handler,
             middleware,
         );
-        }
-    };
+    }};
 }
 
 #[macro_export]
 macro_rules! exe {
     // 带有 pre 处理的分支
     (|$ctx:ident, $data:ident| $body:block, |$pre_ctx:ident| $pre:block) => {{
-        use std::sync::Arc;
         use futures::future::FutureExt;
-        use $crate::http::types::{HTTPContext, Executor};
+        use std::sync::Arc;
+        use $crate::connection::context::HTTPContext;
+        use $crate::http::types::Executor;
 
         // 显式指定闭包的生命周期约束
         let executor: Arc<Executor> = Arc::new(move |$ctx: &mut HTTPContext| {
@@ -145,17 +145,16 @@ macro_rules! exe {
 
     // 仅 body 的分支
     (|$ctx:ident| $body:block) => {{
-        use std::sync::Arc;
         use futures::future::FutureExt;
-        use $crate::http::types::{HTTPContext, Executor};
+        use std::sync::Arc;
+        use $crate::connection::context::HTTPContext;
+        use $crate::http::types::Executor;
 
-        let executor: Arc<Executor> = Arc::new(move |$ctx: &mut HTTPContext| {
-            async move { $body }.boxed()
-        });
+        let executor: Arc<Executor> =
+            Arc::new(move |$ctx: &mut HTTPContext| async move { $body }.boxed());
         executor
     }};
 }
-
 
 #[macro_export]
 macro_rules! validator {

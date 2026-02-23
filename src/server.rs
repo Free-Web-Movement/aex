@@ -1,18 +1,19 @@
-use bytes::{ BytesMut, Buf };
 use tokio::net::UdpSocket;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::io::{ AsyncReadExt, BufReader, BufWriter };
 use tokio::net::{ TcpListener, tcp::{ OwnedReadHalf, OwnedWriteHalf } };
 
-use crate::http::req::Request;
-use crate::http::res::Response;
+use crate::http::protocol::method::HttpMethod;
 use crate::http::router::{ Router as HttpRouter, handle_request };
-use crate::http::types::{ HTTPContext, TypeMap };
 use crate::tcp::router::Router as TcpRouter;
 use crate::udp::router::Router as UdpRouter;
 use crate::tcp::types::{ Codec, Command, Frame, RawCodec }; // 确保引入了 Command
 use tokio::sync::Mutex;
+use crate::connection::context::{GlobalContext, HTTPContext, HttpMetadata, TypeMapExt};
+
+
+pub const SERVER_NAME: &str = "Aex/1.0";
 
 /// AexServer: 核心多协议服务器
 pub struct AexServer<F, C, K = u32>
@@ -24,6 +25,7 @@ pub struct AexServer<F, C, K = u32>
     pub http_router: Option<Arc<HttpRouter>>,
     pub tcp_router: Option<Arc<TcpRouter<F, C, K>>>,
     pub udp_router: Option<Arc<UdpRouter<F, C, K>>>,
+    pub globals: Arc<Mutex<GlobalContext>>,
     _phantom: std::marker::PhantomData<(F, C)>, // 修正 PhantomData 包含 C
 }
 
@@ -39,6 +41,7 @@ impl<F, C, K> AexServer<F, C, K>
             http_router: None,
             tcp_router: None,
             udp_router: None,
+            globals: Arc::new(Mutex::new(GlobalContext::new(addr))),
             _phantom: std::marker::PhantomData,
         }
     }
@@ -90,7 +93,7 @@ impl<F, C, K> AexServer<F, C, K>
 
                 // 协议嗅探：HTTP
                 if let Some(hr) = &server_ctx.http_router {
-                    if Request::is_http_connection(&mut reader).await.unwrap_or_default() {
+                    if HttpMethod::is_http_connection(&mut reader).await.unwrap_or_default() {
                         let reader = BufReader::new(reader);
                         let writer = BufWriter::new(writer);
                         return Self::handle_http(hr.clone(), reader, writer, peer_addr).await;
@@ -126,6 +129,7 @@ impl<F, C, K> AexServer<F, C, K>
             http_router: self.http_router.clone(),
             tcp_router: self.tcp_router.clone(),
             udp_router: self.udp_router.clone(),
+            globals: self.globals.clone(),
             _phantom: std::marker::PhantomData,
         }
     }
@@ -136,17 +140,14 @@ impl<F, C, K> AexServer<F, C, K>
         writer: BufWriter<OwnedWriteHalf>,
         peer_addr: SocketAddr
     ) -> anyhow::Result<()> {
-        let req = Request::new(reader, peer_addr, "").await?;
-        let res = Response::new(writer);
-        let mut ctx = HTTPContext {
-            req,
-            res,
-            global: Arc::new(Mutex::new(TypeMap::new())),
-            local: TypeMap::new(),
-        };
+        // let req = Request::new(reader, peer_addr, "").await?;
 
+
+        // let res = Response::new(writer);
+        let mut ctx = HTTPContext::new(reader, writer, Arc::new(GlobalContext::new(peer_addr)), peer_addr);
+        ctx.req().await.parse_to_local().await?;
         if handle_request(&router, &mut ctx).await {
-            let _ = ctx.res.send().await;
+            let _ = ctx.res().send_response().await;
         }
         Ok(())
     }

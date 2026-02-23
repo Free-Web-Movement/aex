@@ -42,7 +42,7 @@ impl ConnectionManager {
             return;
         }
 
-        let scope = NodeIp::get_scope(ip);
+        let scope = NetworkScope::from_ip(&ip);
         let key = (ip, scope);
 
         // 获取当前时间戳
@@ -77,7 +77,7 @@ impl ConnectionManager {
 
     pub fn remove(&self, addr: SocketAddr, is_client: bool) {
         let ip = addr.ip();
-        let scope = NodeIp::get_scope(ip);
+        let scope = NetworkScope::from_ip(&ip);
 
         if let Some(bi_conn) = self.connections.get(&(ip, scope)) {
             if is_client {
@@ -99,7 +99,7 @@ impl ConnectionManager {
     /// 返回值表示是否成功找到了该连接并执行了取消操作
     pub fn cancel_by_addr(&self, addr: SocketAddr) -> bool {
         let ip = addr.ip();
-        let scope = NodeIp::get_scope(ip);
+        let scope = NetworkScope::from_ip(&ip);
         let key = (ip, scope);
 
         // 1. 定位到 IP 桶
@@ -136,7 +136,7 @@ impl ConnectionManager {
 
     /// 取消该 IP 下的所有连接（无论是哪个端口，无论是入站还是出站）
     pub fn cancel_all_by_ip(&self, ip: IpAddr) {
-        let scope = NodeIp::get_scope(ip);
+        let scope = NetworkScope::from_ip(&ip);
         if let Some((_, bi_conn)) = self.connections.remove(&(ip, scope)) {
             // 遍历清理所有入站
             for r in bi_conn.clients {
@@ -279,7 +279,7 @@ impl ConnectionManager {
     /// 优雅地取消单个连接：先发信号，让任务自己处理后事
     pub fn cancel_gracefully(&self, addr: SocketAddr) -> bool {
         let ip = addr.ip();
-        let scope = NodeIp::get_scope(ip);
+        let scope = NetworkScope::from_ip(&ip);
 
         if let Some(bi_conn) = self.connections.get(&(ip, scope)) {
             // 尝试在 clients 或 servers 中找到 entry

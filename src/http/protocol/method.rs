@@ -1,3 +1,7 @@
+use tokio::net::tcp::OwnedReadHalf;
+
+use crate::connection::req::MAX_CAPACITY;
+
 #[repr(u8)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum HttpMethod {
@@ -120,15 +124,25 @@ impl HttpMethod {
     pub fn is_prefixed_bytes(buf: &[u8]) -> bool {
         for &method in HTTP_METHODS.iter() {
             let m = method.as_bytes();
-            if
-                buf.len() > m.len() &&
-                buf[m.len()] == b' ' &&
-                buf[..m.len()].eq_ignore_ascii_case(m)
+            if buf.len() > m.len() && buf[m.len()] == b' ' && buf[..m.len()].eq_ignore_ascii_case(m)
             {
                 return true;
             }
         }
         false
+    }
+
+    pub async fn is_http_connection(reader: &mut OwnedReadHalf) -> anyhow::Result<bool> {
+        let mut buf = [0u8; MAX_CAPACITY as usize];
+
+        let n = reader.peek(&mut buf).await?;
+
+        if n == 0 {
+            return Ok(false);
+        }
+
+        let s = std::str::from_utf8(&buf[..n]).unwrap_or("");
+        Ok(HttpMethod::is_prefixed(s))
     }
 }
 
@@ -231,7 +245,10 @@ mod tests {
         // --- 所有已注册方法都应该识别 ---
         for &method in HTTP_METHODS.iter() {
             let req = format!("{method} /");
-            assert!(HttpMethod::is_prefixed(&req), "method {method} should be recognized");
+            assert!(
+                HttpMethod::is_prefixed(&req),
+                "method {method} should be recognized"
+            );
         }
 
         // --- 非 HTTP ---
