@@ -38,9 +38,4 @@ impl Params {
     pub fn set_form(&mut self, form: &str) {
         self.form = Some(Self::parse_pairs(form));
     }
-
-    /// 解析 form body，支持数组参数
-    fn parse_form(form: &str) -> HashMap<String, Vec<String>> {
-        Self::parse_pairs(form)
-    }
 }

@@ -1,24 +1,23 @@
 use std::{
-    net::{IpAddr, SocketAddr},
-    sync::{Arc, atomic::AtomicU64},
-    time::{SystemTime, UNIX_EPOCH},
+    net::{ IpAddr, SocketAddr },
+    sync::{ Arc, atomic::AtomicU64 },
+    time::{ SystemTime, UNIX_EPOCH },
 };
 
 use dashmap::DashMap;
-use tokio::{net::tcp::OwnedWriteHalf, sync::{Mutex, RwLock}};
+use tokio::{ net::tcp::OwnedWriteHalf, sync::{ Mutex, RwLock } };
 use tokio_util::sync::CancellationToken;
 
 use crate::connection::{
-    node::Node as NodeIp,
     status::ConnectionStatus,
-    types::{BiDirectionalConnections, ConnectionEntry, NetworkScope},
+    types::{ BiDirectionalConnections, ConnectionEntry, NetworkScope },
 };
 
 pub struct ConnectionManager {
     // 用于通知所有连接优雅退出的信号
-    pub(crate) cancel_token: CancellationToken,
+    pub cancel_token: CancellationToken,
     /// 入站连接池：其他节点连入 (Inbound)
-    pub(crate) connections: DashMap<(IpAddr, NetworkScope), BiDirectionalConnections>,
+    pub connections: DashMap<(IpAddr, NetworkScope), BiDirectionalConnections>,
     // pub(crate) index_by_id: DashMap<Vec<u8>, SocketAddr>,
 }
 
@@ -35,7 +34,7 @@ impl ConnectionManager {
         addr: SocketAddr,
         writer: OwnedWriteHalf,
         handle: tokio::task::AbortHandle,
-        is_client: bool,
+        is_client: bool
     ) {
         let ip = addr.ip();
         if ip.is_loopback() {
@@ -46,10 +45,7 @@ impl ConnectionManager {
         let key = (ip, scope);
 
         // 获取当前时间戳
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
 
         let child_token = self.cancel_token.child_token();
 
@@ -64,10 +60,7 @@ impl ConnectionManager {
         });
 
         // DashMap 写入逻辑
-        let bi_conn = self
-            .connections
-            .entry(key)
-            .or_insert_with(BiDirectionalConnections::new);
+        let bi_conn = self.connections.entry(key).or_insert_with(BiDirectionalConnections::new);
         if is_client {
             bi_conn.clients.insert(addr, entry);
         } else {
@@ -102,28 +95,30 @@ impl ConnectionManager {
         let scope = NetworkScope::from_ip(&ip);
         let key = (ip, scope);
 
-        // 1. 定位到 IP 桶
-        if let Some(bi_conn) = self.connections.get(&key) {
-            // 2. 尝试从入站连接中查找并取消
-            // DashMap 的 remove 会返回被移除的键值对，这让我们可以直接拿到句柄
-            if let Some((_, entry)) = bi_conn.clients.remove(&addr) {
-                entry.abort_handle.abort();
-                self.check_and_cleanup_bucket(key); // 辅助函数：清理空桶
-                return true;
-            }
+        let mut found = false;
 
-            // 3. 尝试从出站连接中查找并取消
-            if let Some((_, entry)) = bi_conn.servers.remove(&addr) {
-                entry.abort_handle.abort();
-                self.check_and_cleanup_bucket(key);
-                return true;
+        // 1. 使用作用域或显式 drop 确保 bi_conn 的引用在 check_and_cleanup 之前释放
+        {
+            if let Some(bi_conn) = self.connections.get(&key) {
+                if let Some((_, entry)) = bi_conn.clients.remove(&addr) {
+                    entry.abort_handle.abort();
+                    found = true;
+                } else if let Some((_, entry)) = bi_conn.servers.remove(&addr) {
+                    entry.abort_handle.abort();
+                    found = true;
+                }
             }
+        } // <--- 这里 bi_conn (Ref) 被 drop，释放了分片锁
+
+        if found {
+            self.check_and_cleanup_bucket(key); // 现在可以安全地重新获取锁或执行 remove
         }
-        false
+
+        found
     }
 
     /// 内部辅助：当某个 IP 桶完全为空时，从全局 Map 中移除以节省内存
-    fn check_and_cleanup_bucket(&self, key: (IpAddr, NetworkScope)) {
+    pub fn check_and_cleanup_bucket(&self, key: (IpAddr, NetworkScope)) {
         // 使用 get_mut 或 entry 以确保逻辑连贯
         if let Some(bi_conn) = self.connections.get(&key) {
             if bi_conn.clients.is_empty() && bi_conn.servers.is_empty() {
@@ -151,10 +146,7 @@ impl ConnectionManager {
 
     /// 遍历所有连接，根据传入的参数策略执行停用
     pub fn deactivate(&self, timeout_secs: u64, max_lifetime_secs: u64) {
-        let current = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
+        let current = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
         let mut empty_buckets = Vec::new();
 
         // DashMap 的 iter_mut 锁定分片进行原地修改
@@ -185,10 +177,7 @@ impl ConnectionManager {
     }
 
     pub fn status(&self) -> ConnectionStatus {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
 
         let mut status = ConnectionStatus {
             total_ips: self.connections.len(),
@@ -229,18 +218,12 @@ impl ConnectionManager {
                 conn_count += 1;
             };
 
-            bi_conn
-                .clients
-                .iter()
-                .for_each(|r| process_uptime(r.value()));
-            bi_conn
-                .servers
-                .iter()
-                .for_each(|r| process_uptime(r.value()));
+            bi_conn.clients.iter().for_each(|r| process_uptime(r.value()));
+            bi_conn.servers.iter().for_each(|r| process_uptime(r.value()));
         }
 
         if conn_count > 0 {
-            status.average_uptime = total_uptime / conn_count as u64;
+            status.average_uptime = total_uptime / (conn_count as u64);
         }
 
         status
@@ -257,14 +240,8 @@ impl ConnectionManager {
         for mut bucket_ref in self.connections.iter_mut() {
             let (_, bi_conn) = bucket_ref.pair_mut();
 
-            bi_conn
-                .clients
-                .iter()
-                .for_each(|r| r.value().abort_handle.abort());
-            bi_conn
-                .servers
-                .iter()
-                .for_each(|r| r.value().abort_handle.abort());
+            bi_conn.clients.iter().for_each(|r| r.value().abort_handle.abort());
+            bi_conn.servers.iter().for_each(|r| r.value().abort_handle.abort());
 
             bi_conn.clients.clear();
             bi_conn.servers.clear();
@@ -283,10 +260,7 @@ impl ConnectionManager {
 
         if let Some(bi_conn) = self.connections.get(&(ip, scope)) {
             // 尝试在 clients 或 servers 中找到 entry
-            let entry = bi_conn
-                .clients
-                .get(&addr)
-                .or_else(|| bi_conn.servers.get(&addr));
+            let entry = bi_conn.clients.get(&addr).or_else(|| bi_conn.servers.get(&addr));
 
             if let Some(e) = entry {
                 e.cancel_token.cancel(); // 仅取消这一个

@@ -80,14 +80,14 @@ impl ConnectionEntry {
     pub fn is_deactivated(&self, current: u64, timeout_secs: u64, max_lifetime_secs: u64) -> bool {
         // 1. 检查寿命
         let uptime = current.saturating_sub(self.connected_at);
-        if uptime > max_lifetime_secs {
+        if uptime >= max_lifetime_secs {
             return true;
         }
 
         // 2. 检查活跃度
         let last_active = self.last_seen.load(Ordering::Relaxed);
         let idle_time = current.saturating_sub(last_active);
-        if idle_time > timeout_secs {
+        if idle_time >= timeout_secs {
             return true;
         }
 
