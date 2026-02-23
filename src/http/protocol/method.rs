@@ -1,6 +1,6 @@
 use tokio::net::tcp::OwnedReadHalf;
 
-use crate::connection::req::MAX_CAPACITY;
+use crate::http::req::MAX_CAPACITY;
 
 #[repr(u8)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]

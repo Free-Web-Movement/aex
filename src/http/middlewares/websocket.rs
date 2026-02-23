@@ -1,8 +1,7 @@
 use crate::{
-    connection::context::{HTTPContext, HttpMetadata, TypeMapExt},
+    connection::context::{HTTPContext, TypeMapExt},
     http::{
-        protocol::{header::HeaderKey, method::HttpMethod},
-        types::{BinaryHandler, Executor, TextHandler},
+        meta::HttpMetadata, protocol::{header::HeaderKey, method::HttpMethod}, types::{BinaryHandler, Executor, TextHandler}
     },
 };
 use base64::Engine;
@@ -316,7 +315,7 @@ impl WebSocket {
         Box::new(move |mut ctx: &mut HTTPContext| {
             let ws = ws.clone();
             (async move {
-                let meta = &ctx.meta_in;
+                let meta = &ctx.local.get_value::<HttpMetadata>().unwrap();
                 if meta.method != HttpMethod::GET {
                     return true;
                 }
@@ -330,7 +329,6 @@ impl WebSocket {
                 // 构建 WebSocket 并握手
                 {
                     let mut writer_lock = ctx.writer.lock().await; // 获取 MutexGuard
-                    let meta = &ctx.meta_in;
                     if let Err(e) = Self::handshake(&mut writer_lock, &meta.headers).await {
                         eprintln!("WebSocket handshake failed: {:?}", e);
                         return false;

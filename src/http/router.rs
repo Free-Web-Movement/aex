@@ -1,8 +1,8 @@
 use std::{collections::HashMap, sync::Arc};
 
 use crate::{
-    connection::context::{HTTPContext},
-    http::{params::Params, types::Executor},
+    connection::context::{HTTPContext, TypeMapExt},
+    http::{meta::HttpMetadata, params::Params, types::Executor},
 };
 
 /// 节点类型
@@ -136,7 +136,7 @@ impl Router {
 
 pub async fn handle_request(root: &Router, ctx: &mut HTTPContext) -> bool {
     // 1. 获取 Metadata
-    let meta = &mut ctx.meta_in;
+    let meta = &mut ctx.local.get_value::<HttpMetadata>().unwrap(); // 注意这里直接从 local 获取并可变借用
 
     // 2. 准备路由匹配所需的 segments
     let pure_path = meta.path.split('?').next().unwrap_or("");
@@ -179,6 +179,8 @@ pub async fn handle_request(root: &Router, ctx: &mut HTTPContext) -> bool {
         // 6. 关键步骤：更新 meta 并同步回 ctx.local
         meta.params = Some(params);
         let method_key = meta.method.to_str().to_owned(); // 提前拷贝一份用于匹配
+
+        ctx.local.set_value(meta.clone()); // 同步更新回 local，确保后续中间件和处理器能访问到最新的 Metadata
 
 
         // 7. 执行中间件 (Middleware)

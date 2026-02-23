@@ -1,8 +1,8 @@
 use std::net::SocketAddr;
-use std::sync::Arc;
-use aex::connection::context::{HttpMetadata, TypeMapExt};
+use aex::connection::context::{TypeMapExt};
+use aex::http::meta::HttpMetadata;
 use aex::http::protocol::header::HeaderKey;
-use aex::http::protocol::media_type::{MediaType, SubMediaType};
+use aex::http::protocol::media_type::{SubMediaType};
 use aex::http::protocol::status::StatusCode;
 use aex::{ get, route };
 use aex::tcp::types::{ RawCodec, Command };
@@ -23,7 +23,7 @@ async fn main() -> anyhow::Result<()> {
         http_router,
         get!("/", |ctx: &mut HTTPContext| {
             Box::pin(async move {
-                let meta = &mut ctx.meta_out;
+                let meta = &mut ctx.local.get_value::<HttpMetadata>().unwrap();
                 meta.status = StatusCode::Ok;
                 meta.headers.insert(HeaderKey::ContentType, SubMediaType::Plain.as_str().to_string());
                 meta.body = "Hello world!".to_string().into_bytes().to_vec();

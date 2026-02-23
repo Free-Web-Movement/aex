@@ -6,8 +6,7 @@ use zz_validator::{
 };
 
 use crate::{
-    exe,
-    http::{params::Params, protocol::status::StatusCode, types::Executor},
+    connection::context::TypeMapExt, exe, http::{meta::HttpMetadata, params::Params, protocol::status::StatusCode, types::Executor}
 };
 
 /// 核心优化点 1：基于引用的转换，避免不必要的 String 拷贝
@@ -85,7 +84,7 @@ pub fn to_validator(dsl_map: HashMap<String, String>) -> Arc<Executor> {
         let compiled = compiled.clone();
         let mut res = true;
 
-        let meta = &mut ctx.meta_in;
+        let meta = &mut ctx.local.get_value::<HttpMetadata>().unwrap();
         println!("Validating request: {} {}", meta.method.to_str(), meta.path);
         let params = meta.params.clone();
         let params = params.unwrap_or_else(|| {

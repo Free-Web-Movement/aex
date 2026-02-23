@@ -10,7 +10,7 @@ use crate::tcp::router::Router as TcpRouter;
 use crate::udp::router::Router as UdpRouter;
 use crate::tcp::types::{ Codec, Command, Frame, RawCodec }; // 确保引入了 Command
 use tokio::sync::Mutex;
-use crate::connection::context::{GlobalContext, HTTPContext, HttpMetadata, TypeMapExt};
+use crate::connection::context::{GlobalContext, HTTPContext, TypeMapExt};
 
 
 pub const SERVER_NAME: &str = "Aex/1.0";
