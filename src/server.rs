@@ -1,26 +1,29 @@
-use tokio::net::UdpSocket;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tokio::io::{ AsyncReadExt, BufReader, BufWriter };
-use tokio::net::{ TcpListener, tcp::{ OwnedReadHalf, OwnedWriteHalf } };
+use tokio::io::{AsyncReadExt, BufReader, BufWriter};
+use tokio::net::UdpSocket;
+use tokio::net::{
+    TcpListener,
+    tcp::{OwnedReadHalf, OwnedWriteHalf},
+};
 
-use crate::http::protocol::method::HttpMethod;
-use crate::http::router::{ Router as HttpRouter, handle_request };
-use crate::tcp::router::Router as TcpRouter;
-use crate::udp::router::Router as UdpRouter;
-use crate::tcp::types::{ Codec, Command, Frame, RawCodec }; // 确保引入了 Command
-use tokio::sync::Mutex;
 use crate::connection::context::{GlobalContext, HTTPContext};
-
+use crate::http::protocol::method::HttpMethod;
+use crate::http::router::{Router as HttpRouter, handle_request};
+use crate::tcp::router::Router as TcpRouter;
+use crate::tcp::types::{Codec, Command, Frame, RawCodec}; // 确保引入了 Command
+use crate::udp::router::Router as UdpRouter;
+use tokio::sync::Mutex;
 
 pub const SERVER_NAME: &str = "Aex/1.0";
 
 /// AexServer: 核心多协议服务器
 pub struct AexServer<F, C, K = u32>
-    where
-        F: Frame + Send + Sync + 'static,
-        C: Command + Send + Sync + 'static, // 统一使用 Command 约束
-        K: Eq + std::hash::Hash + Send + Sync + 'static {
+where
+    F: Frame + Send + Sync + 'static,
+    C: Command + Send + Sync + 'static, // 统一使用 Command 约束
+    K: Eq + std::hash::Hash + Send + Sync + 'static,
+{
     pub addr: SocketAddr,
     pub http_router: Option<Arc<HttpRouter>>,
     pub tcp_router: Option<Arc<TcpRouter<F, C, K>>>,
@@ -30,10 +33,10 @@ pub struct AexServer<F, C, K = u32>
 }
 
 impl<F, C, K> AexServer<F, C, K>
-    where
-        F: Frame + Send + Sync + 'static,
-        C: Command + Send + Sync + 'static,
-        K: Eq + std::hash::Hash + Send + Sync + 'static
+where
+    F: Frame + Send + Sync + 'static,
+    C: Command + Send + Sync + 'static,
+    K: Eq + std::hash::Hash + Send + Sync + 'static,
 {
     pub fn new(addr: SocketAddr) -> Self {
         Self {
@@ -93,7 +96,10 @@ impl<F, C, K> AexServer<F, C, K>
 
                 // 协议嗅探：HTTP
                 if let Some(hr) = &server_ctx.http_router {
-                    if HttpMethod::is_http_connection(&mut reader).await.unwrap_or_default() {
+                    if HttpMethod::is_http_connection(&mut reader)
+                        .await
+                        .unwrap_or_default()
+                    {
                         let reader = BufReader::new(reader);
                         let writer = BufWriter::new(writer);
                         return Self::handle_http(hr.clone(), reader, writer, peer_addr).await;
@@ -138,16 +144,22 @@ impl<F, C, K> AexServer<F, C, K>
         router: Arc<HttpRouter>,
         reader: BufReader<OwnedReadHalf>,
         writer: BufWriter<OwnedWriteHalf>,
-        peer_addr: SocketAddr
+        peer_addr: SocketAddr,
     ) -> anyhow::Result<()> {
         // let req = Request::new(reader, peer_addr, "").await?;
 
-
         // let res = Response::new(writer);
-        let mut ctx = HTTPContext::new(reader, writer, Arc::new(GlobalContext::new(peer_addr)), peer_addr);
+        let mut ctx = HTTPContext::new(
+            reader,
+            writer,
+            Arc::new(GlobalContext::new(peer_addr)),
+            peer_addr,
+        );
         ctx.req().await.parse_to_local().await?;
         if handle_request(&router, &mut ctx).await {
             let _ = ctx.res().send_response().await;
+        } else {
+            let _ = ctx.res().send_failure().await;
         }
         Ok(())
     }
@@ -155,7 +167,7 @@ impl<F, C, K> AexServer<F, C, K>
     async fn handle_tcp(
         router: Arc<TcpRouter<F, C, K>>,
         reader: OwnedReadHalf,
-        writer: OwnedWriteHalf
+        writer: OwnedWriteHalf,
     ) -> anyhow::Result<()> {
         let mut r_opt = Some(reader);
         let mut w_opt = Some(writer);
@@ -181,15 +193,16 @@ impl<F, C, K> AexServer<F, C, K>
             let data = &buf[..n];
 
             // 2. 解码 Frame
-            let frame_result = std::panic::catch_unwind(
-                std::panic::AssertUnwindSafe(|| { <F as Codec>::decode(data) })
-            );
+            let frame_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                <F as Codec>::decode(data)
+            }));
 
             match frame_result {
                 Ok(Ok(frame)) => {
                     // 3. 分发给 Router
                     // 如果 Handler 需要读后续数据，它会通过 r_opt.take() 拿走 Reader 的所有权
-                    let should_continue = router.handle_frame(frame, &mut r_opt, &mut w_opt).await?;
+                    let should_continue =
+                        router.handle_frame(frame, &mut r_opt, &mut w_opt).await?;
 
                     // 4. 检查 Reader 是否还在，或者 Handler 是否要求关闭
                     if !should_continue || r_opt.is_none() {
@@ -209,7 +222,7 @@ impl<F, C, K> AexServer<F, C, K>
 
     pub async fn handle_udp(
         router: Arc<UdpRouter<F, C, K>>,
-        socket: Arc<UdpSocket>
+        socket: Arc<UdpSocket>,
     ) -> anyhow::Result<()> {
         let mut buf = [0u8; 65535]; // UDP 最大报文长度
         loop {

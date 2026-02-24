@@ -1,52 +1,168 @@
-
-
 #[cfg(test)]
 mod tests {
-    use aex::http::protocol::header::{HEADER_KEYS, HeaderKey};
+    use aex::http::protocol::header::HeaderKey;
+
+
+    // ---------- from_str 标准 header ----------
     #[test]
-    fn test_headerkey_to_str() {
-        // 遍历所有枚举，保证 to_str 覆盖
-        for i in 0u16..HEADER_KEYS.len() as u16 {
-            let key = unsafe { std::mem::transmute::<u16, HeaderKey>(i) };
-            let s = key.to_str();
-            assert_eq!(s, HEADER_KEYS[i as usize]);
+    fn test_from_str_standard() {
+        let key = HeaderKey::from_str("Content-Type").unwrap();
+        assert_eq!(key, HeaderKey::ContentType);
+    }
+
+    // ---------- 大小写不敏感 ----------
+    #[test]
+    fn test_from_str_case_insensitive() {
+        let key = HeaderKey::from_str("content-type").unwrap();
+        assert_eq!(key, HeaderKey::ContentType);
+
+        let key2 = HeaderKey::from_str("CONTENT-TYPE").unwrap();
+        assert_eq!(key2, HeaderKey::ContentType);
+    }
+
+    // ---------- trim 测试 ----------
+    #[test]
+    fn test_from_str_trim() {
+        let key = HeaderKey::from_str("  Content-Type  ").unwrap();
+        assert_eq!(key, HeaderKey::ContentType);
+    }
+
+    // ---------- Custom header ----------
+    #[test]
+    fn test_from_str_custom() {
+        let key = HeaderKey::from_str("X-Custom-Header").unwrap();
+
+        match key {
+            HeaderKey::Custom(s) => assert_eq!(s, "X-Custom-Header"),
+            _ => panic!("Expected Custom variant"),
         }
     }
 
+    // ---------- as_str 标准 header ----------
     #[test]
-    fn test_headerkey_from_str_exact() {
-        // 遍历所有 HEADER_KEYS，确保 from_str 可以匹配
-        for i in 0..HEADER_KEYS.len() {
-            let key_str = HEADER_KEYS[i];
-            let key_enum = HeaderKey::from_str(key_str).unwrap();
-            assert_eq!(key_enum.to_str(), key_str);
+    fn test_as_str_standard() {
+        let key = HeaderKey::ContentLength;
+        assert_eq!(key.as_str(), "Content-Length");
+    }
 
-            // 测试大小写不敏感
-            let key_enum_upper = HeaderKey::from_str(&key_str.to_uppercase()).unwrap();
-            assert_eq!(key_enum_upper.to_str(), key_str);
+    // ---------- as_str custom ----------
+    #[test]
+    fn test_as_str_custom() {
+        let key = HeaderKey::Custom("X-Test".to_string());
+        assert_eq!(key.as_str(), "X-Test");
+    }
 
-            let key_enum_mixed = HeaderKey::from_str(&key_str.to_ascii_lowercase()).unwrap();
-            assert_eq!(key_enum_mixed.to_str(), key_str);
-        }
+    // ---------- Display ----------
+    #[test]
+    fn test_display_standard() {
+        let key = HeaderKey::ContentType;
+        assert_eq!(format!("{}", key), "Content-Type");
     }
 
     #[test]
-    fn test_headerkey_from_str_invalid() {
-        // 无效 header 返回 None
-        assert!(HeaderKey::from_str("Invalid-Header").is_none());
-        assert!(HeaderKey::from_str("").is_none());
-        assert!(HeaderKey::from_str(" ").is_none());
-        assert!(HeaderKey::from_str("123").is_none());
+    fn test_display_custom() {
+        let key = HeaderKey::Custom("X-My-Header".into());
+        assert_eq!(format!("{}", key), "X-My-Header");
     }
 
+    // ---------- Hash + Eq 覆盖 ----------
     #[test]
-    fn test_headerkey_all_from_to_roundtrip() {
-        // 从枚举 -> str -> 枚举，保证完全一致
-        for i in 0u16..HEADER_KEYS.len() as u16 {
-            let key = unsafe { std::mem::transmute::<u16, HeaderKey>(i) };
-            let s = key.to_str();
-            let key_back = HeaderKey::from_str(s).unwrap();
-            assert_eq!(key, key_back);
+    fn test_eq_and_hash() {
+        use std::collections::HashSet;
+
+        let mut set = HashSet::new();
+        set.insert(HeaderKey::ContentType);
+        set.insert(HeaderKey::ContentType);
+
+        assert_eq!(set.len(), 1);
+
+        set.insert(HeaderKey::Custom("X-A".into()));
+        set.insert(HeaderKey::Custom("X-A".into()));
+
+        assert_eq!(set.len(), 2);
+    }
+
+    // ---------- 覆盖所有标准 header 至少一次 ----------
+    // 这个测试会调用所有 as_str 分支，确保 match 全覆盖
+    #[test]
+    fn test_all_standard_headers_as_str() {
+        let headers = vec![
+            HeaderKey::CacheControl,
+            HeaderKey::Connection,
+            HeaderKey::Date,
+            HeaderKey::Pragma,
+            HeaderKey::Trailer,
+            HeaderKey::TransferEncoding,
+            HeaderKey::Upgrade,
+            HeaderKey::Via,
+            HeaderKey::Warning,
+            HeaderKey::Accept,
+            HeaderKey::AcceptCharset,
+            HeaderKey::AcceptEncoding,
+            HeaderKey::AcceptLanguage,
+            HeaderKey::Authorization,
+            HeaderKey::Cookie,
+            HeaderKey::Expect,
+            HeaderKey::From,
+            HeaderKey::Host,
+            HeaderKey::IfMatch,
+            HeaderKey::IfModifiedSince,
+            HeaderKey::IfNoneMatch,
+            HeaderKey::IfRange,
+            HeaderKey::IfUnmodifiedSince,
+            HeaderKey::MaxForwards,
+            HeaderKey::Origin,
+            HeaderKey::Range,
+            HeaderKey::Referer,
+            HeaderKey::TE,
+            HeaderKey::UserAgent,
+            HeaderKey::AcceptRanges,
+            HeaderKey::Age,
+            HeaderKey::ETag,
+            HeaderKey::Location,
+            HeaderKey::ProxyAuthenticate,
+            HeaderKey::RetryAfter,
+            HeaderKey::Server,
+            HeaderKey::SetCookie,
+            HeaderKey::Vary,
+            HeaderKey::WWWAuthenticate,
+            HeaderKey::Allow,
+            HeaderKey::ContentEncoding,
+            HeaderKey::ContentLanguage,
+            HeaderKey::ContentLength,
+            HeaderKey::ContentLocation,
+            HeaderKey::ContentRange,
+            HeaderKey::ContentType,
+            HeaderKey::Expires,
+            HeaderKey::LastModified,
+            HeaderKey::AccessControlAllowCredentials,
+            HeaderKey::AccessControlAllowHeaders,
+            HeaderKey::AccessControlAllowMethods,
+            HeaderKey::AccessControlAllowOrigin,
+            HeaderKey::AccessControlExposeHeaders,
+            HeaderKey::AccessControlMaxAge,
+            HeaderKey::SecFetchDest,
+            HeaderKey::SecFetchMode,
+            HeaderKey::SecFetchSite,
+            HeaderKey::SecFetchUser,
+            HeaderKey::SecWebSocketAccept,
+            HeaderKey::SecWebSocketExtensions,
+            HeaderKey::SecWebSocketKey,
+            HeaderKey::SecWebSocketProtocol,
+            HeaderKey::SecWebSocketVersion,
+            HeaderKey::Forwarded,
+            HeaderKey::XForwardedFor,
+            HeaderKey::XForwardedHost,
+            HeaderKey::XForwardedProto,
+            HeaderKey::DNT,
+            HeaderKey::KeepAlive,
+            HeaderKey::UpgradeInsecureRequests,
+        ];
+
+        for header in headers {
+            let s = header.as_str();
+            assert!(!s.is_empty());
         }
     }
 }
+

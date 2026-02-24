@@ -2,7 +2,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use crate::{
     connection::context::{HTTPContext, TypeMapExt},
-    http::{meta::HttpMetadata, params::Params, types::Executor},
+    http::{meta::HttpMetadata, params::Params, protocol::status::StatusCode, types::Executor},
 };
 
 /// 节点类型
@@ -44,9 +44,9 @@ impl Router {
         // let segments: Vec<&str> = path.trim_start_matches('/').split('/').collect();
 
         let segments: Vec<&str> = path
-        .split('/')
-        .filter(|s| !s.is_empty()) // 保持一致，过滤掉空段
-        .collect();
+            .split('/')
+            .filter(|s| !s.is_empty()) // 保持一致，过滤掉空段
+            .collect();
         let mut node = self;
 
         for seg in segments {
@@ -178,18 +178,22 @@ pub async fn handle_request(root: &Router, ctx: &mut HTTPContext) -> bool {
 
         // 6. 关键步骤：更新 meta 并同步回 ctx.local
         meta.params = Some(params);
-        let method_key = meta.method.to_str().to_owned(); // 提前拷贝一份用于匹配
-
         ctx.local.set_value(meta.clone()); // 同步更新回 local，确保后续中间件和处理器能访问到最新的 Metadata
 
+        
+        // let method_key = meta.method.to_str().to_owned(); // 提前拷贝一份用于匹配
+        let method_key = meta.method.to_str().to_uppercase(); // 强制大写以匹配 HashMap 的 Key
 
         // 7. 执行中间件 (Middleware)
         if let Some(mws_map) = &node.middlewares {
             let mws = mws_map.get(&method_key).or_else(|| mws_map.get("*"));
             if let Some(mws) = mws {
                 for mw in mws {
-                    println!("Executing middleware for method: {}", method_key);
                     if !mw(ctx).await {
+                        // 如果中间件没有设置状态，我们补一个默认的 400
+                        let mut meta = ctx.local.get_value::<HttpMetadata>().unwrap();
+                        meta.status = StatusCode::BadRequest;
+                        ctx.local.set_value(meta);
                         return false;
                     }
                 }
@@ -202,10 +206,13 @@ pub async fn handle_request(root: &Router, ctx: &mut HTTPContext) -> bool {
                 .get(&method_key)
                 .or_else(|| handlers_map.get("*"));
             if let Some(handler) = handler {
-                println!("Executing handler for method: {}", method_key);
                 return handler(ctx).await;
             }
         }
+    } else {
+        let mut meta = ctx.local.get_value::<HttpMetadata>().unwrap();
+        meta.status = StatusCode::NotFound;
+        ctx.local.set_value(meta);
     }
 
     true

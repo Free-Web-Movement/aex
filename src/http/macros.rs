@@ -7,19 +7,18 @@
 macro_rules! make_method_macro {
     ($method_str:expr, $path:expr, $handler:expr $(, $middleware:expr)?) => {
         {
-        use std::sync::Arc;
-        use $crate::connection::context::HTTPContext;
-        use $crate::http::types::{Executor};
+            use std::sync::Arc;
+            use $crate::http::types::{Executor};
 
-        let handler_arc: Arc<Executor> = Arc::new($handler);
+            // 修正：假设 $handler 已经是 Arc<Executor> 类型
+            let handler_arc: Arc<Executor> = $handler;
 
-        let mw_arc_opt: Option<Vec<Arc<Executor>>> = None $(.or(Some(
-            $middleware.into_iter()
-                .map(|mw| Arc::new(mw) as Arc<Executor>)
-                .collect::<Vec<_>>()
-        )))?;
+            // 修正：中间件列表处理，支持直接传入 Vec<Arc<Executor>>
+            let mw_arc_opt: Option<Vec<Arc<Executor>>> = None $(.or(Some(
+                $middleware // 这里直接使用传入的 Vec，因为 exe! 已经包好了 Arc
+            )))?;
 
-        ($method_str, $path, handler_arc, mw_arc_opt)
+            ($method_str, $path, handler_arc, mw_arc_opt)
         }
     };
 }

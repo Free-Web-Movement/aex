@@ -1,280 +1,149 @@
-#[repr(u16)]
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
-pub enum HeaderKey {
+use std::fmt;
+use std::hash::Hasher;
+use std::hash::Hash;
+
+macro_rules! define_header_keys {
+    ($($name:ident => $string:expr),* $(,)?) => {
+        #[derive(Debug, Clone)] // 注意：去掉了 Eq, PartialEq, Hash 的 derive
+        pub enum HeaderKey {
+            $($name,)*
+            Custom(String),
+        }
+
+        impl HeaderKey {
+            pub fn from_str(s: &str) -> Option<Self> {
+                let s_trimmed = s.trim();
+                let s_lower = s_trimmed.to_ascii_lowercase();
+                match s_lower.as_str() {
+                    $(
+                        s if s == $string.to_ascii_lowercase() => Some(HeaderKey::$name),
+                    )*
+                    // 存储原始格式，不再强制小写
+                    _ => Some(HeaderKey::Custom(s_trimmed.to_string())),
+                }
+            }
+
+            pub fn as_str(&self) -> &str {
+                match self {
+                    $(
+                        HeaderKey::$name => $string,
+                    )*
+                    HeaderKey::Custom(s) => s.as_str(),
+                }
+            }
+        }
+
+        // --- 手动实现比较逻辑 ---
+
+        impl PartialEq for HeaderKey {
+            fn eq(&self, other: &Self) -> bool {
+                // 仅在比较时转为小写，不影响存储
+                self.as_str().to_ascii_lowercase() == other.as_str().to_ascii_lowercase()
+            }
+        }
+
+        impl Eq for HeaderKey {}
+
+        impl Hash for HeaderKey {
+            fn hash<H: Hasher>(&self, state: &mut H) {
+                // 仅在计算哈希时转为小写，确保不同大小写的输入在 HashMap 中落在同一个槽位
+                self.as_str().to_ascii_lowercase().hash(state);
+            }
+        }
+    };
+}
+// 使用宏统一管理所有 70+ 个标准 Header
+define_header_keys! {
     // ===== General Headers =====
-    CacheControl = 0,
-    Connection,
-    Date,
-    Pragma,
-    Trailer,
-    TransferEncoding,
-    Upgrade,
-    Via,
-    Warning,
+    CacheControl => "Cache-Control",
+    Connection => "Connection",
+    Date => "Date",
+    Pragma => "Pragma",
+    Trailer => "Trailer",
+    TransferEncoding => "Transfer-Encoding",
+    Upgrade => "Upgrade",
+    Via => "Via",
+    Warning => "Warning",
 
     // ===== Request Headers =====
-    Accept,
-    AcceptCharset,
-    AcceptEncoding,
-    AcceptLanguage,
-    Authorization,
-    Cookie,
-    Expect,
-    From,
-    Host,
-    IfMatch,
-    IfModifiedSince,
-    IfNoneMatch,
-    IfRange,
-    IfUnmodifiedSince,
-    MaxForwards,
-    Origin,
-    Range,
-    Referer,
-    TE,
-    UserAgent,
+    Accept => "Accept",
+    AcceptCharset => "Accept-Charset",
+    AcceptEncoding => "Accept-Encoding",
+    AcceptLanguage => "Accept-Language",
+    Authorization => "Authorization",
+    Cookie => "Cookie",
+    Expect => "Expect",
+    From => "From",
+    Host => "Host",
+    IfMatch => "If-Match",
+    IfModifiedSince => "If-Modified-Since",
+    IfNoneMatch => "If-None-Match",
+    IfRange => "If-Range",
+    IfUnmodifiedSince => "If-Unmodified-Since",
+    MaxForwards => "Max-Forwards",
+    Origin => "Origin",
+    Range => "Range",
+    Referer => "Referer",
+    TE => "TE",
+    UserAgent => "User-Agent",
 
     // ===== Response Headers =====
-    AcceptRanges,
-    Age,
-    ETag,
-    Location,
-    ProxyAuthenticate,
-    RetryAfter,
-    Server,
-    SetCookie,
-    Vary,
-    WWWAuthenticate,
+    AcceptRanges => "Accept-Ranges",
+    Age => "Age",
+    ETag => "ETag",
+    Location => "Location",
+    ProxyAuthenticate => "Proxy-Authenticate",
+    RetryAfter => "Retry-After",
+    Server => "Server",
+    SetCookie => "Set-Cookie",
+    Vary => "Vary",
+    WWWAuthenticate => "WWW-Authenticate",
 
-    // ===== Entity / Representation Headers =====
-    Allow,
-    ContentEncoding,
-    ContentLanguage,
-    ContentLength,
-    ContentLocation,
-    ContentRange,
-    ContentType,
-    Expires,
-    LastModified,
-
-    // ===== CORS / Fetch / Web =====
-    AccessControlAllowCredentials,
-    AccessControlAllowHeaders,
-    AccessControlAllowMethods,
-    AccessControlAllowOrigin,
-    AccessControlExposeHeaders,
-    AccessControlMaxAge,
-
-    SecFetchDest,
-    SecFetchMode,
-    SecFetchSite,
-    SecFetchUser,
-
-    // ===== WebSocket =====
-    SecWebSocketAccept,
-    SecWebSocketExtensions,
-    SecWebSocketKey,
-    SecWebSocketProtocol,
-    SecWebSocketVersion,
-
-    // ===== Proxy / Forwarded =====
-    Forwarded,
-    XForwardedFor,
-    XForwardedHost,
-    XForwardedProto,
-
-    // ===== Misc / De-facto standard =====
-    DNT,
-    KeepAlive,
-    UpgradeInsecureRequests,
-}
-
-pub const HEADER_KEYS: [&str; 70] = [
-    // ===== General =====
-    "Cache-Control",
-    "Connection",
-    "Date",
-    "Pragma",
-    "Trailer",
-    "Transfer-Encoding",
-    "Upgrade",
-    "Via",
-    "Warning",
-
-    // ===== Request =====
-    "Accept",
-    "Accept-Charset",
-    "Accept-Encoding",
-    "Accept-Language",
-    "Authorization",
-    "Cookie",
-    "Expect",
-    "From",
-    "Host",
-    "If-Match",
-    "If-Modified-Since",
-    "If-None-Match",
-    "If-Range",
-    "If-Unmodified-Since",
-    "Max-Forwards",
-    "Origin",
-    "Range",
-    "Referer",
-    "TE",
-    "User-Agent",
-
-    // ===== Response =====
-    "Accept-Ranges",
-    "Age",
-    "ETag",
-    "Location",
-    "Proxy-Authenticate",
-    "Retry-After",
-    "Server",
-    "Set-Cookie",
-    "Vary",
-    "WWW-Authenticate",
-
-    // ===== Entity =====
-    "Allow",
-    "Content-Encoding",
-    "Content-Language",
-    "Content-Length",
-    "Content-Location",
-    "Content-Range",
-    "Content-Type",
-    "Expires",
-    "Last-Modified",
+    // ===== Entity Headers =====
+    Allow => "Allow",
+    ContentEncoding => "Content-Encoding",
+    ContentLanguage => "Content-Language",
+    ContentLength => "Content-Length",
+    ContentLocation => "Content-Location",
+    ContentRange => "Content-Range",
+    ContentType => "Content-Type",
+    Expires => "Expires",
+    LastModified => "Last-Modified",
 
     // ===== CORS / Fetch =====
-    "Access-Control-Allow-Credentials",
-    "Access-Control-Allow-Headers",
-    "Access-Control-Allow-Methods",
-    "Access-Control-Allow-Origin",
-    "Access-Control-Expose-Headers",
-    "Access-Control-Max-Age",
+    AccessControlAllowCredentials => "Access-Control-Allow-Credentials",
+    AccessControlAllowHeaders => "Access-Control-Allow-Headers",
+    AccessControlAllowMethods => "Access-Control-Allow-Methods",
+    AccessControlAllowOrigin => "Access-Control-Allow-Origin",
+    AccessControlExposeHeaders => "Access-Control-Expose-Headers",
+    AccessControlMaxAge => "Access-Control-Max-Age",
 
-    "Sec-Fetch-Dest",
-    "Sec-Fetch-Mode",
-    "Sec-Fetch-Site",
-    "Sec-Fetch-User",
+    SecFetchDest => "Sec-Fetch-Dest",
+    SecFetchMode => "Sec-Fetch-Mode",
+    SecFetchSite => "Sec-Fetch-Site",
+    SecFetchUser => "Sec-Fetch-User",
 
     // ===== WebSocket =====
-    "Sec-WebSocket-Accept",
-    "Sec-WebSocket-Extensions",
-    "Sec-WebSocket-Key",
-    "Sec-WebSocket-Protocol",
-    "Sec-WebSocket-Version",
+    SecWebSocketAccept => "Sec-WebSocket-Accept",
+    SecWebSocketExtensions => "Sec-WebSocket-Extensions",
+    SecWebSocketKey => "Sec-WebSocket-Key",
+    SecWebSocketProtocol => "Sec-WebSocket-Protocol",
+    SecWebSocketVersion => "Sec-WebSocket-Version",
 
     // ===== Proxy =====
-    "Forwarded",
-    "X-Forwarded-For",
-    "X-Forwarded-Host",
-    "X-Forwarded-Proto",
+    Forwarded => "Forwarded",
+    XForwardedFor => "X-Forwarded-For",
+    XForwardedHost => "X-Forwarded-Host",
+    XForwardedProto => "X-Forwarded-Proto",
 
     // ===== Misc =====
-    "DNT",
-    "Keep-Alive",
-    "Upgrade-Insecure-Requests",
-];
+    DNT => "DNT",
+    KeepAlive => "Keep-Alive",
+    UpgradeInsecureRequests => "Upgrade-Insecure-Requests",
+}
 
-impl HeaderKey {
-    /// 大小写不敏感匹配字符串到枚举
-    pub fn from_str(s: &str) -> Option<Self> {
-        let s = s.trim().to_ascii_lowercase();
-        match s.as_str() {
-            // ===== General =====
-            "cache-control" => Some(HeaderKey::CacheControl),
-            "connection" => Some(HeaderKey::Connection),
-            "date" => Some(HeaderKey::Date),
-            "pragma" => Some(HeaderKey::Pragma),
-            "trailer" => Some(HeaderKey::Trailer),
-            "transfer-encoding" => Some(HeaderKey::TransferEncoding),
-            "upgrade" => Some(HeaderKey::Upgrade),
-            "via" => Some(HeaderKey::Via),
-            "warning" => Some(HeaderKey::Warning),
-
-            // ===== Request =====
-            "accept" => Some(HeaderKey::Accept),
-            "accept-charset" => Some(HeaderKey::AcceptCharset),
-            "accept-encoding" => Some(HeaderKey::AcceptEncoding),
-            "accept-language" => Some(HeaderKey::AcceptLanguage),
-            "authorization" => Some(HeaderKey::Authorization),
-            "cookie" => Some(HeaderKey::Cookie),
-            "expect" => Some(HeaderKey::Expect),
-            "from" => Some(HeaderKey::From),
-            "host" => Some(HeaderKey::Host),
-            "if-match" => Some(HeaderKey::IfMatch),
-            "if-modified-since" => Some(HeaderKey::IfModifiedSince),
-            "if-none-match" => Some(HeaderKey::IfNoneMatch),
-            "if-range" => Some(HeaderKey::IfRange),
-            "if-unmodified-since" => Some(HeaderKey::IfUnmodifiedSince),
-            "max-forwards" => Some(HeaderKey::MaxForwards),
-            "origin" => Some(HeaderKey::Origin),
-            "range" => Some(HeaderKey::Range),
-            "referer" => Some(HeaderKey::Referer),
-            "te" => Some(HeaderKey::TE),
-            "user-agent" => Some(HeaderKey::UserAgent),
-
-            // ===== Response =====
-            "accept-ranges" => Some(HeaderKey::AcceptRanges),
-            "age" => Some(HeaderKey::Age),
-            "etag" => Some(HeaderKey::ETag),
-            "location" => Some(HeaderKey::Location),
-            "proxy-authenticate" => Some(HeaderKey::ProxyAuthenticate),
-            "retry-after" => Some(HeaderKey::RetryAfter),
-            "server" => Some(HeaderKey::Server),
-            "set-cookie" => Some(HeaderKey::SetCookie),
-            "vary" => Some(HeaderKey::Vary),
-            "www-authenticate" => Some(HeaderKey::WWWAuthenticate),
-
-            // ===== Entity =====
-            "allow" => Some(HeaderKey::Allow),
-            "content-encoding" => Some(HeaderKey::ContentEncoding),
-            "content-language" => Some(HeaderKey::ContentLanguage),
-            "content-length" => Some(HeaderKey::ContentLength),
-            "content-location" => Some(HeaderKey::ContentLocation),
-            "content-range" => Some(HeaderKey::ContentRange),
-            "content-type" => Some(HeaderKey::ContentType),
-            "expires" => Some(HeaderKey::Expires),
-            "last-modified" => Some(HeaderKey::LastModified),
-
-            // ===== CORS / Fetch / Web =====
-            "access-control-allow-credentials" => Some(HeaderKey::AccessControlAllowCredentials),
-            "access-control-allow-headers" => Some(HeaderKey::AccessControlAllowHeaders),
-            "access-control-allow-methods" => Some(HeaderKey::AccessControlAllowMethods),
-            "access-control-allow-origin" => Some(HeaderKey::AccessControlAllowOrigin),
-            "access-control-expose-headers" => Some(HeaderKey::AccessControlExposeHeaders),
-            "access-control-max-age" => Some(HeaderKey::AccessControlMaxAge),
-
-            "sec-fetch-dest" => Some(HeaderKey::SecFetchDest),
-            "sec-fetch-mode" => Some(HeaderKey::SecFetchMode),
-            "sec-fetch-site" => Some(HeaderKey::SecFetchSite),
-            "sec-fetch-user" => Some(HeaderKey::SecFetchUser),
-
-            // ===== WebSocket =====
-            "sec-websocket-accept" => Some(HeaderKey::SecWebSocketAccept),
-            "sec-websocket-extensions" => Some(HeaderKey::SecWebSocketExtensions),
-            "sec-websocket-key" => Some(HeaderKey::SecWebSocketKey),
-            "sec-websocket-protocol" => Some(HeaderKey::SecWebSocketProtocol),
-            "sec-websocket-version" => Some(HeaderKey::SecWebSocketVersion),
-
-            // ===== Proxy / Forwarded =====
-            "forwarded" => Some(HeaderKey::Forwarded),
-            "x-forwarded-for" => Some(HeaderKey::XForwardedFor),
-            "x-forwarded-host" => Some(HeaderKey::XForwardedHost),
-            "x-forwarded-proto" => Some(HeaderKey::XForwardedProto),
-
-            // ===== Misc =====
-            "dnt" => Some(HeaderKey::DNT),
-            "keep-alive" => Some(HeaderKey::KeepAlive),
-            "upgrade-insecure-requests" => Some(HeaderKey::UpgradeInsecureRequests),
-
-            _ => None,
-        }
-    }
-        /// 枚举转 &str
-    pub fn to_str(&self) -> &'static str {
-        HEADER_KEYS[*self as usize]
+impl fmt::Display for HeaderKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_str())
     }
 }

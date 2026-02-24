@@ -133,14 +133,12 @@ impl HttpMethod {
     }
 
     pub async fn is_http_connection(reader: &mut OwnedReadHalf) -> anyhow::Result<bool> {
-        let mut buf = [0u8; MAX_CAPACITY as usize];
 
+        let mut buf = [0u8; 16 as usize];
         let n = reader.peek(&mut buf).await?;
-
         if n == 0 {
             return Ok(false);
         }
-
         let s = std::str::from_utf8(&buf[..n]).unwrap_or("");
         Ok(HttpMethod::is_prefixed(s))
     }

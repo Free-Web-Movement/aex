@@ -1,16 +1,15 @@
-use std::net::SocketAddr;
-use aex::connection::context::{TypeMapExt};
+use aex::connection::context::TypeMapExt;
 use aex::http::meta::HttpMetadata;
 use aex::http::protocol::header::HeaderKey;
-use aex::http::protocol::media_type::{SubMediaType};
+use aex::http::protocol::media_type::SubMediaType;
 use aex::http::protocol::status::StatusCode;
-use aex::{ get, route };
-use aex::tcp::types::{ RawCodec, Command };
+use aex::http::router::{NodeType, Router as HttpRouter};
 use aex::server::AexServer;
-use aex::http::router::{ NodeType, Router as HttpRouter };
 use aex::tcp::router::Router as TcpRouter;
+use aex::tcp::types::{Command, RawCodec};
 use aex::udp::router::Router as UdpRouter;
-use futures::FutureExt;
+use aex::{exe, get, route};
+use std::net::SocketAddr;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -21,16 +20,20 @@ async fn main() -> anyhow::Result<()> {
 
     route!(
         http_router,
-        get!("/", |ctx: &mut HTTPContext| {
-            Box::pin(async move {
+        get!(
+            "/",
+            exe!(|ctx| {
                 let meta = &mut ctx.local.get_value::<HttpMetadata>().unwrap();
                 meta.status = StatusCode::Ok;
-                meta.headers.insert(HeaderKey::ContentType, SubMediaType::Plain.as_str().to_string());
+                meta.headers.insert(
+                    HeaderKey::ContentType,
+                    SubMediaType::Plain.as_str().to_string(),
+                );
                 meta.body = "Hello world!".to_string().into_bytes().to_vec();
                 // false = 不继续 middleware（如果你还保留这个语义）
                 true
-            }).boxed()
-        })
+            })
+        )
     );
 
     // --- 2. TCP 路由配置 (使用 RawCodec) ---
@@ -58,7 +61,12 @@ async fn main() -> anyhow::Result<()> {
 
     // --- 4. 组装并启动服务器 ---
     // 借力于 HTTPServer 类型别名或直接使用 AexServer
-    AexServer::new(addr).http(http_router).tcp(tcp_router).udp(udp_router).start().await?;
+    AexServer::new(addr)
+        .http(http_router)
+        .tcp(tcp_router)
+        .udp(udp_router)
+        .start()
+        .await?;
 
     Ok(())
 }
