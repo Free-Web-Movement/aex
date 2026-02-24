@@ -160,15 +160,18 @@ impl SubMediaType {
 
     /// 从 Content-Type 的子类型部分解析
     pub fn from_str(s: &str) -> Self {
-        // 只取分号前的部分并修剪空白，处理 "json; charset=utf-8"
-        let base_sub = s
-            .split(';')
-            .next()
-            .unwrap_or("")
-            .trim()
-            .to_ascii_lowercase();
+        // 1. 先按分号分割，取第一部分
+        let type_part = s.split(';').next().unwrap_or("").trim();
 
-        match base_sub.as_str() {
+        // 2. 如果包含斜杠 (例如 "text/plain")，只取斜杠后面的部分
+        let base_sub = if let Some(pos) = type_part.find('/') {
+            &type_part[pos + 1..]
+        } else {
+            type_part
+        };
+
+        // 3. 转换为小写并匹配
+        match base_sub.to_ascii_lowercase().as_str() {
             "json" => SubMediaType::Json,
             "x-www-form-urlencoded" => SubMediaType::UrlEncoded,
             "form-data" => SubMediaType::FormData,
