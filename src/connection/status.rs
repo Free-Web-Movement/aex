@@ -11,22 +11,30 @@ pub struct ConnectionStatus {
     pub oldest_uptime: u64,        // 最长连接时长
     pub average_uptime: u64,       // 平均连接时长
 }
-
 impl fmt::Display for ConnectionStatus {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let total_conns = self.total_clients + self.total_servers;
         
-        writeln!(f, "┏━━━━━━━━━━━━━━━━ AEX Connection Profile ━━━━━━━━━━━━━━━┓")?;
-        writeln!(f, "┃  Nodes (IPs):      {: <40} ┃", self.total_ips)?;
-        writeln!(f, "┃  Total Conns:      {: <40} ┃", total_conns)?;
-        writeln!(f, "┠──────────────────────────────────────────────────────┨")?;
-        writeln!(f, "┃  Direction:        Inbound: {: <10} Outbound: {: <10} ┃", 
-            self.total_clients, self.total_servers)?;
-        writeln!(f, "┃  Network Scope:    Intra:   {: <10} Extra:    {: <10} ┃", 
-            self.intranet_conns, self.extranet_conns)?;
-        writeln!(f, "┠──────────────────────────────────────────────────────┨")?;
-        writeln!(f, "┃  Uptime (secs):    Avg:     {: <10} Max:      {: <10} ┃", 
-            self.average_uptime, self.oldest_uptime)?;
-        write!(f,   "┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛")
+        write!(
+            f,
+            "\
+┏━━━━━━━━━━━━━━━━ AEX Connection Profile ━━━━━━━━━━━━━━━┓
+┃  Nodes (IPs):      {: <40} ┃
+┃  Total Conns:      {: <40} ┃
+┠──────────────────────────────────────────────────────┨
+┃  Direction:        Inbound: {: <10} Outbound: {: <10} ┃
+┃  Network Scope:    Intra:   {: <10} Extra:    {: <10} ┃
+┠──────────────────────────────────────────────────────┨
+┃  Uptime (secs):    Avg:     {: <10} Max:      {: <10} ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛",
+            self.total_ips,
+            total_conns,
+            self.total_clients,
+            self.total_servers,
+            self.intranet_conns,
+            self.extranet_conns,
+            self.average_uptime,
+            self.oldest_uptime
+        )
     }
 }

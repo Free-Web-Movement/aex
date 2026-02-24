@@ -15,7 +15,7 @@ pub struct Node {
     pub port: u16, // 监听端口,
     /// 💡 支持的协议列表，例如: ["tcp", "udp", "http", "ws"]
     pub protocols: HashSet<Protocol>,
-    pub(crate) ips: Vec<(NetworkScope, IpAddr)>,
+    pub ips: Vec<(NetworkScope, IpAddr)>,
 }
 
 impl Node {
