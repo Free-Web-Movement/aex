@@ -1,47 +1,57 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{ collections::HashMap, sync::Arc };
 use zz_validator::{
-    ast::{FieldRule, FieldType, Value},
+    ast::{ FieldRule, FieldType, Value },
     parser::Parser,
     validator::validate_object,
 };
 
 use crate::{
-    connection::context::TypeMapExt, exe, http::{meta::HttpMetadata, params::Params, protocol::status::StatusCode, types::Executor}
+    connection::context::TypeMapExt,
+    exe,
+    http::{ meta::HttpMetadata, params::Params, protocol::status::StatusCode, types::Executor },
 };
 
-/// 核心优化点 1：基于引用的转换，避免不必要的 String 拷贝
-/// 使用 eq_ignore_ascii_case 替代 to_lowercase() 减少内存分配
-fn convert_by_type(s: &str, field_type: &FieldType) -> Value {
-    match field_type {
-        FieldType::Int => s
-            .parse::<i64>()
-            .map(Value::Int)
-            .unwrap_or_else(|_| Value::String(s.to_owned())),
+/// 1. 独立转换函数：确保在 to_value_optimized 作用域内可见
+/// 失败时返回 String 类型的错误描述，供中间件回写 Body
+fn convert_by_type(s: &str, field_type: &FieldType) -> Result<Value, String> {
+    println!("inside convert by type !");
+    println!("s = {}, field_type = {:?} !", s, field_type);
+    let res = match field_type {
+        FieldType::Int =>
+            s
+                .parse::<i64>()
+                .map(Value::Int)
+                .map_err(|_| format!("'{}' is not a valid integer", s)),
 
         FieldType::Bool => {
+            // 严格匹配逻辑
             if s.eq_ignore_ascii_case("true") || s == "1" || s.eq_ignore_ascii_case("on") {
-                Value::Bool(true)
+                Ok(Value::Bool(true))
             } else if s.eq_ignore_ascii_case("false") || s == "0" || s.eq_ignore_ascii_case("off") {
-                Value::Bool(false)
+                Ok(Value::Bool(false))
             } else {
-                Value::String(s.to_owned())
+                // 命中该分支即报错，解决了测试不到 fallback 的问题
+                Err(format!("'{}' is not a valid boolean", s))
             }
         }
 
-        FieldType::Float => s
-            .parse::<f64>()
-            .map(Value::Float)
-            .unwrap_or_else(|_| Value::String(s.to_owned())),
+        FieldType::Float =>
+            s
+                .parse::<f64>()
+                .map(Value::Float)
+                .map_err(|_| format!("'{}' is not a valid float", s)),
 
-        _ => Value::String(s.to_owned()),
-    }
+        // String 类型及其他默认走这里
+        _ => Ok(Value::String(s.to_owned())),
+    };
+    println!("res = {:?} !", res);
+    res
 }
 
-/// 核心优化点 2：统一转换入口，直接从各种原始 Map 中提取
-/// 使用 with_capacity 减少 HashMap 扩容开销
-fn to_value_optimized<'a, I>(iter_provider: I, rules: &[FieldRule]) -> Value
-where
-    I: Fn(&str) -> Option<Vec<&'a str>>,
+/// 2. 优化后的值收集函数
+/// 返回 Result 以确保能够使用 ? 操作符进行短路返回（报错即停止）
+fn to_value_optimized<'a, I>(iter_provider: I, rules: &[FieldRule]) -> Result<Value, String>
+    where I: Fn(&str) -> Option<Vec<&'a str>>
 {
     let mut obj = HashMap::with_capacity(rules.len());
 
@@ -49,98 +59,188 @@ where
         let field_name = &rule.field;
         if let Some(values) = iter_provider(field_name) {
             if rule.is_array {
-                let converted = values
+                // 修复 E0277 核心：明确显式声明 Result<Vec<Value>, String>
+                // 这样 collect 才知道如何将 Result 项聚合为带结果的集合
+                let converted: Result<Vec<Value>, String> = values
                     .iter()
                     .map(|&s| convert_by_type(s, &rule.field_type))
                     .collect();
-                obj.insert(field_name.clone(), Value::Array(converted));
+
+                obj.insert(field_name.clone(), Value::Array(converted?));
             } else if let Some(&first_val) = values.first() {
-                obj.insert(
-                    field_name.clone(),
-                    convert_by_type(first_val, &rule.field_type),
-                );
+                // 单个值直接转换并用 ? 向上抛错
+                let value = convert_by_type(first_val, &rule.field_type)?;
+                println!("field_name: {}, value = {:?}", field_name, value);
+
+                obj.insert(field_name.clone(), value);
             }
         }
     }
-    Value::Object(obj)
+    Ok(Value::Object(obj))
 }
 
 pub fn to_validator(dsl_map: HashMap<String, String>) -> Arc<Executor> {
-    // -----------------------------
-    // 1️⃣ 注册期：预解析并将 HashMap 转为 Vec
-    // 遍历 Vec<(K,V)> 比遍历 HashMap 性能更好，因为 Source 通常只有 3 个
-    // -----------------------------
+    // 1️⃣ 注册期：预解析规则
     let mut compiled_vec = Vec::new();
     for (source, dsl) in dsl_map {
         if !dsl.trim().is_empty() {
-            if let Ok(rules) = Parser::parse_rules(&dsl) {
-                compiled_vec.push((source, rules));
+            match Parser::parse_rules(&dsl) {
+                Ok(rules) => {
+                    compiled_vec.push((source, rules));
+                }
+                Err(e) => {
+                    eprintln!("❌ DSL Parse Error [{}]: {:?}", source, e);
+                }
             }
         }
     }
+
     let compiled = Arc::new(compiled_vec);
 
-    exe!(|ctx, data| { data }, |ctx| {
-        let compiled = compiled.clone();
-        let mut res = true;
+    exe!(
+        |ctx, data| { data },
+        |ctx| {
+            let compiled = compiled.clone();
 
-        let meta = &mut ctx.local.get_value::<HttpMetadata>().unwrap();
-        println!("Validating request: {} {}", meta.method.to_str(), meta.path);
-        let params = meta.params.clone();
-        let params = params.unwrap_or_else(|| {
-            println!("No params found in metadata, using empty Params.");
-            Params::new("".to_string())
-        });
+            // 获取 Metadata，注意：我们需要在校验结束后将其写回
+            let mut meta = ctx.local.get_value::<HttpMetadata>().expect("HttpMetadata missing");
 
-        for (source, rules) in compiled.as_ref() {
-            // 核心优化点 3：使用闭包作为 Provider，消除中间 HashMap 构造
-            let mut value = match source.as_str() {
-                "params" => to_value_optimized(
-                    |key| {
-                        params
-                            .data
-                            .as_ref()
-                            .and_then(|m| m.get(key))
-                            .map(|v| vec![v.as_str()])
-                    },
-                    rules,
-                ),
-                "body" => to_value_optimized(
-                    |key| {
-                        params
-                            .form
-                            .as_ref()
-                            .and_then(|m| m.get(key))
-                            .map(|v| v.iter().map(|s| s.as_str()).collect())
-                    },
-                    rules,
-                ),
-                "query" => to_value_optimized(
-                    |key| {
-                        params
-                            .query
-                            .get(key)
-                            .map(|v| v.iter().map(|s| s.as_str()).collect())
-                    },
-                    rules,
-                ),
-                _ => continue,
-            };
+            // 拿到 Params 的副本进行操作
+            let mut params = meta.params.clone().unwrap_or_else(|| Params::new("".to_string()));
+            let mut res = true;
 
-            // 2️⃣ 执行校验
-            if let Err(e) = validate_object(&mut value, rules) {
-                meta.status = StatusCode::BadRequest;
-                // 预分配字符串容量
-                let mut err_msg = String::with_capacity(64);
-                err_msg.push_str(source);
-                err_msg.push_str(" validate error: ");
-                err_msg.push_str(&e.to_string());
+            for (source, rules) in compiled.as_ref() {
+                // 2️⃣ 执行转换逻辑
+                let value_result = match source.as_str() {
+                    "params" =>
+                        to_value_optimized(|key| {
+                            params.data
+                                .as_ref()
+                                .and_then(|m| m.get(key))
+                                .map(|v| vec![v.as_str()])
+                        }, rules),
+                    "body" =>
+                        to_value_optimized(|key| {
+                            params.form
+                                .as_ref()
+                                .and_then(|m| m.get(key))
+                                .map(|v|
+                                    v
+                                        .iter()
+                                        .map(|s| s.as_str())
+                                        .collect()
+                                )
+                        }, rules),
+                    "query" =>
+                        to_value_optimized(|key| {
+                            params.query.get(key).map(|v|
+                                v
+                                    .iter()
+                                    .map(|s| s.as_str())
+                                    .collect()
+                            )
+                        }, rules),
+                    _ => {
+                        continue;
+                    }
+                };
 
-                meta.body = err_msg.as_bytes().to_vec();
-                res = false;
-                break;
+                // 3️⃣ 处理转换与校验结果
+                match value_result {
+                    Ok(mut value) => {
+                        // 执行 zz-validator 校验
+                        // 这一步非常关键，它会处理 default 值并验证 logic
+                        if let Err(e) = validate_object(&mut value, rules) {
+                            let mut err_msg = String::with_capacity(64);
+                            err_msg.push_str(source);
+                            err_msg.push_str(" validate error: ");
+                            err_msg.push_str(&e.to_string());
+
+                            meta.status = StatusCode::BadRequest;
+                            meta.body = err_msg.into_bytes();
+                            res = false;
+                            break;
+                        }
+
+                        // 定义一个内部辅助逻辑，确保强类型 Value 转回 String 时不产生多余开销
+                        let value_to_string = |v: Value| -> String {
+                            match v {
+                                Value::Bool(b) => if b {
+                                    "true".to_string()
+                                } else {
+                                    "false".to_string()
+                                }
+                                Value::Int(i) => i.to_string(),
+                                Value::Float(f) => {
+                                    let s = f.to_string();
+                                    // 🚀 核心修复：如果转换结果没小数点，手动补上，防止校验器认为它是 Int
+                                    if !s.contains('.') {
+                                        format!("{}.0", s)
+                                    } else {
+                                        s
+                                    }
+                                }
+                                Value::String(s) => s, // 直接移动所有权，无分配
+                                _ => "".to_string(),
+                            }
+                        };
+
+                        if let Value::Object(obj) = value {
+                            match source.as_str() {
+                                "query" => {
+                                    for (k, v) in obj {
+                                        params.query.insert(k, match v {
+                                            Value::Array(arr) =>
+                                                arr.into_iter().map(&value_to_string).collect(),
+                                            _ => vec![value_to_string(v)],
+                                        });
+                                    }
+                                }
+                                "body" => {
+                                    let form_map = params.form.get_or_insert_with(HashMap::new);
+                                    for (k, v) in obj {
+                                        form_map.insert(k, match v {
+                                            Value::Array(arr) =>
+                                                arr.into_iter().map(&value_to_string).collect(),
+                                            _ => vec![value_to_string(v)],
+                                        });
+                                    }
+                                }
+                                "params" => {
+                                    let data_map = params.data.get_or_insert_with(HashMap::new);
+                                    for (k, v) in obj {
+                                        data_map.insert(k, value_to_string(v));
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                    Err(conv_err) => {
+                        // 捕获 convert_by_type 抛出的严格错误（无 to_owned 路径）
+                        let mut err_msg = String::with_capacity(64);
+                        err_msg.push_str(source);
+                        err_msg.push_str(" conversion error: ");
+                        err_msg.push_str(&conv_err);
+
+                        meta.status = StatusCode::BadRequest;
+                        meta.body = err_msg.into_bytes();
+                        res = false;
+                        break;
+                    }
+                }
             }
+
+            // 4️⃣ 统一写回 Metadata
+            // 无论成功还是失败（错误信息和状态码），都必须 set_value 才能生效
+            if res {
+                meta.params = Some(params);
+            }
+            ctx.local.set_value(meta);
+
+            res
         }
-        res
-    })
-}
+    )
+
+
+  }
