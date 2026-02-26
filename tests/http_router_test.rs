@@ -373,9 +373,9 @@ mod tests {
             .unwrap();
 
         // 断言验证
-        assert_eq!(res.status().as_u16(), 400);
+        assert_eq!(res.status().as_u16(), 403);
         let text = res.text().await.unwrap();
-        println!("{}", text);
+        assert!(text.contains("Blocked"));
         assert_eq!(handler_executed.load(Ordering::SeqCst), 0); // 处理器不应运行
     }
 

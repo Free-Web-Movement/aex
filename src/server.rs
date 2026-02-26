@@ -156,10 +156,16 @@ where
             peer_addr,
         );
         ctx.req().await.parse_to_local().await?;
+        
+        // handle_request 返回 true 表示所有中间件和 Handler 正常通过
+        // 返回 false 表示被拦截（如 validator 发现类型不匹配）
         if handle_request(&router, &mut ctx).await {
-            let _ = ctx.res().send_response().await;
+            // 🟢 正常出口
+            ctx.res().send_response().await?;
         } else {
-            let _ = ctx.res().send_failure().await;
+            // 🔴 错误/拦截出口
+            // 此时 send_failure 会读取 validator 写入的 "'{}' is not a valid boolean"
+            ctx.res().send_failure().await?;
         }
         Ok(())
     }

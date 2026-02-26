@@ -49,9 +49,22 @@ where
 
     pub async fn send_failure(&mut self) -> anyhow::Result<()> {
         let mut meta = self.local.get_value::<HttpMetadata>().unwrap();
+
+        // 如果中间件已经设置了 200 或 Ok，但走到了失败路径，强制修正为 400
+        if meta.status == StatusCode::Ok {
+            meta.status = StatusCode::BadRequest;
+        }
+
+        // 核心改变：如果 body 是空的（说明中间件没写错误详情），我们补一个默认提示
+        if meta.body.is_empty() {
+            meta.body = format!("Error: {}", meta.status.to_str()).into_bytes();
+        }
+
+        // 重新计算并同步 Header
         meta.headers
-            .insert(HeaderKey::ContentLength, "0".to_string());
-        meta.body.clear();
+            .insert(HeaderKey::ContentLength, meta.body.len().to_string());
+
+        // 执行发送
         self.send(&meta.headers, &meta.body, meta.status, meta.version)
             .await
     }

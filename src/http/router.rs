@@ -180,7 +180,6 @@ pub async fn handle_request(root: &Router, ctx: &mut HTTPContext) -> bool {
         meta.params = Some(params);
         ctx.local.set_value(meta.clone()); // 同步更新回 local，确保后续中间件和处理器能访问到最新的 Metadata
 
-        
         // let method_key = meta.method.to_str().to_owned(); // 提前拷贝一份用于匹配
         let method_key = meta.method.to_str().to_uppercase(); // 强制大写以匹配 HashMap 的 Key
 
@@ -192,7 +191,10 @@ pub async fn handle_request(root: &Router, ctx: &mut HTTPContext) -> bool {
                     if !mw(ctx).await {
                         // 如果中间件没有设置状态，我们补一个默认的 400
                         let mut meta = ctx.local.get_value::<HttpMetadata>().unwrap();
-                        meta.status = StatusCode::BadRequest;
+                        // meta.status = StatusCode::BadRequest;
+                        if meta.status == StatusCode::Ok {
+                            meta.status = StatusCode::BadRequest;
+                        }
                         ctx.local.set_value(meta);
                         return false;
                     }
