@@ -1,7 +1,9 @@
 #[cfg(test)]
 mod tests {
-    use aex::connection::context::{Context, GlobalContext, TypeMap, TypeMapExt};
-    use std::{net::SocketAddr, sync::Arc};
+    use aex::{communicators::event::Event, connection::context::{Context, GlobalContext, TypeMap, TypeMapExt}};
+    use futures::FutureExt;
+    use tokio::io;
+    use std::{net::SocketAddr, sync::{Arc, atomic::{AtomicUsize, Ordering}}};
 
     // --- 1. 测试 TypeMap 的存取逻辑 ---
     #[test]
@@ -94,5 +96,85 @@ mod tests {
 
         handle.await.unwrap();
         assert_eq!(ctx.lock().await.local.get_value::<usize>(), Some(99));
+    }
+    
+    #[tokio::test]
+    async fn test_context_full_flow() {
+        // 1. 初始化 GlobalContext
+        let addr = "127.0.0.1:8080".parse().unwrap();
+        let global = Arc::new(GlobalContext::new(addr));
+
+        // 准备计数器验证结果
+        let event_counter = Arc::new(AtomicUsize::new(0));
+        let pipe_counter = Arc::new(AtomicUsize::new(0));
+        let spread_counter = Arc::new(AtomicUsize::new(0));
+
+        // --- 预先注册订阅者 ---
+
+        // Event: 监听 "request_received" 事件
+        let ec = Arc::clone(&event_counter);
+        global.event.on("request_received".to_string(), move |req_id: u32| {
+            let c = Arc::clone(&ec);
+            async move {
+                println!("Event 收到请求 ID: {}", req_id);
+                c.fetch_add(1, Ordering::SeqCst);
+            }.boxed()
+        }).await;
+
+        // Pipe: 监听 "audit_log" (N:1)
+        let pc = Arc::clone(&pipe_counter);
+        global.pipe.register("audit_log", move |msg: String| {
+            let c = Arc::clone(&pc);
+            async move {
+                println!("Pipe 审计日志: {}", msg);
+                c.fetch_add(1, Ordering::SeqCst);
+            }.boxed()
+        }).await.unwrap();
+
+        // Spread: 订阅 "broadcast" (1:N)
+        let sc = Arc::clone(&spread_counter);
+        global.spread.subscribe("broadcast", move |val: i32| {
+            let c = Arc::clone(&sc);
+            async move {
+                println!("Spread 广播接收: {}", val);
+                c.fetch_add(1, Ordering::SeqCst);
+            }.boxed()
+        }).await.unwrap();
+
+        // --- 模拟连接进入 ---
+
+        // 模拟 Socket 读写流
+        let (client, _server) = io::duplex(64);
+        let (reader, writer) = io::split(client);
+        let remote_addr = "192.168.1.100:12345".parse().unwrap();
+
+        let ctx = Context::new(reader, writer, Arc::clone(&global), remote_addr);
+
+        // --- 执行业务逻辑测试 ---
+
+        // 1. 测试 elapsed (模拟处理耗时)
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        let time_spent = ctx.elapsed();
+        assert!(time_spent >= 100, "Elapsed 应该大于 100ms, 当前: {}ms", time_spent);
+
+        // 2. 使用 Event 通知系统有新请求
+        ctx.global.event.notify("request_received".to_string(), 1024_u32).await;
+
+        // 3. 使用 Pipe 发送结构化日志
+        ctx.global.pipe.send("audit_log", format!("Client {} processed in {}ms", ctx.addr, time_spent)).await.unwrap();
+
+        // 4. 使用 Spread 发布全局通知
+        ctx.global.spread.publish("broadcast", 200_i32).await.unwrap();
+
+        // --- 最终验证 ---
+        
+        // 给异步任务一点点执行时间 (通知是 spawn 出来的)
+        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+
+        assert_eq!(event_counter.load(Ordering::SeqCst), 1, "Event 应该触发一次");
+        assert_eq!(pipe_counter.load(Ordering::SeqCst), 1, "Pipe 应该处理一条日志");
+        assert_eq!(spread_counter.load(Ordering::SeqCst), 1, "Spread 应该收到一个广播");
+
+        println!("Context 集成功能全数测试通过！");
     }
 }

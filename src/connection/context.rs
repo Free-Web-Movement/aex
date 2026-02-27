@@ -1,16 +1,20 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
+use chrono::DateTime;
+use chrono::Utc;
 use tokio::io::{ BufReader, BufWriter };
 use tokio::net::tcp::{ OwnedReadHalf, OwnedWriteHalf };
 use tokio::sync::{ Mutex, RwLock };
 use std::any::TypeId;
 
+use crate::communicators::event::EventEmitter;
+use crate::communicators::pipe::PipeManager;
+use crate::communicators::spreader::SpreadManager;
 use crate::http::req::Request;
 use crate::http::res::Response;
 
 /// 全局扩展存储（TypeMap 抽象）
 pub type TypeMap = dashmap::DashMap<std::any::TypeId, Box<dyn std::any::Any + Send + Sync>>;
-
 
 pub trait TypeMapExt {
     fn get_value<T: Clone + 'static>(&self) -> Option<T>;
@@ -41,6 +45,9 @@ pub struct GlobalContext {
     pub addr: SocketAddr,
     pub local_node: Arc<RwLock<crate::connection::node::Node>>,
     pub manager: Arc<crate::connection::manager::ConnectionManager>,
+    pub pipe: PipeManager,
+    pub spread: SpreadManager,
+    pub event: EventEmitter,
     /// 全局 TypeMap：允许灵活添加数据库连接池、全局配置等
     pub extensions: Arc<RwLock<TypeMap>>,
 }
@@ -54,12 +61,13 @@ impl GlobalContext {
                 RwLock::new(crate::connection::node::Node::from_addr(addr, None, None))
             ),
             manager: Arc::new(crate::connection::manager::ConnectionManager::new()),
+            pipe: PipeManager::new(),
+            spread: SpreadManager::new(),
+            event: EventEmitter::new(),
             extensions: Arc::new(RwLock::new(TypeMap::default())),
         }
     }
 }
-
-
 
 // --- [Context] ---
 pub type SharedWriter<W> = Arc<Mutex<W>>;
@@ -67,6 +75,8 @@ pub type SharedWriter<W> = Arc<Mutex<W>>;
 pub struct Context<R, W> {
     // remote socket address
     pub addr: SocketAddr,
+    // 连接被进入时间
+    pub accepted: DateTime<Utc>,
     pub reader: R,
     pub writer: SharedWriter<W>,
     pub global: Arc<GlobalContext>,
@@ -86,6 +96,7 @@ pub type HTTPContext = Context<BufReader<OwnedReadHalf>, BufWriter<OwnedWriteHal
 impl<R, W> Context<R, W> {
     pub fn new(reader: R, writer: W, global: Arc<GlobalContext>, addr: SocketAddr) -> Self {
         Self {
+            accepted: Utc::now(),
             reader,
             writer: Arc::new(Mutex::new(writer)), // 初始化时即包装
             global,
@@ -110,5 +121,9 @@ impl<R, W> Context<R, W> {
             local: &mut self.local,
         }
     }
-}
 
+    /// 毫秒表示的已经经历时间
+    pub fn elapsed(&self) -> u64 {
+        Utc::now().signed_duration_since(self.accepted).num_milliseconds().max(0) as u64
+    }
+}
