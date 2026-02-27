@@ -84,7 +84,7 @@ where
                     let w = writer.take().ok_or_else(|| anyhow::anyhow!("Writer already taken"))?;
                     
                     // 执行业务 Handler
-                    return Ok(handler(cmd, Box::new(r), Box::new(w)).await?);
+                    return handler(cmd, Box::new(r), Box::new(w)).await;
                 }
             }
         }

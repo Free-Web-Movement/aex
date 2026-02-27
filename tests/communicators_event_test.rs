@@ -14,7 +14,7 @@ mod tests {
 
         emitter.on(
             "update".to_string(),
-            Arc::new(move |data: String| {
+            Arc::new(move |_data: String| {
                 let c = Arc::clone(&s_count);
                 (
                     async move {

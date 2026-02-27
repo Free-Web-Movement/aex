@@ -3,7 +3,7 @@
 mod tests {
     use aex::http::protocol::status::StatusCode;
 
-    use super::*;
+    
 
     #[test]
     fn test_from_u16_valid() {

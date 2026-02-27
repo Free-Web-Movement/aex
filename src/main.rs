@@ -41,7 +41,7 @@ async fn main() -> anyhow::Result<()> {
     let mut tcp_router = TcpRouter::<RawCodec, RawCodec, u32>::new(|c| c.id());
 
     // 注册 TCP 指令 1001
-    tcp_router.on(1001, |cmd, reader, writer| async move {
+    tcp_router.on(1001, |cmd, _reader, _writer| async move {
         println!("[TCP] Received 1001, payload len: {}", cmd.0.len());
         // 这里可以继续使用 reader/writer 进行长连接交互
         Ok(true)

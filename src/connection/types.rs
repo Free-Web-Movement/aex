@@ -122,6 +122,12 @@ pub struct BiDirectionalConnections {
     pub servers: DashMap<SocketAddr, Arc<ConnectionEntry>>,
 }
 
+impl Default for BiDirectionalConnections {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BiDirectionalConnections {
     pub fn new() -> Self {
         Self {

@@ -1,7 +1,5 @@
 use tokio::net::tcp::OwnedReadHalf;
 
-use crate::http::req::MAX_CAPACITY;
-
 #[repr(u8)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum HttpMethod {
@@ -134,7 +132,7 @@ impl HttpMethod {
 
     pub async fn is_http_connection(reader: &mut OwnedReadHalf) -> anyhow::Result<bool> {
 
-        let mut buf = [0u8; 16 as usize];
+        let mut buf = [0u8; 16_usize];
         let n = reader.peek(&mut buf).await?;
         if n == 0 {
             return Ok(false);

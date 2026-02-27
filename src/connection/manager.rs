@@ -21,6 +21,12 @@ pub struct ConnectionManager {
     // pub(crate) index_by_id: DashMap<Vec<u8>, SocketAddr>,
 }
 
+impl Default for ConnectionManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ConnectionManager {
     pub fn new() -> Self {
         Self {
@@ -120,13 +126,12 @@ impl ConnectionManager {
     /// 内部辅助：当某个 IP 桶完全为空时，从全局 Map 中移除以节省内存
     pub fn check_and_cleanup_bucket(&self, key: (IpAddr, NetworkScope)) {
         // 使用 get_mut 或 entry 以确保逻辑连贯
-        if let Some(bi_conn) = self.connections.get(&key) {
-            if bi_conn.clients.is_empty() && bi_conn.servers.is_empty() {
+        if let Some(bi_conn) = self.connections.get(&key)
+            && bi_conn.clients.is_empty() && bi_conn.servers.is_empty() {
                 // 必须手动显式 drop 掉 bi_conn 引用，否则 remove 会造成死锁（Ref 锁住了分片）
                 drop(bi_conn);
                 self.connections.remove(&key);
             }
-        }
     }
 
     /// 取消该 IP 下的所有连接（无论是哪个端口，无论是入站还是出站）

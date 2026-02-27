@@ -6,7 +6,7 @@ mod tests {
     #[tokio::test]
     async fn test_is_http_connection_eof() {
         // 1. 创建一个双工通道，模拟 TCP 连接
-        let (client, server) = tokio::io::duplex(1024);
+        let (client, _server) = tokio::io::duplex(1024);
 
         // 2. 将 server 端拆分，获取读半部
         // 注意：reader 类型需要匹配 OwnedReadHalf。
@@ -51,7 +51,7 @@ mod tests {
 
         // 2. 在拆分前，先对流进行处理
         // 我们可以通过把底层 std socket 拿出来并关闭它，或者简单地使用 into_split 后处理
-        let (mut reader, writer) = server_stream.into_split();
+        let (_reader, writer) = server_stream.into_split();
 
         // 3. 构造错误环境：
         // 在 OwnedReadHalf 存活时，如果我们通过某种方式让底层资源不可用。

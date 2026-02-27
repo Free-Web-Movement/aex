@@ -1,6 +1,5 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
-use futures::future::BoxFuture;
 use tokio::io::{ AsyncReadExt, BufReader, BufWriter };
 use tokio::net::UdpSocket;
 use tokio::net::{ TcpListener, tcp::{ OwnedReadHalf, OwnedWriteHalf } };
@@ -95,13 +94,12 @@ impl<F, C, K> AexServer<F, C, K>
                 let (mut reader, writer) = socket.into_split();
 
                 // 协议嗅探：HTTP
-                if let Some(hr) = &server_ctx.http_router {
-                    if HttpMethod::is_http_connection(&mut reader).await.unwrap_or_default() {
+                if let Some(hr) = &server_ctx.http_router
+                    && HttpMethod::is_http_connection(&mut reader).await.unwrap_or_default() {
                         let reader = BufReader::new(reader);
                         let writer = BufWriter::new(writer);
                         return Self::handle_http(hr.clone(), reader, writer, peer_addr).await;
                     }
-                }
 
                 // 自定义 TCP
                 if let Some(tr) = &server_ctx.tcp_router {
@@ -243,8 +241,8 @@ impl<F, C, K> AexServer<F, C, K>
                     }
 
                     // 2. 获取 Payload 并解码为 Command
-                    if let Some(payload) = frame.handle() {
-                        if let Ok(cmd) = <C as Codec>::decode(&payload) {
+                    if let Some(payload) = frame.handle()
+                        && let Ok(cmd) = <C as Codec>::decode(&payload) {
                             let key = (router_ctx.extractor)(&cmd);
 
                             // 3. 路由并执行逻辑
@@ -253,7 +251,6 @@ impl<F, C, K> AexServer<F, C, K>
                                 let _ = handler(cmd, peer_addr, socket_ctx).await;
                             }
                         }
-                    }
                 }
             });
         }

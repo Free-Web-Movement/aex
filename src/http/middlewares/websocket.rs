@@ -344,7 +344,7 @@ impl WebSocket {
                 }
 
                 // 启动 WebSocket 循环
-                if let Err(e) = Self::run(&*ws_guard, &mut ctx).await {
+                if let Err(e) = Self::run(&ws_guard, ctx).await {
                     eprintln!("WebSocket run error: {:?}", e);
                 }
 

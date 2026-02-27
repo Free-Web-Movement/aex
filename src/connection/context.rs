@@ -28,8 +28,7 @@ impl TypeMapExt for TypeMap {
             .and_then(|r| {
                 // r.value() 拿到的是 Box<dyn Any>
                 r.value()
-                    .downcast_ref::<T>()
-                    .map(|v| v.clone())
+                    .downcast_ref::<T>().cloned()
             })
     }
 
@@ -61,9 +60,9 @@ impl GlobalContext {
                 RwLock::new(crate::connection::node::Node::from_addr(addr, None, None))
             ),
             manager: Arc::new(crate::connection::manager::ConnectionManager::new()),
-            pipe: PipeManager::new(),
-            spread: SpreadManager::new(),
-            event: EventEmitter::new(),
+            pipe: PipeManager::default(),
+            spread: SpreadManager::default(),
+            event: EventEmitter::default(),
             extensions: Arc::new(RwLock::new(TypeMap::default())),
         }
     }

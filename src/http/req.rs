@@ -153,18 +153,17 @@ where
             if line.is_empty() {
                 break;
             }
-            if let Some(pos) = line.find(':') {
-                if let Some(key) = HeaderKey::from_str(line[..pos].trim()) {
+            if let Some(pos) = line.find(':')
+                && let Some(key) = HeaderKey::from_str(line[..pos].trim()) {
                     map.insert(key, line[pos + 1..].trim().to_string());
                 }
-            }
         }
         Ok(map)
     }
 
     // --- 业务 Getter ---
     pub fn method(&self) -> HttpMethod {
-        self.local.get_value::<HttpMetadata>().unwrap().method.clone()
+        self.local.get_value::<HttpMetadata>().unwrap().method
     }
 
     /// 快速获取所有的 Params

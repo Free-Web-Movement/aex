@@ -8,14 +8,12 @@ use zz_validator::{
 use crate::{
     connection::context::TypeMapExt,
     exe,
-    http::{meta::HttpMetadata, params::Params, protocol::status::StatusCode, types::Executor},
+    http::{meta::HttpMetadata, protocol::status::StatusCode, types::Executor},
 };
 
 /// 1. 独立转换函数：确保在 to_value_optimized 作用域内可见
 /// 失败时返回 String 类型的错误描述，供中间件回写 Body
 fn convert_by_type(s: &str, field_type: &FieldType) -> Result<Value, String> {
-    println!("inside convert by type !");
-    println!("s = {}, field_type = {:?} !", s, field_type);
     let res = match field_type {
         FieldType::Int => s
             .parse::<i64>()
@@ -42,7 +40,6 @@ fn convert_by_type(s: &str, field_type: &FieldType) -> Result<Value, String> {
         // String 类型及其他默认走这里
         _ => Ok(Value::String(s.to_owned())),
     };
-    println!("res = {:?} !", res);
     res
 }
 
@@ -69,8 +66,6 @@ where
             } else if let Some(&first_val) = values.first() {
                 // 单个值直接转换并用 ? 向上抛错
                 let value = convert_by_type(first_val, &rule.field_type)?;
-                println!("field_name: {}, value = {:?}", field_name, value);
-
                 obj.insert(field_name.clone(), value);
             }
         }

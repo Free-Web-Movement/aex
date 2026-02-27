@@ -1,7 +1,6 @@
 #[cfg(test)]
 mod tests {
     use std::{
-        collections::HashMap,
         net::SocketAddr,
         sync::{
             Arc,
@@ -16,7 +15,6 @@ mod tests {
         exe, get,
         http::{
             meta::HttpMetadata,
-            middlewares,
             protocol::{header::HeaderKey, status::StatusCode},
             router::{NodeType, Router},
             types::{Executor, to_executor},
@@ -27,7 +25,7 @@ mod tests {
     };
     use bincode::{Decode, Encode};
     use futures::FutureExt;
-    use tokio::{sync::Mutex, time::sleep};
+    use tokio::time::sleep;
 
     #[derive(serde::Serialize, serde::Deserialize, Encode, Decode, Clone, Debug)]
     pub struct MockProtocol(Vec<u8>);
@@ -180,7 +178,7 @@ mod tests {
         let actual_addr = listener.local_addr().unwrap();
         drop(listener); // 释放端口给 AexServer
 
-        let mut server = AexServer::<MockProtocol, MockProtocol, u32>::new(actual_addr);
+        let server = AexServer::<MockProtocol, MockProtocol, u32>::new(actual_addr);
         let server = server.http(hr);
 
         tokio::spawn(async move {
@@ -281,7 +279,7 @@ mod tests {
         let actual_addr = listener.local_addr().unwrap();
         drop(listener);
 
-        let mut server = AexServer::<MockProtocol, MockProtocol, u32>::new(actual_addr);
+        let server = AexServer::<MockProtocol, MockProtocol, u32>::new(actual_addr);
         let server = server.http(hr);
 
         tokio::spawn(async move {
@@ -361,7 +359,7 @@ mod tests {
             .unwrap()
             .local_addr()
             .unwrap();
-        let mut server = AexServer::<MockProtocol, MockProtocol, u32>::new(actual_addr);
+        let server = AexServer::<MockProtocol, MockProtocol, u32>::new(actual_addr);
         let server = server.http(hr);
         tokio::spawn(async move {
             let _ = server.start().await;
@@ -390,7 +388,7 @@ mod tests {
             .local_addr()
             .unwrap();
 
-        let mut server = AexServer::<MockProtocol, MockProtocol, u32>::new(actual_addr);
+        let server = AexServer::<MockProtocol, MockProtocol, u32>::new(actual_addr);
         let server = server.http(hr);
         tokio::spawn(async move {
             let _ = server.start().await;
@@ -469,7 +467,7 @@ mod tests {
             .unwrap()
             .local_addr()
             .unwrap();
-        let mut server = AexServer::<MockProtocol, MockProtocol, u32>::new(actual_addr);
+        let server = AexServer::<MockProtocol, MockProtocol, u32>::new(actual_addr);
         let server = server.http(hr);
         tokio::spawn(async move {
             let _ = server.start().await;
@@ -527,7 +525,7 @@ mod tests {
             .unwrap()
             .local_addr()
             .unwrap();
-        let mut server = AexServer::<MockProtocol, MockProtocol, u32>::new(actual_addr);
+        let server = AexServer::<MockProtocol, MockProtocol, u32>::new(actual_addr);
         let server = server.http(hr);
         tokio::spawn(async move {
             let _ = server.start().await;
@@ -590,7 +588,7 @@ mod tests {
             .unwrap()
             .local_addr()
             .unwrap();
-        let mut server = AexServer::<MockProtocol, MockProtocol, u32>::new(actual_addr);
+        let server = AexServer::<MockProtocol, MockProtocol, u32>::new(actual_addr);
         let server = server.http(hr);
         tokio::spawn(async move {
             let _ = server.start().await;
@@ -633,7 +631,7 @@ mod tests {
         let mut hr = Router::new(NodeType::Static("root".into()));
         let mw_hit_count = Arc::new(AtomicUsize::new(0));
 
-        let mut server = AexServer::<MockProtocol, MockProtocol, u32>::new(actual_addr);
+        let server = AexServer::<MockProtocol, MockProtocol, u32>::new(actual_addr);
 
         let count = mw_hit_count.clone();
         let mw_any: Arc<Executor> = Arc::new(move |_| {
@@ -712,7 +710,7 @@ mod tests {
         });
 
         // 2. 使用 to_executor 定义一个额外的中间件（比如检查特定的 Header）
-        let mw_header_check = to_executor(|ctx| {
+        let mw_header_check = to_executor(|_ctx| {
             async move {
                 // 这里可以做一些逻辑判断
                 println!("Middleware 2: Checking request...");
@@ -758,7 +756,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_full_macros_suite() {
-        use std::sync::Mutex; // 使用标准库锁简化测试代码中的同步操作
+         // 使用标准库锁简化测试代码中的同步操作
 
         let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
         let actual_addr = tokio::net::TcpListener::bind(addr)
@@ -777,7 +775,7 @@ mod tests {
                 async move { true }.await;
                 true
             },
-            |ctx| { "info".to_string() }
+            |_ctx| { "info".to_string() }
         );
 
         // --- 2. 使用 exe! 定义 Handler (修正版) ---
@@ -850,7 +848,7 @@ mod tests {
                 async move { true }.await;
                 true
             },
-            |ctx| { 
+            |_ctx| { 
                 // pre 块：这里可以根据不同请求生成动态数据
                 "processed-by-macro".to_string() 
             }

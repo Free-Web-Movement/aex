@@ -13,6 +13,12 @@ pub struct PipeManager {
     senders: RwLock<HashMap<String, Box<dyn Any + Send + Sync>>>,
 }
 
+impl Default for PipeManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PipeManager {
     pub fn new() -> Self {
         Self { senders: RwLock::new(HashMap::new()) }

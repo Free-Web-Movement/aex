@@ -57,6 +57,12 @@ pub struct EventEmitter {
     handlers: Arc<RwLock<HashMap<String, Vec<Box<dyn Any + Send + Sync>>>>>,
 }
 
+impl Default for EventEmitter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl EventEmitter {
     pub fn new() -> Self {
         Self {

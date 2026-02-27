@@ -190,7 +190,7 @@ mod router_tests {
         };
 
         let mut r_none: Option<OwnedReadHalf> = None;
-        let (r_real, w_real) = mock_io().await;
+        let (_r_real, w_real) = mock_io().await;
         let mut w_some = Some(w_real);
 
         let res = router.handle_frame(frame, &mut r_none, &mut w_some).await;

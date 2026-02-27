@@ -15,24 +15,6 @@ mod websocket_tests {
     use std::{collections::HashMap, net::SocketAddr, sync::Arc};
     use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader, BufWriter};
 
-    // 辅助工具：构建模拟的 Reader 和 Writer
-    async fn setup_mock_stream(
-        input: Vec<u8>,
-    ) -> (
-        BufReader<tokio::io::DuplexStream>,
-        BufWriter<tokio::io::DuplexStream>,
-    ) {
-        let (client, server) = tokio::io::duplex(1024);
-        let mut client_writer = client;
-        tokio::spawn(async move {
-            client_writer.write_all(&input).await.unwrap();
-        });
-        (
-            BufReader::new(server),
-            BufWriter::new(tokio::io::duplex(1024).1),
-        )
-    }
-
     // 辅助工具：生成合法的 WebSocket 帧
     fn create_ws_frame(opcode: u8, payload: &[u8], masked: bool) -> Vec<u8> {
         let mut frame = Vec::new();
@@ -85,7 +67,7 @@ mod websocket_tests {
 
     #[tokio::test]
     async fn test_handshake_success() {
-        let (_client, server_read) = tokio::io::duplex(1024);
+        let (_client, _server_read) = tokio::io::duplex(1024);
         let (_server_read, server_write) = tokio::io::duplex(1024);
         let mut writer = BufWriter::new(server_write);
 
@@ -353,7 +335,7 @@ mod websocket_tests {
 
     #[tokio::test]
     async fn test_websocket_full_integration_via_router() {
-        use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader, BufWriter};
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
         use tokio::net::TcpStream;
 
         // --- 1. 服务器配置 ---
@@ -383,7 +365,7 @@ mod websocket_tests {
         let ws_middleware = WebSocket::to_middleware(ws_logic);
 
         // 定义一个空 Handler（WebSocket 中间件会拦截并返回 false，所以这个 handler 永远不会执行）
-        let ws_handler = exe!(|ctx| { false });
+        let ws_handler = exe!(|_ctx| { false });
 
         // 挂载到路由：GET /ws
         route!(hr, get!("/ws", ws_handler, vec![ws_middleware.into()]));
@@ -683,7 +665,7 @@ mod websocket_tests {
         // 修正后的语法：使用 ctx 闭包参数，并对中间件调用 .into()
         route!(
             hr,
-            get!("/trigger", exe!(|ctx| { true }), vec![ws_mw.into()])
+            get!("/trigger", exe!(|_ctx| { true }), vec![ws_mw.into()])
         );
 
         let server = HTTPServer::new(actual_addr).http(hr);
@@ -752,7 +734,7 @@ mod websocket_tests {
         let ws_mw = WebSocket::to_middleware(ws);
         route!(
             hr,
-            get!("/read_test", exe!(|ctx| { true }), vec![ws_mw.into()])
+            get!("/read_test", exe!(|_ctx| { true }), vec![ws_mw.into()])
         );
 
         let server = HTTPServer::new(actual_addr).http(hr);
@@ -843,7 +825,7 @@ mod websocket_tests {
         });
         route!(
             hr,
-            get!("/protocol", exe!(|ctx| { true }), vec![ws_mw.into()])
+            get!("/protocol", exe!(|_ctx| { true }), vec![ws_mw.into()])
         );
 
         let server = HTTPServer::new(actual_addr).http(hr);
@@ -905,7 +887,7 @@ mod websocket_tests {
             let _ = stream.read(&mut buf).await.unwrap();
 
             // 发送 Code 1005 (RFC 规定不能在关闭帧里显式发送 1005)
-            let mut close_payload = 1005u16.to_be_bytes().to_vec();
+            let close_payload = 1005u16.to_be_bytes().to_vec();
             let mut frame = vec![0x88, 0x82, 0, 0, 0, 0];
             frame.extend_from_slice(&close_payload);
 
@@ -947,7 +929,7 @@ mod websocket_tests {
         let ws_mw = WebSocket::to_middleware(ws);
         route!(
             hr,
-            get!("/len127", exe!(|ctx| { true }), vec![ws_mw.into()])
+            get!("/len127", exe!(|_ctx| { true }), vec![ws_mw.into()])
         );
 
         let server = HTTPServer::new(actual_addr).http(hr);
@@ -1011,7 +993,7 @@ mod websocket_tests {
 
         let mut hr = Router::new(NodeType::Static("root".into()));
         let ws = WebSocket {
-            on_text: Some(Arc::new(|_, ctx, text| {
+            on_text: Some(Arc::new(|_, ctx, _text| {
                 Box::pin(async move {
                     let mut w = ctx.writer.lock().await;
                     let _ = WebSocket::send_text(&mut w, "ack").await;
@@ -1023,7 +1005,7 @@ mod websocket_tests {
 
         let ws_mw = WebSocket::to_middleware(ws);
         // 换一个不带 pong 字样的路径，彻底消除干扰
-        route!(hr, get!("/t", exe!(|ctx| { true }), vec![ws_mw.into()]));
+        route!(hr, get!("/t", exe!(|_ctx| { true }), vec![ws_mw.into()]));
 
         let server = HTTPServer::new(actual_addr).http(hr);
         tokio::spawn(async move {
@@ -1050,7 +1032,7 @@ mod websocket_tests {
             .unwrap();
 
         // 4. 读取结果
-        let n = stream.read(&mut buf).await.unwrap();
+        let _n = stream.read(&mut buf).await.unwrap();
 
         // 关键点：如果服务器正确静默处理了 Pong，那么我们读到的第一个字节必须是 Text 响应 (0x81)
         // 如果服务器错误地回发了 Pong，那么读到的第一个字节会是 0x8a
@@ -1092,7 +1074,7 @@ mod websocket_tests {
         let ws_mw = WebSocket::to_middleware(ws);
         route!(
             hr,
-            get!("/large_send", exe!(|ctx| { true }), vec![ws_mw.into()])
+            get!("/large_send", exe!(|_ctx| { true }), vec![ws_mw.into()])
         );
 
         let server = HTTPServer::new(actual_addr).http(hr);
@@ -1140,7 +1122,7 @@ mod websocket_tests {
 
     #[tokio::test]
     async fn test_websocket_all_handler_paths_combined() {
-        use std::sync::atomic::{AtomicU8, Ordering};
+        use std::sync::atomic::AtomicU8;
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         use tokio::net::{TcpListener, TcpStream};
 
@@ -1156,7 +1138,7 @@ mod websocket_tests {
 
         let ws = WebSocket {
             on_text: Some(Arc::new(move |_, _, text| {
-                let s = stage_clone.clone();
+                let _s = stage_clone.clone();
                 Box::pin(async move {
                     if text == "trigger_fail" {
                         return false; // 👈 触发 0x1 分支的 break
@@ -1176,7 +1158,7 @@ mod websocket_tests {
 
         let mut hr = Router::new(NodeType::Static("root".into()));
         let ws_mw = WebSocket::to_middleware(ws);
-        route!(hr, get!("/ws", exe!(|ctx| { true }), vec![ws_mw.into()]));
+        route!(hr, get!("/ws", exe!(|_ctx| { true }), vec![ws_mw.into()]));
 
         let server = HTTPServer::new(actual_addr).http(hr);
         tokio::spawn(async move {
@@ -1200,7 +1182,7 @@ mod websocket_tests {
             stream.write_all(&frame).await.unwrap();
 
             // 验证: 1. 执行了 from_utf8_lossy 2. 执行了 close 3. 执行了 break
-            let n = stream.read(&mut buf).await.unwrap();
+            let _n = stream.read(&mut buf).await.unwrap();
             assert_eq!(buf[0], 0x88, "0x1 拒绝应返回 Close 帧");
             assert_eq!(u16::from_be_bytes([buf[2], buf[3]]), 1000);
 
@@ -1218,11 +1200,11 @@ mod websocket_tests {
 
             // 发送 Binary 消息 [0xDE, 0xAD]
             // 0x82 (FIN+Binary), 0x82 (Mask=1, Len=2)
-            let mut frame = vec![0x82, 0x82, 0, 0, 0, 0, 0xDE, 0xAD];
+            let frame = vec![0x82, 0x82, 0, 0, 0, 0, 0xDE, 0xAD];
             stream.write_all(&frame).await.unwrap();
 
             // 验证: 1. 调用 on_binary 2. 执行了 close 3. 执行了 break
-            let n = stream.read(&mut buf).await.unwrap();
+            let _n = stream.read(&mut buf).await.unwrap();
             assert_eq!(buf[0], 0x88, "0x2 拒绝应返回 Close 帧");
             assert_eq!(u16::from_be_bytes([buf[2], buf[3]]), 1000);
 
@@ -1242,7 +1224,7 @@ mod websocket_tests {
             // read_full 会命中 _ => anyhow::bail!("unknown opcode")
             stream.write_all(&[0x83, 0x80, 0, 0, 0, 0]).await.unwrap();
 
-            let n = stream.read(&mut buf).await.unwrap();
+            let _n = stream.read(&mut buf).await.unwrap();
             assert_eq!(buf[0], 0x88, "遇到未知 Opcode 应发送 Close 帧");
             assert_eq!(
                 u16::from_be_bytes([buf[2], buf[3]]),
@@ -1265,7 +1247,7 @@ async fn test_websocket_custom_close_codes_range() {
 
     let mut hr = Router::new(NodeType::Static("root".into()));
     let ws_mw = WebSocket::to_middleware(WebSocket { on_text: None, on_binary: None });
-    route!(hr, get!("/custom_code", exe!(|ctx| { true }), vec![ws_mw.into()]));
+    route!(hr, get!("/custom_code", exe!(|_ctx| { true }), vec![ws_mw.into()]));
 
     let server = HTTPServer::new(actual_addr).http(hr);
     tokio::spawn(async move { let _ = server.start().await; });
@@ -1298,7 +1280,7 @@ async fn test_websocket_custom_close_codes_range() {
     // 3. 验证服务端响应
     // 源码逻辑：parse_close_payload 成功返回 Ok((4000, None))
     // 随后 run 会调用 Self::close(writer, 4000, None) 并 bail
-    let n = stream.read(&mut buf).await.unwrap();
+    let _n = stream.read(&mut buf).await.unwrap();
     
     assert_eq!(buf[0], 0x88, "应响应关闭帧");
     let received_code = u16::from_be_bytes([buf[2], buf[3]]);
@@ -1326,7 +1308,7 @@ async fn test_websocket_strict_protocol_validation() {
         on_binary: None,
     };
     let ws_mw = WebSocket::to_middleware(ws);
-    route!(hr, get!("/strict", exe!(|ctx| { true }), vec![ws_mw.into()]));
+    route!(hr, get!("/strict", exe!(|_ctx| { true }), vec![ws_mw.into()]));
 
     let server = HTTPServer::new(actual_addr).http(hr);
     tokio::spawn(async move { let _ = server.start().await; });

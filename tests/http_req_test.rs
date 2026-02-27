@@ -11,27 +11,6 @@ mod tests {
     use std::io::Cursor;
     use tokio::io::BufReader;
 
-    // 辅助函数：构造测试用的 Request
-    fn setup_request<'a>(
-        input: &'a [u8],
-        local: &'a mut TypeMap,
-    ) -> Request<'a, BufReader<Cursor<&'a [u8]>>> {
-        let cursor = Cursor::new(input);
-        let reader = BufReader::new(cursor);
-        Request::new(Box::leak(Box::new(reader)), local) // 仅用于测试示例简化生命周期
-    }
-
-    // 由于生命周期复杂，测试中直接手动构造
-    macro_rules! test_req {
-        ($input:expr, $local:expr) => {{
-            let reader = BufReader::new(Cursor::new($input));
-            Request {
-                reader: Box::leak(Box::new(reader)),
-                local: $local,
-            }
-        }};
-    }
-
     #[tokio::test]
     async fn test_parse_to_local_success() {
         let mut local = TypeMap::new();
@@ -136,7 +115,7 @@ mod tests {
         // 构造一个超过 MAX_CAPACITY 的行 (假设 MAX_CAPACITY 为 1024)
         let long_line = vec![b'a'; 2048];
         let mut reader = BufReader::new(Cursor::new(long_line));
-        let req = Request::new(&mut reader, &mut local);
+        let _req = Request::new(&mut reader, &mut local);
 
         // 由于 read_until 会持续读取直到看到 \n，
         // 虽然代码里没直接检查长度，但 read_until 内部 buf 会增长。

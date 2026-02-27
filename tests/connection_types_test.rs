@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use super::*;
+    
     use std::{net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr}, sync::atomic::Ordering};
     use aex::connection::{node::Node, protocol::Protocol, types::{ConnectionEntry, NetworkScope}};
     use tokio::net::{TcpListener, tcp::OwnedWriteHalf};

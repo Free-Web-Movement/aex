@@ -1,10 +1,10 @@
 #[cfg(test)]
 mod tests {
-    use super::*;
+    
     use aex::connection::{
-        context::{TypeMap, TypeMapExt}, manager::ConnectionManager, types::{ BiDirectionalConnections, NetworkScope }
+        manager::ConnectionManager, types::{ BiDirectionalConnections, NetworkScope }
     };
-    use tokio::net::{ TcpStream, tcp::OwnedWriteHalf };
+    use tokio::net::tcp::OwnedWriteHalf;
     use std::net::{ IpAddr, Ipv4Addr, SocketAddr };
 
     // 辅助函数：创建一个模拟的 OwnedWriteHalf

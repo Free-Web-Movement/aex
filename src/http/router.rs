@@ -105,11 +105,10 @@ impl Router {
         let rest = &segs[1..];
 
         // 1. 静态匹配
-        if let Some(child) = self.children.get(seg) {
-            if let matched @ Some(_) = child.match_route(rest, params) {
+        if let Some(child) = self.children.get(seg)
+            && let matched @ Some(_) = child.match_route(rest, params) {
                 return matched;
             }
-        }
 
         // 2. 动态匹配
         if let Some(param_child) = self.children.get(":") {

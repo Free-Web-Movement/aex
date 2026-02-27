@@ -1,4 +1,4 @@
-use std::{collections::HashMap, net::SocketAddr};
+use std::collections::HashMap;
 
 use aex::{
     connection::context::TypeMapExt,
@@ -346,7 +346,7 @@ async fn test_validator_edge_cases_and_fallback() {
     // 它会执行 .unwrap_or_else(|_| Value::String(s.to_owned()))
 
     // 我们定义一个带 int 的规则来触发对应分支的 fallback
-    let mw_fallback = v!(query => "(age:string)"); // 注意这里用 string 承接
+    let _mw_fallback = v!(query => "(age:string)"); // 注意这里用 string 承接
     // 如果 convert_by_type 里的 Int 分支被调用（根据规则类型），它就会走 s.to_owned()
 
     let res_fallback = client

@@ -12,6 +12,12 @@ pub struct SpreadManager {
     hubs: RwLock<HashMap<String, Box<dyn Any + Send + Sync>>>,
 }
 
+impl Default for SpreadManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SpreadManager {
     pub fn new() -> Self {
         Self { hubs: RwLock::new(HashMap::new()) }
