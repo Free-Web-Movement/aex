@@ -320,7 +320,7 @@ impl WebSocket {
         use futures::FutureExt;
         let ws = Arc::new(Mutex::new(ws));
 
-        Box::new(move |mut ctx: &mut HTTPContext| {
+        Box::new(move |ctx: &mut HTTPContext| {
             let ws = ws.clone();
             (async move {
                 let meta = ctx.local.get_value::<HttpMetadata>().unwrap();
