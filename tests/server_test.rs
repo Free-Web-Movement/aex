@@ -1,15 +1,17 @@
 #[cfg(test)]
 mod aex_tests {
+    use aex::communicators::event::Event;
     use aex::connection::context::{ HTTPContext, TypeMapExt };
     use aex::http::meta::HttpMetadata;
     use aex::http::protocol::header::HeaderKey;
     use aex::http::protocol::status::StatusCode;
-    use aex::server::AexServer;
+    use aex::server::{ AexServer, HTTPServer };
     use aex::tcp::types::{ Codec, Command, Frame };
-    use aex::{ get, route };
     use futures::FutureExt;
+    use std::sync::atomic::Ordering;
     use std::net::SocketAddr;
     use std::sync::Arc;
+    use std::sync::atomic::AtomicUsize;
     use tokio::io::AsyncWriteExt;
     use tokio::net::{ TcpListener, TcpStream, UdpSocket };
     use tokio::time::{ Duration, sleep, timeout };
@@ -165,5 +167,86 @@ mod aex_tests {
         if test_result.is_err() {
             panic!("Test timed out! Possible deadlock or server not responding.");
         }
+    }
+
+    #[tokio::test]
+    async fn test_server_communication_bus() {
+        let addr = "127.0.0.1:0".parse().unwrap(); // 自动分配可用端口
+        let server = HTTPServer::new(addr);
+
+        // 准备计数器
+        let pipe_count = Arc::new(AtomicUsize::new(0));
+        let spread_count = Arc::new(AtomicUsize::new(0));
+        let event_count = Arc::new(AtomicUsize::new(0));
+
+        // 1. 测试 Pipe (N:1)
+        let p_c = Arc::clone(&pipe_count);
+        server.pipe::<String>(
+            "audit_log",
+            Box::new(move |msg| {
+                let c = Arc::clone(&p_c);
+                (
+                    async move {
+                        println!("[Pipe Test] 收到日志: {}", msg);
+                        c.fetch_add(1, Ordering::SeqCst);
+                    }
+                ).boxed()
+            })
+        ).await;
+
+        // 2. 测试 Spread (1:N)
+        let s_c = Arc::clone(&spread_count);
+        server.spread::<i32>(
+            "config_sync",
+            Box::new(move |val| {
+                let c = Arc::clone(&s_c);
+                (
+                    async move {
+                        println!("[Spread Test] 收到配置版本: {}", val);
+                        c.fetch_add(1, Ordering::SeqCst);
+                    }
+                ).boxed()
+            })
+        ).await;
+
+        // 3. 测试 Event (M:N)
+        let e_c = Arc::clone(&event_count);
+        server.event::<u32>(
+            "user_login",
+            Arc::new(move |uid| {
+                let c = Arc::clone(&e_c);
+                (
+                    async move {
+                        println!("[Event Test] 用户 {} 登录", uid);
+                        c.fetch_add(1, Ordering::SeqCst);
+                    }
+                ).boxed()
+            })
+        ).await;
+
+        // --- 模拟业务触发 ---
+        // 在实际运行中，这些触发通常发生在 Context 逻辑内
+        {
+            let globals = server.globals.lock().await;
+
+            // 触发 Pipe
+            globals.pipe.send("audit_log", "Server started".to_string()).await.unwrap();
+
+            // 触发 Spread
+            globals.spread.publish("config_sync", 101).await.unwrap();
+
+            // 触发 Event
+            globals.event.notify("user_login".to_string(), 888_u32).await;
+        }
+
+        // 给异步任务一点点执行时间
+        sleep(Duration::from_millis(100)).await;
+
+        // 断言验证
+        assert_eq!(pipe_count.load(Ordering::SeqCst), 1, "Pipe 回调应执行 1 次");
+        assert_eq!(spread_count.load(Ordering::SeqCst), 1, "Spread 回调应执行 1 次");
+        assert_eq!(event_count.load(Ordering::SeqCst), 1, "Event 回调应执行 1 次");
+
+        println!("✅ AexServer 通讯总线功能验证通过！");
     }
 }

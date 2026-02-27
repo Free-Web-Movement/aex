@@ -4,6 +4,9 @@ use std::sync::Arc;
 use tokio::sync::{broadcast, RwLock};
 use futures::future::BoxFuture;
 
+
+pub type SpreadCallback<T> = Box<dyn (Fn(T) -> BoxFuture<'static, ()>) + Send + Sync>;
+
 pub struct SpreadManager {
     // 存储广播发送端：Map<频道名, Box<broadcast::Sender<T>>>
     hubs: RwLock<HashMap<String, Box<dyn Any + Send + Sync>>>,
@@ -16,10 +19,9 @@ impl SpreadManager {
 
     /// 【订阅消息】—— 频道的“生命源头”
     /// 只有通过 subscribe，频道才会被物理创建
-    pub async fn subscribe<T, F>(&self, name: &str, callback: F) -> Result<(), String>
+    pub async fn subscribe<T>(&self, name: &str, callback: SpreadCallback<T>) -> Result<(), String>
     where
         T: Clone + Send + Sync + 'static,
-        F: Fn(T) -> BoxFuture<'static, ()> + Send + Sync + 'static,
     {
         let mut rx = {
             let mut map = self.hubs.write().await;

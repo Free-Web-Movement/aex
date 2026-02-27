@@ -6,7 +6,7 @@ use futures::future::BoxFuture;
 
 // 定义回调函数的类型约束
 // 它接收一个 T，并返回一个异步的 Unit 结果
-type PipeCallback<T> = Box<dyn (Fn(T) -> BoxFuture<'static, ()>) + Send + Sync>;
+pub type PipeCallback<T> = Box<dyn (Fn(T) -> BoxFuture<'static, ()>) + Send + Sync>;
 
 pub struct PipeManager {
     // 存储发送端，用于 N 端投递
@@ -20,8 +20,8 @@ impl PipeManager {
 
     /// 【接收端注册】
     /// 增加冲突检测：如果 name 已存在，则注册失败并提示错误
-    pub async fn register<T, F>(&self, name: &str, callback: F) -> Result<(), String>
-        where T: Send + 'static, F: Fn(T) -> BoxFuture<'static, ()> + Send + Sync + 'static
+    pub async fn register<T>(&self, name: &str, callback: PipeCallback<T>) -> Result<(), String>
+        where T: Send + 'static
     {
         // 1. 检查名称是否已被占用
         {

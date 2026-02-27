@@ -13,8 +13,7 @@ pub trait Event<D> where D: Clone + Send + Sync + 'static {
     fn map(&self) -> Arc<RwLock<HashMap<String, Vec<Box<dyn Any + Send + Sync>>>>>;
 
     /// 注册接收器
-    fn on<F>(&self, event_name: String, callback: F) -> impl Future<Output = ()>
-        where F: Fn(D) -> BoxFuture<'static, ()> + Send + Sync + 'static
+    fn _on(&self, event_name: String, callback: EventCallback<D>) -> impl Future<Output = ()>
     {
         async {
             let handlers = self.map();
@@ -22,7 +21,7 @@ pub trait Event<D> where D: Clone + Send + Sync + 'static {
             let mut map = handlers.write().await;
             let list = map.entry(event_name).or_insert_with(Vec::new);
 
-            let cb: EventCallback<D> = Arc::new(callback);
+            let cb: EventCallback<D> = callback;
             list.push(Box::new(cb));
         }
     }
@@ -63,6 +62,13 @@ impl EventEmitter {
         Self {
             handlers: Arc::new(RwLock::new(HashMap::new())),
         }
+    }
+
+    pub async fn on<D>(&self, name: String, cb: EventCallback<D>) 
+    where D: Clone + Send + Sync + 'static 
+    {
+        // 内部调用 Trait 方法
+        Event::<D>::_on(self, name, cb).await;
     }
 }
 

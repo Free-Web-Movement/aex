@@ -1,19 +1,22 @@
 #[cfg(test)]
 mod tests {
-    use aex::{communicators::event::Event, connection::context::{Context, GlobalContext, TypeMap, TypeMapExt}};
+    use aex::{
+        communicators::event::Event,
+        connection::context::{ Context, GlobalContext, TypeMap, TypeMapExt },
+    };
     use futures::FutureExt;
     use tokio::io;
-    use std::{net::SocketAddr, sync::{Arc, atomic::{AtomicUsize, Ordering}}};
+    use std::{ net::SocketAddr, sync::{ Arc, atomic::{ AtomicUsize, Ordering } } };
 
     // --- 1. 测试 TypeMap 的存取逻辑 ---
     #[test]
     fn test_typemap_ext() {
         let map = TypeMap::default();
-        
+
         // 测试插入和读取
         map.set_value(42i32);
         assert_eq!(map.get_value::<i32>(), Some(42));
-        
+
         // 测试覆盖更新
         map.set_value(100i32);
         assert_eq!(map.get_value::<i32>(), Some(100));
@@ -23,7 +26,9 @@ mod tests {
 
         // 测试复杂类型
         #[derive(Clone, PartialEq, Debug)]
-        struct User { id: u64 }
+        struct User {
+            id: u64,
+        }
         map.set_value(User { id: 1 });
         assert_eq!(map.get_value::<User>(), Some(User { id: 1 }));
     }
@@ -33,7 +38,7 @@ mod tests {
     fn test_global_context_init() {
         let addr: SocketAddr = "127.0.0.1:8080".parse().unwrap();
         let global = GlobalContext::new(addr);
-        
+
         assert_eq!(global.addr, addr);
         // 验证 extensions 是否可写
         global.extensions.blocking_write().set_value(true);
@@ -60,7 +65,7 @@ mod tests {
         assert_eq!(ctx.local.get_value::<String>(), Some("request_scoped".to_string()));
 
         // --- 测试视图构造 ---
-        
+
         // 1. Request 视图
         {
             let req_view = ctx.req().await;
@@ -73,7 +78,7 @@ mod tests {
             let res_view = ctx.res();
             // 验证字段引用正确
             assert_eq!(res_view.local.get_value::<String>(), Some("request_scoped".to_string()));
-            
+
             // 验证 writer 是被包裹在 Arc<Mutex<W>> 中的
             let _lock = res_view.writer.lock().await;
         }
@@ -84,9 +89,9 @@ mod tests {
     async fn test_context_concurrency() {
         let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
         let global = Arc::new(GlobalContext::new(addr));
-        let ctx = Arc::new(tokio::sync::Mutex::new(
-            Context::<Vec<u8>, Vec<u8>>::new(vec![], vec![], global, addr)
-        ));
+        let ctx = Arc::new(
+            tokio::sync::Mutex::new(Context::<Vec<u8>, Vec<u8>>::new(vec![], vec![], global, addr))
+        );
 
         let ctx_clone = ctx.clone();
         let handle = tokio::spawn(async move {
@@ -97,7 +102,7 @@ mod tests {
         handle.await.unwrap();
         assert_eq!(ctx.lock().await.local.get_value::<usize>(), Some(99));
     }
-    
+
     #[tokio::test]
     async fn test_context_full_flow() {
         // 1. 初始化 GlobalContext
@@ -113,33 +118,54 @@ mod tests {
 
         // Event: 监听 "request_received" 事件
         let ec = Arc::clone(&event_counter);
-        global.event.on("request_received".to_string(), move |req_id: u32| {
-            let c = Arc::clone(&ec);
-            async move {
-                println!("Event 收到请求 ID: {}", req_id);
-                c.fetch_add(1, Ordering::SeqCst);
-            }.boxed()
-        }).await;
+
+        Event::_on(
+            &global.event,
+            "request_received".to_string(),
+            Arc::new(move |req_id: u32| {
+                let c = Arc::clone(&ec);
+                (
+                    async move {
+                        println!("Event 收到请求 ID: {}", req_id);
+                        c.fetch_add(1, Ordering::SeqCst);
+                    }
+                ).boxed() // 👈 关键点：返回一个被包装的 Future
+            })
+        ).await;
 
         // Pipe: 监听 "audit_log" (N:1)
         let pc = Arc::clone(&pipe_counter);
-        global.pipe.register("audit_log", move |msg: String| {
-            let c = Arc::clone(&pc);
-            async move {
-                println!("Pipe 审计日志: {}", msg);
-                c.fetch_add(1, Ordering::SeqCst);
-            }.boxed()
-        }).await.unwrap();
+        global.pipe
+            .register(
+                "audit_log",
+                Box::new(move |msg: String| {
+                    let c = Arc::clone(&pc);
+                    (
+                        async move {
+                            println!("Pipe 审计日志: {}", msg);
+                            c.fetch_add(1, Ordering::SeqCst);
+                        }
+                    ).boxed()
+                })
+            ).await
+            .unwrap();
 
         // Spread: 订阅 "broadcast" (1:N)
         let sc = Arc::clone(&spread_counter);
-        global.spread.subscribe("broadcast", move |val: i32| {
-            let c = Arc::clone(&sc);
-            async move {
-                println!("Spread 广播接收: {}", val);
-                c.fetch_add(1, Ordering::SeqCst);
-            }.boxed()
-        }).await.unwrap();
+        global.spread
+            .subscribe(
+                "broadcast",
+                Box::new(move |val: i32| {
+                    let c = Arc::clone(&sc);
+                    (
+                        async move {
+                            println!("Spread 广播接收: {}", val);
+                            c.fetch_add(1, Ordering::SeqCst);
+                        }
+                    ).boxed()
+                })
+            ).await
+            .unwrap();
 
         // --- 模拟连接进入 ---
 
@@ -161,13 +187,15 @@ mod tests {
         ctx.global.event.notify("request_received".to_string(), 1024_u32).await;
 
         // 3. 使用 Pipe 发送结构化日志
-        ctx.global.pipe.send("audit_log", format!("Client {} processed in {}ms", ctx.addr, time_spent)).await.unwrap();
+        ctx.global.pipe
+            .send("audit_log", format!("Client {} processed in {}ms", ctx.addr, time_spent)).await
+            .unwrap();
 
         // 4. 使用 Spread 发布全局通知
         ctx.global.spread.publish("broadcast", 200_i32).await.unwrap();
 
         // --- 最终验证 ---
-        
+
         // 给异步任务一点点执行时间 (通知是 spawn 出来的)
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
 
