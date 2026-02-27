@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::http::{params::Params, protocol::{content_type::ContentType, header::HeaderKey, method::HttpMethod, status::StatusCode, version::HttpVersion}};
+use crate::http::{params::Params, protocol::{content_type::ContentType, header::{HeaderKey, Headers}, method::HttpMethod, status::StatusCode, version::HttpVersion}};
 
 // 常规的HTTP请求元数据，供中间件和处理器使用
 #[derive(Debug, Clone)]
@@ -12,13 +12,11 @@ pub struct HttpMetadata {
     pub transfer_encoding: Option<String>,
     pub multipart_boundary: Option<String>,
     pub params: Option<Params>, // 放在Trie路由里解析
-    pub headers: HashMap<HeaderKey, String>,
+    pub headers: Headers,
     pub content_type: ContentType,
     pub length: usize,
     pub cookies: HashMap<String, String>,
     pub is_websocket: bool,
-    pub server: String,
-    //
     pub status: StatusCode, // 处理结果状态码，默认200
 
     // 如果是form-url-encoded的请求，form会被保存在Params里面
@@ -38,13 +36,12 @@ impl Default for HttpMetadata {
             transfer_encoding: None,
             multipart_boundary: None,
             params: None,
-            headers: HashMap::new(),
+            headers: Headers::new(),
             // 假设 ContentType 有默认值（通常是 text/plain 或 application/octet-stream）
             content_type: ContentType::default(),
             length: 0,
             cookies: HashMap::new(),
             is_websocket: false,
-            server: "".to_string(),
             status: StatusCode::Ok, // 默认 200 OK
             body: Vec::new(),
         }

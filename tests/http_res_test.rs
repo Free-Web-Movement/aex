@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
     use std::{collections::HashMap, sync::Arc};
-    use aex::{connection::context::{TypeMap, TypeMapExt}, http::{meta::HttpMetadata, protocol::{content_type::ContentType, header::HeaderKey, method::HttpMethod, status::StatusCode, version::HttpVersion}, res::Response}};
+    use aex::{connection::context::{TypeMap, TypeMapExt}, http::{meta::HttpMetadata, protocol::{content_type::ContentType, header::{HeaderKey, Headers}, method::HttpMethod, status::StatusCode, version::HttpVersion}, res::Response}};
     use tokio::sync::Mutex;
 
     // 辅助函数：构造测试用的 Response 环境
@@ -56,12 +56,12 @@ mod tests {
             transfer_encoding: None,
             multipart_boundary: None,
             params: None,
-            headers,
+            headers: Headers::from(headers),
             content_type: ContentType::default(),
             length: 11,
             cookies: HashMap::new(),
             is_websocket: false,
-            server: "RustServer/1.0".into(),
+            // server: "RustServer/1.0".into(),
             status: StatusCode::NotFound,
             body: b"Not Found :(".to_vec(),
         };

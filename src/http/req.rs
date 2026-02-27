@@ -10,7 +10,7 @@ use crate::{
     connection::context::{TypeMap, TypeMapExt},
     http::{
         meta::HttpMetadata, middlewares::websocket::WebSocket, params::Params, protocol::{
-            content_type::ContentType, header::HeaderKey, media_type::MediaType,
+            content_type::ContentType, header::{HeaderKey, Headers}, media_type::MediaType,
             method::HttpMethod, status::StatusCode, version::HttpVersion,
         }
     },
@@ -100,14 +100,14 @@ where
             transfer_encoding,
             multipart_boundary,
             content_type,
-            server,
+            // server,
             length,
             cookies,
             is_websocket: WebSocket::check(method, &headers),
             params: None,
             status: StatusCode::Ok, // 默认状态码为 200
             body: Vec::new(),       // 默认空消息体
-            headers,
+            headers: Headers::from(headers),
         };
 
         self.local.set_value(meta);

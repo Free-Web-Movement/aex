@@ -5,7 +5,7 @@ mod tests {
         connection::context::{ Context, GlobalContext, TypeMap, TypeMapExt },
     };
     use futures::FutureExt;
-    use tokio::io;
+    use tokio::{io, sync::Mutex};
     use std::{ net::SocketAddr, sync::{ Arc, atomic::{ AtomicUsize, Ordering } } };
 
     // --- 1. 测试 TypeMap 的存取逻辑 ---
@@ -49,7 +49,7 @@ mod tests {
     #[tokio::test]
     async fn test_context_flow() {
         let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
-        let global = Arc::new(GlobalContext::new(addr));
+        let global = Arc::new(Mutex::new(GlobalContext::new(addr)));
 
         // 模拟 I/O：使用 dummy 向量模拟 reader 和 writer
         let reader = vec![0u8; 10];
@@ -88,7 +88,7 @@ mod tests {
     #[tokio::test]
     async fn test_context_concurrency() {
         let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
-        let global = Arc::new(GlobalContext::new(addr));
+        let global = Arc::new(Mutex::new(GlobalContext::new(addr)));
         let ctx = Arc::new(
             tokio::sync::Mutex::new(Context::<Vec<u8>, Vec<u8>>::new(vec![], vec![], global, addr))
         );
@@ -107,7 +107,9 @@ mod tests {
     async fn test_context_full_flow() {
         // 1. 初始化 GlobalContext
         let addr = "127.0.0.1:8080".parse().unwrap();
-        let global = Arc::new(GlobalContext::new(addr));
+        let mut global = GlobalContext::new(addr);
+
+        global.set_server_name("Aex".to_string());
 
         // 准备计数器验证结果
         let event_counter = Arc::new(AtomicUsize::new(0));
@@ -174,7 +176,7 @@ mod tests {
         let (reader, writer) = io::split(client);
         let remote_addr = "192.168.1.100:12345".parse().unwrap();
 
-        let ctx = Context::new(reader, writer, Arc::clone(&global), remote_addr);
+        let ctx = Context::new(reader, writer, Arc::clone(&Arc::new(Mutex::new(global))), remote_addr);
 
         // --- 执行业务逻辑测试 ---
 
@@ -183,16 +185,19 @@ mod tests {
         let time_spent = ctx.elapsed();
         assert!(time_spent >= 100, "Elapsed 应该大于 100ms, 当前: {}ms", time_spent);
 
+        let binding = ctx.global.clone();
+        let global = binding.lock().await;
+
         // 2. 使用 Event 通知系统有新请求
-        ctx.global.event.notify("request_received".to_string(), 1024_u32).await;
+        global.event.notify("request_received".to_string(), 1024_u32).await;
 
         // 3. 使用 Pipe 发送结构化日志
-        ctx.global.pipe
+        global.pipe
             .send("audit_log", format!("Client {} processed in {}ms", ctx.addr, time_spent)).await
             .unwrap();
 
         // 4. 使用 Spread 发布全局通知
-        ctx.global.spread.publish("broadcast", 200_i32).await.unwrap();
+        global.spread.publish("broadcast", 200_i32).await.unwrap();
 
         // --- 最终验证 ---
 

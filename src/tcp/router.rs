@@ -48,7 +48,6 @@ where
 pub fn on<FFut, Fut>(&mut self, key: K, f: FFut)
 where
     FFut: Fn(C, Box<dyn AsyncRead + Unpin + Send>, Box<dyn AsyncWrite + Unpin + Send>) -> Fut + Send + Sync + 'static,
-    // 💡 修改点：将 bool 改为 anyhow::Result<bool>
     Fut: Future<Output = anyhow::Result<bool>> + Send + 'static,
 {
     self.handlers.insert(

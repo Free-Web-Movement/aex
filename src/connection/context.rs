@@ -13,6 +13,8 @@ use crate::communicators::spreader::SpreadManager;
 use crate::http::req::Request;
 use crate::http::res::Response;
 
+pub const SERVER_NAME: &str = "Aex/1.0";
+
 /// 全局扩展存储（TypeMap 抽象）
 pub type TypeMap = dashmap::DashMap<std::any::TypeId, Box<dyn std::any::Any + Send + Sync>>;
 
@@ -27,8 +29,7 @@ impl TypeMapExt for TypeMap {
         self.get(&TypeId::of::<T>()) // 传入 TypeId 作为 Key
             .and_then(|r| {
                 // r.value() 拿到的是 Box<dyn Any>
-                r.value()
-                    .downcast_ref::<T>().cloned()
+                r.value().downcast_ref::<T>().cloned()
             })
     }
 
@@ -47,6 +48,7 @@ pub struct GlobalContext {
     pub pipe: PipeManager,
     pub spread: SpreadManager,
     pub event: EventEmitter,
+    pub name: String,
     /// 全局 TypeMap：允许灵活添加数据库连接池、全局配置等
     pub extensions: Arc<RwLock<TypeMap>>,
 }
@@ -63,8 +65,13 @@ impl GlobalContext {
             pipe: PipeManager::default(),
             spread: SpreadManager::default(),
             event: EventEmitter::default(),
+            name: SERVER_NAME.to_string(),
             extensions: Arc::new(RwLock::new(TypeMap::default())),
         }
+    }
+
+    pub fn set_server_name(&mut self, name: String) {
+        self.name = name;
     }
 }
 
@@ -78,7 +85,7 @@ pub struct Context<R, W> {
     pub accepted: DateTime<Utc>,
     pub reader: R,
     pub writer: SharedWriter<W>,
-    pub global: Arc<GlobalContext>,
+    pub global: Arc<Mutex<GlobalContext>>,
     /// 本地 TypeMap：用于存储请求级别的临时变量
     pub local: TypeMap,
 }
@@ -93,7 +100,7 @@ pub struct Context<R, W> {
 pub type HTTPContext = Context<BufReader<OwnedReadHalf>, BufWriter<OwnedWriteHalf>>;
 
 impl<R, W> Context<R, W> {
-    pub fn new(reader: R, writer: W, global: Arc<GlobalContext>, addr: SocketAddr) -> Self {
+    pub fn new(reader: R, writer: W, global: Arc<Mutex<GlobalContext>>, addr: SocketAddr) -> Self {
         Self {
             accepted: Utc::now(),
             reader,

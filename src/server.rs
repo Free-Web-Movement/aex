@@ -14,9 +14,6 @@ use crate::tcp::router::Router as TcpRouter;
 use crate::tcp::types::{ Codec, Command, Frame, RawCodec }; // 确保引入了 Command
 use crate::udp::router::Router as UdpRouter;
 use tokio::sync::Mutex;
-
-pub const SERVER_NAME: &str = "Aex/1.0";
-
 /// AexServer: 核心多协议服务器
 pub struct AexServer<F, C, K = u32>
     where
@@ -139,19 +136,15 @@ impl<F, C, K> AexServer<F, C, K>
         router: Arc<HttpRouter>,
         reader: BufReader<OwnedReadHalf>,
         writer: BufWriter<OwnedWriteHalf>,
-        peer_addr: SocketAddr
+        peer_addr: SocketAddr,
     ) -> anyhow::Result<()> {
-        // let req = Request::new(reader, peer_addr, "").await?;
-
-        // let res = Response::new(writer);
         let mut ctx = HTTPContext::new(
             reader,
             writer,
-            Arc::new(GlobalContext::new(peer_addr)),
+            Arc::new(Mutex::new(GlobalContext::new(peer_addr))),
             peer_addr
         );
         ctx.req().await.parse_to_local().await?;
-
         // handle_request 返回 true 表示所有中间件和 Handler 正常通过
         // 返回 false 表示被拦截（如 validator 发现类型不匹配）
         if handle_request(&router, &mut ctx).await {

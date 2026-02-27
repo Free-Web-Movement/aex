@@ -2,7 +2,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use crate::{
     connection::context::{HTTPContext, TypeMapExt},
-    http::{meta::HttpMetadata, params::Params, protocol::status::StatusCode, types::Executor},
+    http::{meta::HttpMetadata, params::Params, protocol::{media_type::SubMediaType, status::StatusCode}, types::Executor},
 };
 
 /// 节点类型
@@ -162,7 +162,7 @@ pub async fn handle_request(root: &Router, ctx: &mut HTTPContext) -> bool {
         if meta
             .content_type
             .to_string()
-            .contains("x-www-form-urlencoded")
+            .contains(SubMediaType::UrlEncoded.as_str())
             && meta.length > 0
         {
             let mut body_bytes = vec![0u8; meta.length];

@@ -1,6 +1,8 @@
+use std::collections::HashMap;
 use std::fmt;
 use std::hash::Hasher;
 use std::hash::Hash;
+use std::ops::Deref;
 
 macro_rules! define_header_keys {
     ($($name:ident => $string:expr),* $(,)?) => {
@@ -145,5 +147,69 @@ define_header_keys! {
 impl fmt::Display for HeaderKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.as_str())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Headers(HashMap<HeaderKey, String>);
+
+impl Headers {
+    pub fn new() -> Self {
+        Self(HashMap::new())
+    }
+
+    /// 链式调用：插入 Header 并返回自身所有权
+    pub fn with(mut self, key: HeaderKey, value: impl Into<String>) -> Self {
+        self.0.insert(key, value.into());
+        self
+    }
+
+    /// 就地修改：插入 Header 并返回旧值（如果有）
+    pub fn insert(&mut self, key: HeaderKey, value: impl Into<String>) -> Option<String> {
+        self.0.insert(key, value.into())
+    }
+
+    /// 获取 Header 引用
+    pub fn get(&self, key: &HeaderKey) -> Option<&String> {
+        self.0.get(key)
+    }
+
+    /// 移除 Header
+    pub fn remove(&mut self, key: &HeaderKey) -> Option<String> {
+        self.0.remove(key)
+    }
+
+    /// 检查是否存在
+    pub fn contains(&self, key: &HeaderKey) -> bool {
+        self.0.contains_key(key)
+    }
+}
+
+// 技巧：实现 Deref 使得 Headers 可以像 HashMap 一样被迭代或读取
+impl Deref for Headers {
+    type Target = HashMap<HeaderKey, String>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl From<HashMap<HeaderKey, String>> for Headers {
+    /// 将现有的 HashMap 转换为 Headers
+    fn from(map: HashMap<HeaderKey, String>) -> Self {
+        Self(map)
+    }
+}
+
+impl From<Headers> for HashMap<HeaderKey, String> {
+    /// 如果需要将 Headers 转回原始 HashMap（例如为了某些库的兼容性）
+    fn from(headers: Headers) -> Self {
+        headers.0
+    }
+}
+
+// 进阶：支持从数组/迭代器直接创建，这在测试中非常有用
+impl FromIterator<(HeaderKey, String)> for Headers {
+    fn from_iter<I: IntoIterator<Item = (HeaderKey, String)>>(iter: I) -> Self {
+        Self(HashMap::from_iter(iter))
     }
 }
