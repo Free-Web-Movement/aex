@@ -142,6 +142,7 @@ impl Router {
 
     pub async fn handle(
         self: Arc<Self>,
+        global: Arc<Mutex<GlobalContext>>,
         reader: BufReader<OwnedReadHalf>,
         writer: BufWriter<OwnedWriteHalf>,
         peer_addr: SocketAddr,
@@ -149,7 +150,7 @@ impl Router {
         let mut ctx = HTTPContext::new(
             reader,
             writer,
-            Arc::new(Mutex::new(GlobalContext::new(peer_addr))),
+            global,
             peer_addr,
         );
         ctx.req().await.parse_to_local().await?;

@@ -100,12 +100,13 @@ where
                     let reader = BufReader::new(reader);
                     let writer = BufWriter::new(writer);
                     let rh = hr.clone();
-                    return rh.handle(reader, writer, peer_addr).await;
+                    return rh.handle(server_ctx.globals.clone(), reader, writer, peer_addr).await;
                 }
 
                 // 自定义 TCP
                 if let Some(tr) = &server_ctx.tcp_router {
-                    return tr.clone().handle(reader, writer).await;
+                    TcpRouter::<F, C, K>::set_crypto_session(server_ctx.globals.clone()).await;
+                    return tr.clone().handle(server_ctx.globals.clone(), reader, writer).await;
                 }
 
                 Ok::<(), anyhow::Error>(())
@@ -119,7 +120,7 @@ where
             let socket = Arc::new(UdpSocket::bind(self.addr).await?);
             println!("[AEX] UDP listener started on {}", self.addr);
             let rt = router.clone();
-            return rt.handle(socket).await;
+            return rt.handle(self.globals.clone(), socket).await;
         }
         Ok(())
     }

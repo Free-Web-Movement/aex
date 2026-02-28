@@ -1,15 +1,17 @@
-use std::net::SocketAddr;
-use std::sync::Arc;
 use chrono::DateTime;
 use chrono::Utc;
-use tokio::io::{ BufReader, BufWriter };
-use tokio::net::tcp::{ OwnedReadHalf, OwnedWriteHalf };
-use tokio::sync::{ Mutex, RwLock };
 use std::any::TypeId;
+use std::collections::HashMap;
+use std::net::SocketAddr;
+use std::sync::Arc;
+use tokio::io::{BufReader, BufWriter};
+use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
+use tokio::sync::{Mutex, RwLock};
 
 use crate::communicators::event::EventEmitter;
 use crate::communicators::pipe::PipeManager;
 use crate::communicators::spreader::SpreadManager;
+use crate::crypto::zero_trust_session_key::SessionKey;
 use crate::http::req::Request;
 use crate::http::res::Response;
 
@@ -58,9 +60,9 @@ impl GlobalContext {
         Self {
             addr,
             // 假设 Node 和 ConnectionManager 都有默认初始化方法
-            local_node: Arc::new(
-                RwLock::new(crate::connection::node::Node::from_addr(addr, None, None))
-            ),
+            local_node: Arc::new(RwLock::new(crate::connection::node::Node::from_addr(
+                addr, None, None,
+            ))),
             manager: Arc::new(crate::connection::manager::ConnectionManager::new()),
             pipe: PipeManager::default(),
             spread: SpreadManager::default(),
@@ -130,6 +132,9 @@ impl<R, W> Context<R, W> {
 
     /// 毫秒表示的已经经历时间
     pub fn elapsed(&self) -> u64 {
-        Utc::now().signed_duration_since(self.accepted).num_milliseconds().max(0) as u64
+        Utc::now()
+            .signed_duration_since(self.accepted)
+            .num_milliseconds()
+            .max(0) as u64
     }
 }

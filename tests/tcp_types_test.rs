@@ -8,20 +8,25 @@ mod tests {
     #[derive(Serialize, Deserialize, Encode, Decode, Debug, PartialEq, Eq)]
     struct TestCommand {
         pub id: u32,
-        pub data: String,
+        pub data: Vec<u8>
     }
     impl Codec for TestCommand {}
     impl Command for TestCommand {
         fn id(&self) -> u32 {
             self.id
         }
+        
+        fn data(&self) -> &Vec<u8> {
+            &self.data
+        }
+        
     }
 
     #[test]
     fn test_codec_encode_decode() {
         let cmd = TestCommand {
             id: 101,
-            data: "hello".to_string(),
+            data: "hello".as_bytes().to_vec(),
         };
 
         // 测试序列化
@@ -68,7 +73,7 @@ mod tests {
     #[test]
     fn test_trait_default_methods() {
         // 测试 Command 的默认 validate
-        struct DummyCmd;
+        struct DummyCmd(Vec<u8>);
         impl Serialize for DummyCmd {
             fn serialize<S>(&self, _: S) -> std::result::Result<S::Ok, S::Error>
             where
@@ -97,7 +102,7 @@ mod tests {
             fn decode<D: bincode::de::Decoder<Context = ()>>(
                 _: &mut D,
             ) -> std::result::Result<Self, bincode::error::DecodeError> {
-                Ok(DummyCmd)
+                Ok(DummyCmd(vec![0]))
             }
         }
         impl Codec for DummyCmd {}
@@ -105,9 +110,17 @@ mod tests {
             fn id(&self) -> u32 {
                 99
             }
+            
+            fn data(&self) -> &Vec<u8> {
+                &self.0
+            }
+
+            fn validate(&self) -> bool {
+                true
+            }
         }
 
-        let dummy = DummyCmd;
+        let dummy = DummyCmd(vec![0]);
         assert!(dummy.validate()); // 覆盖 Command::validate 默认路径
     }
 

@@ -1,3 +1,4 @@
+use std::any::TypeId;
 use std::collections::HashMap;
 use std::future::Future;
 use std::hash::Hash;
@@ -5,7 +6,10 @@ use std::pin::Pin;
 use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite};
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
+use tokio::sync::Mutex;
 
+use crate::connection::context::GlobalContext;
+use crate::crypto::zero_trust_session_key::SessionKey;
 use crate::tcp::types::{Codec, Command, Frame};
 
 // 假设这些在你之前的定义中
@@ -21,6 +25,9 @@ pub type CommandHandler<C> = Box<
         + Send
         + Sync,
 >;
+
+pub struct ConnectedSessions(pub Arc<Mutex<HashMap<Vec<u8>, SessionKey>>>);
+pub struct TempSessions(pub Arc<Mutex<HashMap<Vec<u8>, SessionKey>>>);
 
 pub struct Router<F, C, K = u32>
 where
@@ -104,6 +111,7 @@ where
 
     pub async fn handle(
         &self,
+        global: Arc<Mutex<GlobalContext>>,
         reader: OwnedReadHalf,
         writer: OwnedWriteHalf,
     ) -> anyhow::Result<()> {
@@ -139,8 +147,7 @@ where
                 Ok(Ok(frame)) => {
                     // 3. 分发给 Router
                     // 如果 Handler 需要读后续数据，它会通过 r_opt.take() 拿走 Reader 的所有权
-                    let should_continue =
-                        self.handle_frame(frame, &mut r_opt, &mut w_opt).await?;
+                    let should_continue = self.handle_frame(frame, &mut r_opt, &mut w_opt).await?;
 
                     // 4. 检查 Reader 是否还在，或者 Handler 是否要求关闭
                     if !should_continue || r_opt.is_none() {
@@ -156,5 +163,26 @@ where
             }
         }
         Ok(())
+    }
+
+    pub async fn set_crypto_session(ctx: Arc<tokio::sync::Mutex<GlobalContext>>) {
+        // 1. 初始化容器
+        let connected = Arc::new(Mutex::new(HashMap::new()));
+        let temp = Arc::new(Mutex::new(HashMap::new()));
+
+        // 2. 获取 GlobalContext 的 MutexGuard
+        let g_ctx = ctx.lock().await;
+
+        // 3. 获取 extensions 的 RwLock 写锁
+        // 注意：假设你的 extensions 字段是公开的或者有访问权限
+        let exts = g_ctx.extensions.write().await;
+
+        // 4. 存入包装后的 Newtype
+        exts.insert(
+            TypeId::of::<ConnectedSessions>(),
+            Box::new(ConnectedSessions(connected)),
+        );
+
+        exts.insert(TypeId::of::<TempSessions>(), Box::new(TempSessions(temp)));
     }
 }

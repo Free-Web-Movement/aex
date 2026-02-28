@@ -43,6 +43,9 @@ mod aex_tests {
         fn id(&self) -> u32 {
             self.0.first().cloned().unwrap_or(0) as u32
         }
+                fn data(&self) -> &Vec<u8> {
+            &self.0
+        }
     }
 
     impl Codec for MockProtocol {

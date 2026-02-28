@@ -14,6 +14,7 @@ mod router_tests {
     struct TestCommand {
         pub id: u32,
         pub valid: bool,
+        pub data: Vec<u8>,
     }
     impl Codec for TestCommand {}
     impl Command for TestCommand {
@@ -22,6 +23,9 @@ mod router_tests {
         }
         fn validate(&self) -> bool {
             self.valid
+        }
+        fn data(&self) -> &Vec<u8> {
+            &self.data
         }
     }
 
@@ -77,7 +81,7 @@ mod router_tests {
             let res = router
                 .handle_frame(invalid_frame, &mut r_opt, &mut w_opt)
                 .await;
-            assert!(res.unwrap()); 
+            assert!(res.unwrap());
             assert!(r_opt.is_some()); // 验证 IO 没被取走
         }
 
@@ -112,6 +116,7 @@ mod router_tests {
             let invalid_cmd = TestCommand {
                 id: 100,
                 valid: false,
+                data: vec![0],
             };
             let data = Codec::encode(&invalid_cmd);
 
@@ -129,6 +134,7 @@ mod router_tests {
             let unknown_cmd = TestCommand {
                 id: 999,
                 valid: true,
+                data: vec![0],
             };
             let data = Codec::encode(&unknown_cmd);
             let frame = TestFrame {
@@ -146,6 +152,7 @@ mod router_tests {
             let valid_cmd = TestCommand {
                 id: 100,
                 valid: true,
+                data: vec![0],
             };
             let frame = TestFrame {
                 payload: Some(Codec::encode(&valid_cmd)),
@@ -164,13 +171,14 @@ mod router_tests {
             let exit_cmd = TestCommand {
                 id: 200,
                 valid: true,
+                data: vec![0],
             };
             let frame = TestFrame {
                 payload: Some(Codec::encode(&exit_cmd)),
                 is_valid: true,
             };
             let res = router.handle_frame(frame, &mut r2_opt, &mut w2_opt).await;
-            assert!(!res.unwrap()); 
+            assert!(!res.unwrap());
             assert!(r2_opt.is_none());
         }
     }
@@ -183,6 +191,7 @@ mod router_tests {
         let cmd = TestCommand {
             id: 100,
             valid: true,
+            data: vec![0],
         };
         let frame = TestFrame {
             payload: Some(Codec::encode(&cmd)),
@@ -201,7 +210,7 @@ mod router_tests {
     #[tokio::test]
     async fn test_writer_already_taken() {
         let mut router: Router<TestFrame, TestCommand, u32> = Router::new(|c: &TestCommand| c.id());
-        
+
         // 1. 注册一个有效的 Handler
         router.on(100, |_, _, _| async { Ok(true) });
 
@@ -209,6 +218,7 @@ mod router_tests {
         let cmd = TestCommand {
             id: 100,
             valid: true,
+            data: vec![0],
         };
         let frame = TestFrame {
             payload: Some(Codec::encode(&cmd)),
@@ -228,7 +238,7 @@ mod router_tests {
         // 5. 验证错误信息
         assert!(res.is_err());
         assert_eq!(res.unwrap_err().to_string(), "Writer already taken");
-        
+
         // 顺便验证：由于 Reader 在 Writer 报错前已经被 take 了，此时 r_some 应该是 None
         assert!(r_some.is_none());
     }

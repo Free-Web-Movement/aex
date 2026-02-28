@@ -2,7 +2,9 @@ use std::net::SocketAddr;
 use std::{collections::HashMap, sync::Arc};
 
 use tokio::net::UdpSocket;
+use tokio::sync::Mutex;
 
+use crate::connection::context::GlobalContext;
 use crate::tcp::types::{Codec, Command, Frame};
 use crate::udp::types::PacketExecutor;
 
@@ -43,7 +45,11 @@ where
         );
     }
 
-    pub async fn handle(self: Arc<Self>, socket: Arc<UdpSocket>) -> anyhow::Result<()> {
+    pub async fn handle(
+        self: Arc<Self>,
+        global: Arc<Mutex<GlobalContext>>,
+        socket: Arc<UdpSocket>,
+    ) -> anyhow::Result<()> {
         let mut buf = [0u8; 65535]; // UDP 最大报文长度
         loop {
             let (n, peer_addr) = socket.recv_from(&mut buf).await?;

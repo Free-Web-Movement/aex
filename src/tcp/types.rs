@@ -45,7 +45,6 @@ pub type StreamExecutor = Box<
 >;
 
 pub trait Frame: Codec {
-
     // 生成校验数据
     fn payload(&self) -> Option<Vec<u8>>;
 
@@ -56,7 +55,6 @@ pub trait Frame: Codec {
 
     // 处理逻辑
     fn command(&self) -> Option<&Vec<u8>>;
-
 
     // 用于数据校验
     fn sign<F>(&self, signer: F) -> Vec<u8>
@@ -83,6 +81,16 @@ pub trait Command: Codec {
     fn validate(&self) -> bool {
         true
     }
+
+    // 命令需要发送的二进制数据，可能是加密过的
+    fn data(&self) -> &Vec<u8>;
+    // 可选实现：是否基于P2P的零信息加密,
+    // 默认为false，即不采用加密
+    // 如果需要加密，那么必须要进行公钥握手机制。
+    // 成功后才能使用
+    fn is_trusted(&self) -> bool {
+        false
+    }
 }
 
 /// 🛠️ 纯二进制包装：既不带 ID 也不带冗余结构
@@ -101,5 +109,8 @@ impl Frame for RawCodec {
 impl Command for RawCodec {
     fn id(&self) -> u32 {
         0 // 纯数据指令，ID 固定为 0
+    }
+    fn data(&self) -> &Vec<u8> {
+        &self.0
     }
 }
