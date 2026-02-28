@@ -1,7 +1,6 @@
 use chrono::DateTime;
 use chrono::Utc;
 use std::any::TypeId;
-use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::io::{BufReader, BufWriter};
@@ -11,7 +10,6 @@ use tokio::sync::{Mutex, RwLock};
 use crate::communicators::event::EventEmitter;
 use crate::communicators::pipe::PipeManager;
 use crate::communicators::spreader::SpreadManager;
-use crate::crypto::zero_trust_session_key::SessionKey;
 use crate::http::req::Request;
 use crate::http::res::Response;
 

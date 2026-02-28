@@ -104,7 +104,8 @@ macro_rules! all {
 // -----------------------------
 #[macro_export]
 macro_rules! route {
-    ($root:expr, $method_macro:expr) => {{
+    ($root:expr, $method_macro:expr) => {
+        {
         let (method, path, handler, middleware) = $method_macro;
         $root.insert(
             path,
@@ -112,13 +113,15 @@ macro_rules! route {
             handler,
             middleware,
         );
-    }};
+        }
+    };
 }
 
 #[macro_export]
 macro_rules! exe {
     // 带有 pre 处理的分支
-    (|$ctx:ident, $data:ident| $body:block, |$pre_ctx:ident| $pre:block) => {{
+    (| $ctx:ident, $data:ident | $body:block, | $pre_ctx:ident | $pre:block) => {
+        {
         use futures::future::FutureExt;
         use std::sync::Arc;
         use $crate::connection::context::HTTPContext;
@@ -140,10 +143,12 @@ macro_rules! exe {
             .boxed() // 相当于 Box::pin(async move { ... })
         });
         executor
-    }};
+        }
+    };
 
     // 仅 body 的分支
-    (|$ctx:ident| $body:block) => {{
+    (| $ctx:ident | $body:block) => {
+        {
         use futures::future::FutureExt;
         use std::sync::Arc;
         use $crate::connection::context::HTTPContext;
@@ -152,12 +157,14 @@ macro_rules! exe {
         let executor: Arc<Executor> =
             Arc::new(move |$ctx: &mut HTTPContext| async move { $body }.boxed());
         executor
-    }};
+        }
+    };
 }
 
 #[macro_export]
 macro_rules! validator {
-    ( $( $key:ident => $dsl:expr ),* $(,)? ) => {{
+    ($($key:ident => $dsl:expr),* $(,)?) => {
+        {
         use std::collections::HashMap;
         use std::sync::Arc;
         use $crate::http::middlewares::validator::to_validator;
@@ -171,7 +178,8 @@ macro_rules! validator {
 
         let mw: Arc<Executor> = to_validator(dsl_map);
         mw
-    }};
+        }
+    };
 }
 
 // 文件：src/macros.rs
@@ -180,5 +188,42 @@ macro_rules! validator {
 macro_rules! v {
     ($($tokens:tt)*) => {
         $crate::validator!($($tokens)*)
+    };
+}
+
+#[macro_export]
+macro_rules! body {
+    // 基础模式
+    ($ctx:expr, $content:expr) => {
+        {
+            use $crate::http::protocol::header::HeaderKey;
+            let mut meta = $ctx.local.get_value::<HttpMetadata>().unwrap();
+
+            // 修复点：显式转为 Vec<u8>，消除 into() 的歧义
+            let bytes: Vec<u8> = $content.as_bytes().to_vec();
+            let len = bytes.len();
+
+            // 自动插入到 Headers 集合中
+            meta.headers.insert(
+                HeaderKey::ContentLength, 
+                len.to_string()
+            );
+            
+            // 赋值 Body
+            meta.body = bytes;
+            $ctx.local.set_value::<HttpMetadata>(meta);
+        }
+    };
+
+    // 扩展模式
+    ($ctx:expr, $content:expr, { $($key:expr => $val:expr),* $(,)? }) => {
+        {
+            // 注意：在调用自身时，最好使用 $crate::body 以防作用域冲突
+            $(
+                $ctx.meta.headers.insert($key, $val.into());
+            )*     
+            $crate::body!($ctx, $content); 
+
+        }
     };
 }

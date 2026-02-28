@@ -46,10 +46,10 @@ where
         // 3. 提取特定字段 (移植旧逻辑)
 
         // 3.1 Content-Length
-        let length = headers
-            .get(&HeaderKey::ContentLength)
-            .and_then(|s| s.trim().parse::<usize>().ok())
-            .unwrap_or(0);
+        // let length = headers
+        //     .get(&HeaderKey::ContentLength)
+        //     .and_then(|s| s.trim().parse::<usize>().ok())
+        //     .unwrap_or(0);
 
         // 3.2 Content-Type & Multipart Boundary
         let content_type = headers
@@ -95,7 +95,7 @@ where
             transfer_encoding,
             multipart_boundary,
             content_type,
-            length,
+            // length,
             cookies,
             is_websocket: WebSocket::check(method, &headers),
             params: None,

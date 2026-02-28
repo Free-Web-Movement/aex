@@ -31,7 +31,6 @@ mod tests {
         let meta = local.get_value::<HttpMetadata>().unwrap();
         assert_eq!(meta.method, HttpMethod::GET);
         assert_eq!(meta.path, "/api/test?id=1");
-        assert_eq!(meta.length, 15);
         assert!(meta.is_chunked);
         assert_eq!(meta.cookies.get("user").unwrap(), "alice");
     }

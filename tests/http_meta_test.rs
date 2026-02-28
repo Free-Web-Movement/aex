@@ -11,7 +11,6 @@ mod tests {
         assert_eq!(meta.method, HttpMethod::GET);
         assert_eq!(meta.path, "/");
         assert_eq!(meta.status, StatusCode::Ok);
-        assert_eq!(meta.length, 0);
         assert!(meta.body.is_empty());
         assert!(meta.headers.is_empty());
         assert!(meta.params.is_none());

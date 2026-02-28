@@ -58,7 +58,6 @@ mod tests {
             params: None,
             headers: Headers::from(headers),
             content_type: ContentType::default(),
-            length: 11,
             cookies: HashMap::new(),
             is_websocket: false,
             // server: "RustServer/1.0".into(),

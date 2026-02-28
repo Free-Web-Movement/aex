@@ -1,17 +1,17 @@
-use std::{collections::HashMap, net::SocketAddr, sync::Arc};
+use std::{ collections::HashMap, net::SocketAddr, sync::Arc };
 
 use tokio::{
-    io::{BufReader, BufWriter},
-    net::tcp::{OwnedReadHalf, OwnedWriteHalf},
+    io::{ BufReader, BufWriter },
+    net::tcp::{ OwnedReadHalf, OwnedWriteHalf },
     sync::Mutex,
 };
 
 use crate::{
-    connection::context::{GlobalContext, HTTPContext, TypeMapExt},
+    connection::context::{ GlobalContext, HTTPContext, TypeMapExt },
     http::{
         meta::HttpMetadata,
         params::Params,
-        protocol::{media_type::SubMediaType, status::StatusCode},
+        protocol::{ media_type::SubMediaType, status::StatusCode },
         types::Executor,
     },
 };
@@ -20,8 +20,8 @@ use crate::{
 #[derive(Clone, Debug)]
 pub enum NodeType {
     Static(String), // 静态段
-    Param(String),  // 动态段 :id
-    Wildcard,       // 通配符 *
+    Param(String), // 动态段 :id
+    Wildcard, // 通配符 *
 }
 
 /// Trie 树节点
@@ -29,7 +29,7 @@ pub struct Router {
     pub node_type: NodeType,
     pub children: HashMap<String, Router>,
     pub middlewares: Option<HashMap<String, Vec<Arc<Executor>>>>, // 方法级中间件
-    pub handlers: Option<HashMap<String, Arc<Executor>>>,         // 方法级处理器
+    pub handlers: Option<HashMap<String, Arc<Executor>>>, // 方法级处理器
 }
 
 // pub type Router = Router;
@@ -50,7 +50,7 @@ impl Router {
         path: &str,
         method: Option<&str>,
         handler: Arc<Executor>,
-        middlewares: Option<Vec<Arc<Executor>>>,
+        middlewares: Option<Vec<Arc<Executor>>>
     ) {
         // let segments: Vec<&str> = path.trim_start_matches('/').split('/').collect();
 
@@ -69,29 +69,28 @@ impl Router {
                 seg.to_string()
             };
 
-            node = node.children.entry(key.clone()).or_insert_with(|| {
-                Router::new(if key == "*" {
-                    NodeType::Wildcard
-                } else if key == ":" {
-                    NodeType::Param(seg[1..].to_string())
-                } else {
-                    NodeType::Static(seg.to_string())
-                })
-            });
+            node = node.children
+                .entry(key.clone())
+                .or_insert_with(|| {
+                    Router::new(
+                        if key == "*" {
+                            NodeType::Wildcard
+                        } else if key == ":" {
+                            NodeType::Param(seg[1..].to_string())
+                        } else {
+                            NodeType::Static(seg.to_string())
+                        }
+                    )
+                });
         }
 
-        let method_key = method
-            .map(|m| m.to_uppercase())
-            .unwrap_or_else(|| "*".to_string());
+        let method_key = method.map(|m| m.to_uppercase()).unwrap_or_else(|| "*".to_string());
 
         // 设置处理器
         if node.handlers.is_none() {
             node.handlers = Some(HashMap::new());
         }
-        node.handlers
-            .as_mut()
-            .unwrap()
-            .insert(method_key.clone(), handler);
+        node.handlers.as_mut().unwrap().insert(method_key.clone(), handler);
 
         // 设置中间件
         if let Some(mws) = middlewares {
@@ -106,7 +105,7 @@ impl Router {
     pub fn match_route<'a>(
         &'a self,
         segs: &[&str],
-        params: &mut HashMap<String, String>,
+        params: &mut HashMap<String, String>
     ) -> Option<&'a Router> {
         if segs.is_empty() {
             return Some(self);
@@ -116,8 +115,9 @@ impl Router {
         let rest = &segs[1..];
 
         // 1. 静态匹配
-        if let Some(child) = self.children.get(seg)
-            && let matched @ Some(_) = child.match_route(rest, params)
+        if
+            let Some(child) = self.children.get(seg) &&
+            let matched @ Some(_) = child.match_route(rest, params)
         {
             return matched;
         }
@@ -145,14 +145,9 @@ impl Router {
         global: Arc<Mutex<GlobalContext>>,
         reader: BufReader<OwnedReadHalf>,
         writer: BufWriter<OwnedWriteHalf>,
-        peer_addr: SocketAddr,
+        peer_addr: SocketAddr
     ) -> anyhow::Result<()> {
-        let mut ctx = HTTPContext::new(
-            reader,
-            writer,
-            global,
-            peer_addr,
-        );
+        let mut ctx = HTTPContext::new(reader, writer, global, peer_addr);
         ctx.req().await.parse_to_local().await?;
         // handle_request 返回 true 表示所有中间件和 Handler 正常通过
         // 返回 false 表示被拦截（如 validator 发现类型不匹配）
@@ -197,17 +192,26 @@ impl Router {
             }
 
             // 5. 处理 Form Body (如果是 x-www-form-urlencoded)
-            if meta
-                .content_type
-                .to_string()
-                .contains(SubMediaType::UrlEncoded.as_str())
-                && meta.length > 0
+            let length = match meta.headers.get(&super::protocol::header::HeaderKey::ContentLength) {
+                Some(s) => {
+                    let v = match s.parse::<usize>() {
+                        Ok(u) => u,
+                        Err(_) => 0,
+                    };
+                    v
+                }
+                None => 0,
+            };
+            if
+                meta.content_type.to_string().contains(SubMediaType::UrlEncoded.as_str()) &&
+                length > 0
             {
-                let mut body_bytes = vec![0u8; meta.length];
+                let mut body_bytes = vec![0u8; length];
                 // 注意：这里直接从 ctx.reader 读取，因为 HTTPContext 暴露了 reader
-                if tokio::io::AsyncReadExt::read_exact(&mut ctx.reader, &mut body_bytes)
-                    .await
-                    .is_ok()
+                if
+                    tokio::io::AsyncReadExt
+                        ::read_exact(&mut ctx.reader, &mut body_bytes).await
+                        .is_ok()
                 {
                     params.set_form(&String::from_utf8_lossy(&body_bytes));
                 }
@@ -241,9 +245,7 @@ impl Router {
 
             // 8. 执行最终处理器 (Handler)
             if let Some(handlers_map) = &node.handlers {
-                let handler = handlers_map
-                    .get(&method_key)
-                    .or_else(|| handlers_map.get("*"));
+                let handler = handlers_map.get(&method_key).or_else(|| handlers_map.get("*"));
                 if let Some(handler) = handler {
                     return handler(ctx).await;
                 }
@@ -255,4 +257,11 @@ impl Router {
         }
         true
     }
+}
+
+impl Default for Router {
+
+  fn default() -> Self {
+      Router::new(NodeType::Static("root".into()))
+  }
 }

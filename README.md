@@ -1,5 +1,5 @@
 
-# AEX — Async-first, Executor-based Web Framework for Rust
+# AEX — Async-first, Executor-based Web/TCP/UDP Framework for Rust
 
 > 一个轻量、可控、忠于 HTTP 本质的 Rust Web 框架
 
@@ -13,6 +13,7 @@ AEX.rs 是一个轻量级异步 Rust Web 框架
 4. 面向真实网络 I/O，而非抽象叠加
 
 > 为 Rust 开发者提供更清晰、更可控的 Web 编程体验
+
 
 ---
 
@@ -45,48 +46,27 @@ cargo add tokio futures futures_util anyhow
 
 ## 最简单的Hello World实现
 
+
 ```rust
-#[tokio::main(flavor = "multi_thread")]
+#[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // 构建 Router
-    let mut route = Router::new(NodeType::Static("root".into()));
+    let addr: SocketAddr = "0.0.0.0:8080".parse()?;
+    let mut router = HttpRouter::new(NodeType::Static("root".into()));
+
     route!(
-        route,
-        get!("/", |ctx: &mut HTTPContext| {
-            Box::pin(async move {
-                ctx.res.body.push("Hello world!".to_string());
-                // false = 不继续 middleware（如果你还保留这个语义）
+        router,
+        get!(
+            "/",
+            exe!(|ctx| {
+                let meta = &mut ctx.local.get_value::<HttpMetadata>().unwrap();
+                body!(meta, "Hello world!");
                 true
-            }).boxed()
-        })
+            })
+        )
     );
-    //启动 HTTPServer
-    let ip = "0.0.0.0";
-    let port = 8080;
-    let addr: SocketAddr = format!("{}:{}", ip, port).parse()?;
-    let server = HTTPServer::new(addr, route);
-    server.run().await?;
+    HTTPServer::new(addr).http(router).start().await?;
+    Ok(())
 }
-```
-
----
-
-注意必须补充下面的文件头内容，才能正真运行起来：
-
-```rust
-use std::{ net::SocketAddr, sync::Arc };
-
-use clap::Parser;
-
-use aex::{
-    get,
-    route,
-    router::{ NodeType, Router },
-    server::HTTPServer,
-    types::{ BinaryHandler, HTTPContext, TextHandler },
-    websocket::WebSocket, // 👈 关键：TrieRouter
-};
-use futures::FutureExt;
 ```
 
 ---
