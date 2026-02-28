@@ -124,14 +124,13 @@ mod tests {
 
         // 1. 调用实例方法 encode
         // 这里的 self 是 &RawCodec，会匹配到 impl Codec for RawCodec 的默认实现
-        // let encoded = raw.encode(); 
+        // let encoded = raw.encode();
         let encoded = <RawCodec as Codec>::encode(&raw);
         assert!(!encoded.is_empty());
 
         // 2. 调用关联函数 decode
         // 使用完全限定语法确保调用的是 Codec trait 里的实现
-        let decoded = <RawCodec as Codec>::decode(&encoded)
-            .expect("RawCodec should be decodable");
+        let decoded = <RawCodec as Codec>::decode(&encoded).expect("RawCodec should be decodable");
 
         // 3. 验证数据和接口
         assert_eq!(decoded.0, original_data);
@@ -143,11 +142,11 @@ mod tests {
     fn test_raw_codec_frame_handle() {
         let data = vec![10, 20];
         let raw = RawCodec(data.clone());
-        
+
         // 覆盖 Frame trait 的 handle 方法
         let handled_data = raw.handle();
         assert_eq!(handled_data, Some(data));
-        
+
         // 覆盖默认的 validate 实现
         assert!(Frame::validate(&raw));
         assert!(Command::validate(&raw));
@@ -156,11 +155,11 @@ mod tests {
     #[test]
     fn test_codec_decode_error_handling() {
         // 构造一个非法的数据片段（例如对于 Vec 来说长度前缀不完整的数据）
-        let malformed = vec![0x81]; 
-        
+        let malformed = vec![0x81];
+
         // 尝试解码，这会触发 Codec::decode 中的 map_err
         let result = <RawCodec as Codec>::decode(&malformed);
-        
+
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
         // 验证是否包含你定义的错误前缀
@@ -174,16 +173,16 @@ mod tests {
 
         // 1. 直接调用 bincode 宏生成的 Encode 逻辑
         // 注意：这里我们直接使用 bincode 的方法，而不是你 trait 里的包装方法
-        let config = frame_config(); 
-        let encoded = encode_to_vec(&raw, config)
-            .expect("Derived Encode should work with RawCodec");
+        let config = frame_config();
+        let encoded =
+            encode_to_vec(&raw, config).expect("Derived Encode should work with RawCodec");
 
         assert!(!encoded.is_empty());
 
         // 2. 直接调用 bincode 宏生成的 Decode 逻辑
         // 验证宏生成的代码能否正确识别并还原 Vec<u8>
-        let (decoded, len): (RawCodec, usize) = decode_from_slice(&encoded, config)
-            .expect("Derived Decode should work with RawCodec");
+        let (decoded, len): (RawCodec, usize) =
+            decode_from_slice(&encoded, config).expect("Derived Decode should work with RawCodec");
 
         assert_eq!(len, encoded.len());
         assert_eq!(decoded.0, data);
@@ -199,6 +198,13 @@ mod tests {
         let trait_encoded = Codec::encode(&raw);
         let direct_encoded = encode_to_vec(&raw, frame_config()).unwrap();
 
-        assert_eq!(trait_encoded, direct_encoded, "Trait encoding must match derived encoding");
+        assert_eq!(
+            trait_encoded, direct_encoded,
+            "Trait encoding must match derived encoding"
+        );
+
+        let signature = raw.sign(|bytes| bytes.to_vec());
+
+        assert!(raw.verify(&signature, |_| true));
     }
 }

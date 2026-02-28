@@ -7,6 +7,10 @@ use std::{
 use crate::connection::{ protocol::Protocol, types::NetworkScope };
 use serde::{ Deserialize, Serialize };
 
+
+//
+// 节点基本信息
+// 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Node {
     pub id: Vec<u8>, // 节点 ID，通常是公钥的哈希

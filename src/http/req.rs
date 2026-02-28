@@ -43,11 +43,6 @@ where
         // 2. 解析所有 Headers
         let headers = self.parse_headers_from_reader().await?;
 
-        let server = headers
-            .get(&HeaderKey::Server)
-            .cloned()
-            .unwrap_or_else(|| "".to_string());
-
         // 3. 提取特定字段 (移植旧逻辑)
 
         // 3.1 Content-Length
@@ -100,7 +95,6 @@ where
             transfer_encoding,
             multipart_boundary,
             content_type,
-            // server,
             length,
             cookies,
             is_websocket: WebSocket::check(method, &headers),

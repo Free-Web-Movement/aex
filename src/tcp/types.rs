@@ -1,23 +1,20 @@
-use std::{
-    pin::Pin,
-};
+use std::pin::Pin;
 
-use tokio::net::{
-    tcp::{OwnedReadHalf, OwnedWriteHalf},
-};
+use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 
 use anyhow::Result;
 use bincode;
 use serde::{Deserialize, Serialize};
 
-
 /// C: 业务指令/数据对象 (Command/Message)
-
-use bincode::{config, decode_from_slice, encode_to_vec, Decode, Encode};
+use bincode::{Decode, Encode, config, decode_from_slice, encode_to_vec};
 
 #[inline]
 pub fn frame_config() -> impl bincode::config::Config {
-    config::standard().with_fixed_int_encoding().with_big_endian().with_limit::<1024>() // 设置最大消息大小为 1024
+    config::standard()
+        .with_fixed_int_encoding()
+        .with_big_endian()
+        .with_limit::<1024>() // 设置最大消息大小为 1024
 }
 
 /// ⚡ 修正后的 Codec trait
@@ -38,7 +35,6 @@ pub trait Codec: Serialize + for<'de> Deserialize<'de> + Encode + Decode<()> + S
     }
 }
 
-
 pub type StreamExecutor = Box<
     dyn Fn(
             OwnedReadHalf,
@@ -48,18 +44,34 @@ pub type StreamExecutor = Box<
         + Sync,
 >;
 
-/// Frame 继承自 Codec，它是物理层的容器
 pub trait Frame: Codec {
-    // 核心属性：获取该帧内部包裹的原始字节负载
-    // 用于交给 Command::decode 进行进一步解析
-    // 返回 Option，如果没有子指令，返回 None；如果有，返回 Some(&[u8])
+
+    // 生成校验数据
     fn payload(&self) -> Option<&[u8]>;
-    /// 可选：获取帧头信息或校验状态，默认返回 true
+
+    // 用于逻辑校验
     fn validate(&self) -> bool {
         true
     }
-    // 按照你之前的要求，返回 Option<Vec<u8>>
+
+    // 处理逻辑
     fn handle(&self) -> Option<Vec<u8>>;
+
+
+    // 用于数据校验
+    fn sign<F>(&self, signer: F) -> Vec<u8>
+    where
+        F: FnOnce(&[u8]) -> Vec<u8>,
+    {
+        let raw_bytes = Codec::encode(self); // 假设 Codec 提供 encode()
+        signer(&raw_bytes)
+    }
+    fn verify<V>(&self, signature: &Vec<u8>, verifier: V) -> bool
+    where
+        V: FnOnce(&[u8]) -> bool,
+    {
+        verifier(signature)
+    }
 }
 
 pub trait Command: Codec {

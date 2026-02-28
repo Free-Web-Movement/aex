@@ -1,28 +1,32 @@
 use std::collections::HashMap;
+use std::future::Future;
 use std::hash::Hash;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::future::Future;
-use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite};
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 
-use crate::tcp::types::{Command, Frame};
+use crate::tcp::types::{Codec, Command, Frame};
 
 // 假设这些在你之前的定义中
 // use crate::tcp::types::{Codec, Frame, Command, RawCodec, frame_config};
 
 /// ⚡ 修复后的 Handler 签名：使用 BoxFuture 确保异步闭包可用
-pub type CommandHandler<C> = Box<dyn Fn(
-    C, 
-    Box<dyn AsyncRead + Unpin + Send>, 
-    Box<dyn AsyncWrite + Unpin + Send>
-) -> Pin<Box<dyn Future<Output = anyhow::Result<bool>> + Send>> + Send + Sync>;
+pub type CommandHandler<C> = Box<
+    dyn Fn(
+            C,
+            Box<dyn AsyncRead + Unpin + Send>,
+            Box<dyn AsyncWrite + Unpin + Send>,
+        ) -> Pin<Box<dyn Future<Output = anyhow::Result<bool>> + Send>>
+        + Send
+        + Sync,
+>;
 
-pub struct Router<F, C, K = u32> 
-where 
+pub struct Router<F, C, K = u32>
+where
     F: Frame + Send + Sync + 'static,
     C: Command + Send + Sync + 'static,
-    K: Eq + Hash + Send + Sync + 'static 
+    K: Eq + Hash + Send + Sync + 'static,
 {
     pub handlers: HashMap<K, CommandHandler<C>>,
     // 这里的 extractor 将 Command 映射为路由 Key
@@ -30,11 +34,11 @@ where
     _phantom: std::marker::PhantomData<F>,
 }
 
-impl<F, C, K> Router<F, C, K> 
-where 
+impl<F, C, K> Router<F, C, K>
+where
     F: Frame + Send + Sync + 'static,
     C: Command + Send + Sync + 'static,
-    K: Eq + Hash + Send + Sync + 'static 
+    K: Eq + Hash + Send + Sync + 'static,
 {
     pub fn new(extractor: impl Fn(&C) -> K + Send + Sync + 'static) -> Self {
         Self {
@@ -45,16 +49,17 @@ where
     }
 
     /// 修复语法：正确构建 Pin<Box<dyn Future>>
-pub fn on<FFut, Fut>(&mut self, key: K, f: FFut)
-where
-    FFut: Fn(C, Box<dyn AsyncRead + Unpin + Send>, Box<dyn AsyncWrite + Unpin + Send>) -> Fut + Send + Sync + 'static,
-    Fut: Future<Output = anyhow::Result<bool>> + Send + 'static,
-{
-    self.handlers.insert(
-        key, 
-        Box::new(move |cmd, r, w| Box::pin(f(cmd, r, w)))
-    );
-}
+    pub fn on<FFut, Fut>(&mut self, key: K, f: FFut)
+    where
+        FFut: Fn(C, Box<dyn AsyncRead + Unpin + Send>, Box<dyn AsyncWrite + Unpin + Send>) -> Fut
+            + Send
+            + Sync
+            + 'static,
+        Fut: Future<Output = anyhow::Result<bool>> + Send + 'static,
+    {
+        self.handlers
+            .insert(key, Box::new(move |cmd, r, w| Box::pin(f(cmd, r, w))));
+    }
 
     /// 核心分发逻辑
     pub async fn handle_frame(
@@ -73,15 +78,21 @@ where
             // 3. 使用你固定的 Codec::decode 恢复 Command 对象
             if let Ok(cmd) = <C as crate::tcp::types::Codec>::decode(&data) {
                 // 逻辑校验
-                if !cmd.validate() { return Ok(true); }
+                if !cmd.validate() {
+                    return Ok(true);
+                }
 
                 let key = (self.extractor)(&cmd);
-                
+
                 if let Some(handler) = self.handlers.get(&key) {
                     // 转移 IO 句柄所有权
-                    let r = reader.take().ok_or_else(|| anyhow::anyhow!("Reader already taken"))?;
-                    let w = writer.take().ok_or_else(|| anyhow::anyhow!("Writer already taken"))?;
-                    
+                    let r = reader
+                        .take()
+                        .ok_or_else(|| anyhow::anyhow!("Reader already taken"))?;
+                    let w = writer
+                        .take()
+                        .ok_or_else(|| anyhow::anyhow!("Writer already taken"))?;
+
                     // 执行业务 Handler
                     return handler(cmd, Box::new(r), Box::new(w)).await;
                 }
@@ -89,5 +100,61 @@ where
         }
 
         Ok(true)
+    }
+
+    pub async fn handle(
+        &self,
+        reader: OwnedReadHalf,
+        writer: OwnedWriteHalf,
+    ) -> anyhow::Result<()> {
+        let mut r_opt = Some(reader);
+        let mut w_opt = Some(writer);
+
+        // 固定的轻量级缓冲区，仅用于读取 Frame 头
+        let mut buf = vec![0u8; 1024];
+
+        loop {
+            // 尝试获取 reader，如果被 handler 接管走了，这里就退出循环
+            let r = match r_opt.as_mut() {
+                Some(r) => r,
+                None => {
+                    break;
+                }
+            };
+
+            // 1. 读取一次数据，期望是一个完整的 Frame
+            let n = r.read(&mut buf).await?;
+            if n == 0 {
+                break;
+            }
+
+            let data = &buf[..n];
+
+            // 2. 解码 Frame
+            let frame_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                <F as Codec>::decode(data)
+            }));
+
+            match frame_result {
+                Ok(Ok(frame)) => {
+                    // 3. 分发给 Router
+                    // 如果 Handler 需要读后续数据，它会通过 r_opt.take() 拿走 Reader 的所有权
+                    let should_continue =
+                        self.handle_frame(frame, &mut r_opt, &mut w_opt).await?;
+
+                    // 4. 检查 Reader 是否还在，或者 Handler 是否要求关闭
+                    if !should_continue || r_opt.is_none() {
+                        break;
+                    }
+                }
+                Ok(Err(e)) => {
+                    eprintln!("[AEX] 解码业务逻辑失败: {}", e);
+                }
+                Err(_) => {
+                    eprintln!("[AEX] 严重错误：解码器发生了崩溃 (Panic)！已丢弃该包并隔离。");
+                }
+            }
+        }
+        Ok(())
     }
 }

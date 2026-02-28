@@ -1,8 +1,19 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, net::SocketAddr, sync::Arc};
+
+use tokio::{
+    io::{BufReader, BufWriter},
+    net::tcp::{OwnedReadHalf, OwnedWriteHalf},
+    sync::Mutex,
+};
 
 use crate::{
-    connection::context::{HTTPContext, TypeMapExt},
-    http::{meta::HttpMetadata, params::Params, protocol::{media_type::SubMediaType, status::StatusCode}, types::Executor},
+    connection::context::{GlobalContext, HTTPContext, TypeMapExt},
+    http::{
+        meta::HttpMetadata,
+        params::Params,
+        protocol::{media_type::SubMediaType, status::StatusCode},
+        types::Executor,
+    },
 };
 
 /// 节点类型
@@ -106,9 +117,10 @@ impl Router {
 
         // 1. 静态匹配
         if let Some(child) = self.children.get(seg)
-            && let matched @ Some(_) = child.match_route(rest, params) {
-                return matched;
-            }
+            && let matched @ Some(_) = child.match_route(rest, params)
+        {
+            return matched;
+        }
 
         // 2. 动态匹配
         if let Some(param_child) = self.children.get(":") {
@@ -127,94 +139,119 @@ impl Router {
 
         None
     }
-}
 
-// --------------------------------------
-// 执行路由
-// --------------------------------------
-
-pub async fn handle_request(root: &Router, ctx: &mut HTTPContext) -> bool {
-    // 1. 获取 Metadata
-    let meta = &mut ctx.local.get_value::<HttpMetadata>().unwrap(); // 注意这里直接从 local 获取并可变借用
-
-    // 2. 准备路由匹配所需的 segments
-    let pure_path = meta.path.split('?').next().unwrap_or("");
-    let segments: Vec<&str> = pure_path
-        .trim_start_matches('/')
-        .split('/')
-        .filter(|s| !s.is_empty())
-        .collect();
-
-    let mut path_params = HashMap::new();
-
-    // 3. 执行 Trie 树匹配
-    if let Some(node) = root.match_route(&segments, &mut path_params) {
-        // 4. 构造并填充 Params
-        let mut params = Params::new(meta.path.clone());
-
-        // Trie 树已经帮我们解析好了 data (Path Params)
-        // 只有在 HashMap 不为空时才注入，保持数据清洁
-        if !path_params.is_empty() {
-            params.data = Some(path_params);
+    pub async fn handle(
+        self: Arc<Self>,
+        reader: BufReader<OwnedReadHalf>,
+        writer: BufWriter<OwnedWriteHalf>,
+        peer_addr: SocketAddr,
+    ) -> anyhow::Result<()> {
+        let mut ctx = HTTPContext::new(
+            reader,
+            writer,
+            Arc::new(Mutex::new(GlobalContext::new(peer_addr))),
+            peer_addr,
+        );
+        ctx.req().await.parse_to_local().await?;
+        // handle_request 返回 true 表示所有中间件和 Handler 正常通过
+        // 返回 false 表示被拦截（如 validator 发现类型不匹配）
+        if self.on_request(&mut ctx).await {
+            // 🟢 正常出口
+            ctx.res().send_response().await?;
+        } else {
+            // 🔴 错误/拦截出口
+            // 此时 send_failure 会读取 validator 写入的 "'{}' is not a valid boolean"
+            ctx.res().send_failure().await?;
         }
+        Ok(())
+    }
 
-        // 5. 处理 Form Body (如果是 x-www-form-urlencoded)
-        if meta
-            .content_type
-            .to_string()
-            .contains(SubMediaType::UrlEncoded.as_str())
-            && meta.length > 0
-        {
-            let mut body_bytes = vec![0u8; meta.length];
-            // 注意：这里直接从 ctx.reader 读取，因为 HTTPContext 暴露了 reader
-            if tokio::io::AsyncReadExt::read_exact(&mut ctx.reader, &mut body_bytes)
-                .await
-                .is_ok()
-            {
-                params.set_form(&String::from_utf8_lossy(&body_bytes));
+    // --------------------------------------
+    // 执行路由
+    // --------------------------------------
+
+    pub async fn on_request(&self, ctx: &mut HTTPContext) -> bool {
+        // 1. 获取 Metadata
+        let meta = &mut ctx.local.get_value::<HttpMetadata>().unwrap(); // 注意这里直接从 local 获取并可变借用
+
+        // 2. 准备路由匹配所需的 segments
+        let pure_path = meta.path.split('?').next().unwrap_or("");
+        let segments: Vec<&str> = pure_path
+            .trim_start_matches('/')
+            .split('/')
+            .filter(|s| !s.is_empty())
+            .collect();
+
+        let mut path_params = HashMap::new();
+
+        // 3. 执行 Trie 树匹配
+        if let Some(node) = self.match_route(&segments, &mut path_params) {
+            // 4. 构造并填充 Params
+            let mut params = Params::new(meta.path.clone());
+
+            // Trie 树已经帮我们解析好了 data (Path Params)
+            // 只有在 HashMap 不为空时才注入，保持数据清洁
+            if !path_params.is_empty() {
+                params.data = Some(path_params);
             }
-        }
 
-        // 6. 关键步骤：更新 meta 并同步回 ctx.local
-        meta.params = Some(params);
-        ctx.local.set_value(meta.clone()); // 同步更新回 local，确保后续中间件和处理器能访问到最新的 Metadata
+            // 5. 处理 Form Body (如果是 x-www-form-urlencoded)
+            if meta
+                .content_type
+                .to_string()
+                .contains(SubMediaType::UrlEncoded.as_str())
+                && meta.length > 0
+            {
+                let mut body_bytes = vec![0u8; meta.length];
+                // 注意：这里直接从 ctx.reader 读取，因为 HTTPContext 暴露了 reader
+                if tokio::io::AsyncReadExt::read_exact(&mut ctx.reader, &mut body_bytes)
+                    .await
+                    .is_ok()
+                {
+                    params.set_form(&String::from_utf8_lossy(&body_bytes));
+                }
+            }
 
-        // let method_key = meta.method.to_str().to_owned(); // 提前拷贝一份用于匹配
-        let method_key = meta.method.to_str().to_uppercase(); // 强制大写以匹配 HashMap 的 Key
+            // 6. 关键步骤：更新 meta 并同步回 ctx.local
+            meta.params = Some(params);
+            ctx.local.set_value(meta.clone()); // 同步更新回 local，确保后续中间件和处理器能访问到最新的 Metadata
 
-        // 7. 执行中间件 (Middleware)
-        if let Some(mws_map) = &node.middlewares {
-            let mws = mws_map.get(&method_key).or_else(|| mws_map.get("*"));
-            if let Some(mws) = mws {
-                for mw in mws {
-                    if !mw(ctx).await {
-                        // 如果中间件没有设置状态，我们补一个默认的 400
-                        let mut meta = ctx.local.get_value::<HttpMetadata>().unwrap();
-                        // meta.status = StatusCode::BadRequest;
-                        if meta.status == StatusCode::Ok {
-                            meta.status = StatusCode::BadRequest;
+            // let method_key = meta.method.to_str().to_owned(); // 提前拷贝一份用于匹配
+            let method_key = meta.method.to_str().to_uppercase(); // 强制大写以匹配 HashMap 的 Key
+
+            // 7. 执行中间件 (Middleware)
+            if let Some(mws_map) = &node.middlewares {
+                let mws = mws_map.get(&method_key).or_else(|| mws_map.get("*"));
+                if let Some(mws) = mws {
+                    for mw in mws {
+                        if !mw(ctx).await {
+                            // 如果中间件没有设置状态，我们补一个默认的 400
+                            let mut meta = ctx.local.get_value::<HttpMetadata>().unwrap();
+                            // meta.status = StatusCode::BadRequest;
+                            if meta.status == StatusCode::Ok {
+                                meta.status = StatusCode::BadRequest;
+                            }
+                            ctx.local.set_value(meta);
+                            return false;
                         }
-                        ctx.local.set_value(meta);
-                        return false;
                     }
                 }
             }
-        }
 
-        // 8. 执行最终处理器 (Handler)
-        if let Some(handlers_map) = &node.handlers {
-            let handler = handlers_map
-                .get(&method_key)
-                .or_else(|| handlers_map.get("*"));
-            if let Some(handler) = handler {
-                return handler(ctx).await;
+            // 8. 执行最终处理器 (Handler)
+            if let Some(handlers_map) = &node.handlers {
+                let handler = handlers_map
+                    .get(&method_key)
+                    .or_else(|| handlers_map.get("*"));
+                if let Some(handler) = handler {
+                    return handler(ctx).await;
+                }
             }
+        } else {
+            let mut meta = ctx.local.get_value::<HttpMetadata>().unwrap();
+            meta.status = StatusCode::NotFound;
+            ctx.local.set_value(meta);
         }
-    } else {
-        let mut meta = ctx.local.get_value::<HttpMetadata>().unwrap();
-        meta.status = StatusCode::NotFound;
-        ctx.local.set_value(meta);
+        true
     }
-
-    true
 }

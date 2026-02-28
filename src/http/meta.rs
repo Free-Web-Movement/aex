@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::http::{params::Params, protocol::{content_type::ContentType, header::{HeaderKey, Headers}, method::HttpMethod, status::StatusCode, version::HttpVersion}};
+use crate::http::{params::Params, protocol::{content_type::ContentType, header::Headers, method::HttpMethod, status::StatusCode, version::HttpVersion}};
 
 // 常规的HTTP请求元数据，供中间件和处理器使用
 #[derive(Debug, Clone)]
