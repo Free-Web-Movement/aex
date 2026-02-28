@@ -1,3 +1,5 @@
+use std::time::UNIX_EPOCH;
+
 use chrono::{DateTime, Utc};
 
 /// 全局 UTC 时间源
@@ -13,6 +15,13 @@ impl SystemTime {
     /// 当前秒级时间戳 (Unix Timestamp)
     pub fn now_ts() -> u64 {
         Utc::now().timestamp() as u64
+    }
+
+    pub fn timestamp() -> u128 {
+        std::time::SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis()
     }
 
     /// 当前毫秒级时间戳
@@ -39,11 +48,11 @@ impl SystemTime {
 
     /// 判断给定时间点是否已过期
     /// from: 起始时间, ttl_ms: 有效时长（毫秒）
-    pub fn is_expired(from: DateTime<Utc>, ttl_ms: u64) -> bool {
+    pub fn is_expired(from: DateTime<Utc>, ttl_ms: u128) -> bool {
         let now_ms = Utc::now().timestamp_millis();
         let from_ms = from.timestamp_millis();
-        
+
         // 使用 saturating_sub 防止时间回拨导致的溢出 panic
-        (now_ms.saturating_sub(from_ms)) as u64 >= ttl_ms
+        (now_ms.saturating_sub(from_ms)) as u128 >= ttl_ms
     }
 }
