@@ -31,11 +31,11 @@ mod aex_tests {
         fn validate(&self) -> bool {
             !self.0.is_empty()
         }
-        fn handle(&self) -> Option<Vec<u8>> {
-            Some(self.0.clone())
-        }
-        fn payload(&self) -> Option<&[u8]> {
+        fn command(&self) -> Option<&Vec<u8>> {
             Some(&self.0)
+        }
+        fn payload(&self) -> Option<Vec<u8>> {
+            Some(self.0.clone())
         }
     }
 

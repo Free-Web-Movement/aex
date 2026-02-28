@@ -32,14 +32,14 @@ mod router_tests {
     }
     impl Codec for TestFrame {}
     impl Frame for TestFrame {
-        fn payload(&self) -> Option<&[u8]> {
-            self.payload.as_deref()
+        fn payload(&self) -> Option<Vec<u8>> {
+            self.payload.clone()
         }
         fn validate(&self) -> bool {
             self.is_valid
         }
-        fn handle(&self) -> Option<Vec<u8>> {
-            self.payload.clone()
+        fn command(&self) -> Option<&Vec<u8>> {
+            self.payload.as_ref()
         }
     }
 

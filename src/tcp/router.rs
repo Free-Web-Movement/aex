@@ -74,7 +74,7 @@ where
         }
 
         // 2. 剥壳获取 Payload
-        if let Some(data) = frame.handle() {
+        if let Some(data) = frame.command() {
             // 3. 使用你固定的 Codec::decode 恢复 Command 对象
             if let Ok(cmd) = <C as crate::tcp::types::Codec>::decode(&data) {
                 // 逻辑校验

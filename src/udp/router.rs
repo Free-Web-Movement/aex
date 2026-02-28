@@ -61,7 +61,7 @@ where
                     }
 
                     // 2. 获取 Payload 并解码为 Command
-                    if let Some(payload) = frame.handle()
+                    if let Some(payload) = frame.command()
                         && let Ok(cmd) = <C as Codec>::decode(&payload)
                     {
                         let key = (router_ctx.extractor)(&cmd);

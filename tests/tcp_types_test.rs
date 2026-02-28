@@ -51,8 +51,8 @@ mod tests {
         assert!(Command::validate(&raw)); // 测试默认实现
 
         // 测试 Frame trait
-        assert_eq!(raw.payload(), Some(raw_data.as_slice()));
-        assert_eq!(raw.handle(), Some(raw_data));
+        assert_eq!(raw.payload(), Some(raw_data.clone()));
+        assert_eq!(raw.command(), Some(raw_data.as_ref()));
         assert!(Frame::validate(&raw)); // 测试 Frame 的默认 validate
     }
 
@@ -135,7 +135,7 @@ mod tests {
         // 3. 验证数据和接口
         assert_eq!(decoded.0, original_data);
         assert_eq!(decoded.id(), 0);
-        assert_eq!(decoded.payload(), Some(original_data.as_slice()));
+        assert_eq!(decoded.payload(), Some(original_data));
     }
 
     #[test]
@@ -144,8 +144,8 @@ mod tests {
         let raw = RawCodec(data.clone());
 
         // 覆盖 Frame trait 的 handle 方法
-        let handled_data = raw.handle();
-        assert_eq!(handled_data, Some(data));
+        let handled_data = raw.command();
+        assert_eq!(handled_data, Some(data.as_ref()));
 
         // 覆盖默认的 validate 实现
         assert!(Frame::validate(&raw));

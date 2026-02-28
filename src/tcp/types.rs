@@ -47,7 +47,7 @@ pub type StreamExecutor = Box<
 pub trait Frame: Codec {
 
     // 生成校验数据
-    fn payload(&self) -> Option<&[u8]>;
+    fn payload(&self) -> Option<Vec<u8>>;
 
     // 用于逻辑校验
     fn validate(&self) -> bool {
@@ -55,7 +55,7 @@ pub trait Frame: Codec {
     }
 
     // 处理逻辑
-    fn handle(&self) -> Option<Vec<u8>>;
+    fn command(&self) -> Option<&Vec<u8>>;
 
 
     // 用于数据校验
@@ -66,7 +66,7 @@ pub trait Frame: Codec {
         let raw_bytes = Codec::encode(self); // 假设 Codec 提供 encode()
         signer(&raw_bytes)
     }
-    fn verify<V>(&self, signature: &Vec<u8>, verifier: V) -> bool
+    fn verify<V>(&self, signature: &[u8], verifier: V) -> bool
     where
         V: FnOnce(&[u8]) -> bool,
     {
@@ -90,11 +90,11 @@ pub trait Command: Codec {
 pub struct RawCodec(pub Vec<u8>);
 impl Codec for RawCodec {}
 impl Frame for RawCodec {
-    fn payload(&self) -> Option<&[u8]> {
-        Some(&self.0)
-    }
-    fn handle(&self) -> Option<Vec<u8>> {
+    fn payload(&self) -> Option<Vec<u8>> {
         Some(self.0.clone())
+    }
+    fn command(&self) -> Option<&Vec<u8>> {
+        Some(&self.0)
     }
 }
 
