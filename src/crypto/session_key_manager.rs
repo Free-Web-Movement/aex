@@ -1,5 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
 
+use anyhow::Ok;
 use anyhow::Result;
 use anyhow::anyhow;
 use chacha20poly1305::aead::{OsRng, rand_core::RngCore};
@@ -23,26 +24,25 @@ impl PairedSessionKey {
         }
     }
 
-    pub async fn create(&self, sk: &Arc<Mutex<HashMap<Vec<u8>, SessionKey>>>) -> Vec<u8> {
+    pub async fn create(&self, is_main: bool) -> (Vec<u8>, PublicKey) {
         let mut session_id = vec![0u8; self.length];
         OsRng.fill_bytes(&mut session_id);
 
         let session_key = SessionKey::new();
+        let ephemeral_public = session_key.ephemeral_public.clone();
+        if is_main {
+            self.main
+                .write()
+                .await
+                .insert(session_id.clone(), session_key);
+        } else {
+            self.temp
+                .lock()
+                .await
+                .insert(session_id.clone(), session_key);
+        }
 
-        sk.lock().await.insert(session_id.clone(), session_key);
-
-        session_id
-    }
-
-    pub async fn add(&self, sk: &Arc<RwLock<HashMap<Vec<u8>, SessionKey>>>) -> Vec<u8> {
-        let mut session_id = vec![0u8; self.length];
-        OsRng.fill_bytes(&mut session_id);
-
-        let session_key = SessionKey::new();
-
-        sk.write().await.insert(session_id.clone(), session_key);
-
-        session_id
+        (session_id, ephemeral_public)
     }
 
     pub async fn save(&self, from: Vec<u8>, to: Vec<u8>) -> Result<()> {
@@ -88,19 +88,65 @@ impl PairedSessionKey {
 
         f(sk)
     }
+    // 辅助方法：安全地从 Vec 转换到 [u8; 32]
+    fn parse_public_key(bytes: &[u8]) -> Result<x25519_dalek::PublicKey> {
+        let array: [u8; 32] = bytes
+            .get(..32)
+            .and_then(|slice| slice.try_into().ok())
+            .ok_or_else(|| {
+                anyhow!(
+                    "Invalid public key length: expected 32, got {}",
+                    bytes.len()
+                )
+            })?;
+        Ok(x25519_dalek::PublicKey::from(array))
+    }
 
     /// 完成 session 握手（ACK 阶段）
-    pub async fn session_establish(&self, key: &Vec<u8>, peer_public: &PublicKey) -> Result<()> {
-        let mut sessions = self.main.write().await;
+    pub async fn establish_begins(
+        &self,
+        id: Vec<u8>,
+        remote: &[u8], // 改为切片更通用
+    ) -> Result<Option<PublicKey>> {
+        let mut session_key = SessionKey::new();
+        let ephemeral_public = session_key.ephemeral_public.clone();
 
-        let sk = sessions
-            .get_mut(key)
-            .ok_or_else(|| anyhow!("session not found for address"))?;
+        // 安全转换，不再使用 expect
+        let client_pub = Self::parse_public_key(remote)?;
 
-        sk.establish(peer_public)?;
-        sk.touch();
+        // 执行 Diffie-Hellman
+        if let Err(_) = session_key.establish(&client_pub) {
+            return Ok(None);
+        }
 
-        Ok(())
+        session_key.touch();
+        self.main.write().await.insert(id, session_key);
+
+        Ok(Some(ephemeral_public))
+    }
+
+    pub async fn establish_ends(&self, id: Vec<u8>, remote: &[u8]) -> Result<bool> {
+        let mut temp_sessions = self.temp.lock().await;
+
+        let mut session = match temp_sessions.remove(&id) {
+            Some(s) => s,
+            None => return Ok(false),
+        };
+
+        // 安全转换
+        let peer_pub = Self::parse_public_key(remote)?;
+
+        if let Err(_) = session.establish(&peer_pub) {
+            return Ok(false);
+        }
+
+        session.touch();
+
+        // 跨锁操作建议：先释放 temp 锁再拿 main 锁，避免潜在死锁
+        drop(temp_sessions);
+
+        self.main.write().await.insert(id, session);
+        Ok(true)
     }
 
     /// 使用 session 加密
@@ -112,8 +158,6 @@ impl PairedSessionKey {
             .ok_or_else(|| anyhow!("session not found for address"))?;
 
         let ct = sk.encrypt(plaintext)?;
-        sk.touch();
-
         Ok(ct)
     }
 
@@ -126,8 +170,6 @@ impl PairedSessionKey {
             .ok_or_else(|| anyhow!("session not found for address"))?;
 
         let pt = sk.decrypt(data)?;
-        sk.touch();
-
         Ok(pt)
     }
 }

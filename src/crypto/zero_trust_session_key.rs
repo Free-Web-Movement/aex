@@ -10,9 +10,9 @@ use x25519_dalek::{EphemeralSecret, PublicKey};
 use crate::time::SystemTime;
 
 pub struct SessionKey {
-    pub key: Option<[u8; 32]>,                     // 对称 session_key
+    pub key: Option<[u8; 32]>, // 对称 session_key
     pub ephemeral_secret: Option<EphemeralSecret>, // 一次性
-    pub ephemeral_public: PublicKey,               // 可缓存
+    pub ephemeral_public: PublicKey, // 可缓存
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -28,11 +28,11 @@ impl SessionKey {
             ephemeral_secret: Some(secret),
             ephemeral_public: public,
             created_at: SystemTime::now(),
-            updated_at: SystemTime::now()
+            updated_at: SystemTime::now(),
         }
     }
 
-        #[inline]
+    #[inline]
     pub fn touch(&mut self) {
         self.updated_at = SystemTime::now();
     }
