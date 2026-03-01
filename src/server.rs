@@ -7,13 +7,14 @@ use tokio::net::UdpSocket;
 use crate::communicators::event::{Event, EventCallback};
 use crate::communicators::pipe::PipeCallback;
 use crate::communicators::spreader::SpreadCallback;
-use crate::connection::context::GlobalContext;
 use crate::http::protocol::method::HttpMethod;
 use crate::http::router::Router as HttpRouter;
 use crate::tcp::router::Router as TcpRouter;
 use crate::tcp::types::{Command, Frame, RawCodec}; // 确保引入了 Command
 use crate::udp::router::Router as UdpRouter;
-use tokio::sync::Mutex;
+use tokio::sync::RwLock;
+use crate::connection::global::GlobalContext;
+
 /// AexServer: 核心多协议服务器
 pub struct AexServer<F, C, K = u32>
 where
@@ -25,7 +26,7 @@ where
     pub http_router: Option<Arc<HttpRouter>>,
     pub tcp_router: Option<Arc<TcpRouter<F, C, K>>>,
     pub udp_router: Option<Arc<UdpRouter<F, C, K>>>,
-    pub globals: Arc<Mutex<GlobalContext>>,
+    pub globals: Arc<RwLock<GlobalContext>>,
     _phantom: std::marker::PhantomData<(F, C)>, // 修正 PhantomData 包含 C
 }
 
@@ -41,7 +42,7 @@ where
             http_router: None,
             tcp_router: None,
             udp_router: None,
-            globals: Arc::new(Mutex::new(GlobalContext::new(addr))),
+            globals: Arc::new(RwLock::new(GlobalContext::new(addr))),
             _phantom: std::marker::PhantomData,
         }
     }
@@ -105,7 +106,7 @@ where
 
                 // 自定义 TCP
                 if let Some(tr) = &server_ctx.tcp_router {
-                    TcpRouter::<F, C, K>::set_crypto_session(server_ctx.globals.clone()).await;
+                    // TcpRouter::<F, C, K>::set_crypto_session(server_ctx.globals.clone()).await;
                     return tr.clone().handle(server_ctx.globals.clone(), reader, writer).await;
                 }
 
@@ -143,7 +144,7 @@ where
     where
         T: Send + 'static,
     {
-        let g = self.globals.lock().await;
+        let g = self.globals.write().await;
         g.pipe.register(name, callback).await.unwrap_or_else(|e| {
             eprintln!("警告: 管道 {} 注册失败: {}", name, e);
         });
@@ -155,7 +156,7 @@ where
     where
         T: Clone + Send + Sync + 'static,
     {
-        let g = self.globals.lock().await;
+        let g = self.globals.write().await;
         g.spread
             .subscribe(name, callback)
             .await
@@ -170,7 +171,7 @@ where
     where
         T: Clone + Send + Sync + 'static,
     {
-        let g = self.globals.lock().await;
+        let g = self.globals.write().await;
         // 调用我们之前实现的异步版 on
         Event::<T>::_on(&g.event, event_name.to_string(), callback).await;
         self

@@ -1,7 +1,7 @@
 use aex::connection::context::TypeMapExt;
 use aex::http::meta::HttpMetadata;
 use aex::http::router::{ NodeType, Router as HttpRouter };
-use aex::server::{AexServer, HTTPServer};
+use aex::server::{HTTPServer};
 use aex::{ body, exe, get, route };
 use std::net::SocketAddr;
 

@@ -12,7 +12,7 @@ mod tests {
         let mut bob = SessionKey::new();
 
         // 记录初始时间用于后续验证
-        let initial_time = alice.created_at;
+        let _ = alice.created_at;
 
         // 2. 交换公钥并建立会话 (ECDH)
         alice.establish(&bob.ephemeral_public)?;
@@ -52,7 +52,7 @@ mod tests {
     fn test_decrypt_with_wrong_key() -> anyhow::Result<()> {
         let mut alice = SessionKey::new();
         let mut bob = SessionKey::new();
-        let mut eve = SessionKey::new(); // 攻击者
+        let eve = SessionKey::new(); // 攻击者
 
         alice.establish(&bob.ephemeral_public)?;
         bob.establish(&alice.ephemeral_public)?;

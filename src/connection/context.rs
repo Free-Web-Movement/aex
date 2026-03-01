@@ -1,15 +1,14 @@
 use chrono::DateTime;
 use chrono::Utc;
+use tokio::sync::RwLock;
 use std::any::TypeId;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::io::{BufReader, BufWriter};
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::{Mutex};
 
-use crate::communicators::event::EventEmitter;
-use crate::communicators::pipe::PipeManager;
-use crate::communicators::spreader::SpreadManager;
+use crate::connection::global::GlobalContext;
 use crate::http::req::Request;
 use crate::http::res::Response;
 
@@ -38,43 +37,6 @@ impl TypeMapExt for TypeMap {
     }
 }
 
-// --- [GlobalContext] ---
-
-pub struct GlobalContext {
-    // local socket listening address
-    pub addr: SocketAddr,
-    pub local_node: Arc<RwLock<crate::connection::node::Node>>,
-    pub manager: Arc<crate::connection::manager::ConnectionManager>,
-    pub pipe: PipeManager,
-    pub spread: SpreadManager,
-    pub event: EventEmitter,
-    pub name: String,
-    /// 全局 TypeMap：允许灵活添加数据库连接池、全局配置等
-    pub extensions: Arc<RwLock<TypeMap>>,
-}
-
-impl GlobalContext {
-    pub fn new(addr: SocketAddr) -> Self {
-        Self {
-            addr,
-            // 假设 Node 和 ConnectionManager 都有默认初始化方法
-            local_node: Arc::new(RwLock::new(crate::connection::node::Node::from_addr(
-                addr, None, None,
-            ))),
-            manager: Arc::new(crate::connection::manager::ConnectionManager::new()),
-            pipe: PipeManager::default(),
-            spread: SpreadManager::default(),
-            event: EventEmitter::default(),
-            name: SERVER_NAME.to_string(),
-            extensions: Arc::new(RwLock::new(TypeMap::default())),
-        }
-    }
-
-    pub fn set_server_name(&mut self, name: String) {
-        self.name = name;
-    }
-}
-
 // --- [Context] ---
 pub type SharedWriter<W> = Arc<Mutex<W>>;
 /// 泛型 Context：AEX 的核心，R 和 W 代表读写流
@@ -85,7 +47,7 @@ pub struct Context<R, W> {
     pub accepted: DateTime<Utc>,
     pub reader: R,
     pub writer: SharedWriter<W>,
-    pub global: Arc<Mutex<GlobalContext>>,
+    pub global: Arc<RwLock<GlobalContext>>,
     /// 本地 TypeMap：用于存储请求级别的临时变量
     pub local: TypeMap,
 }
@@ -100,7 +62,7 @@ pub struct Context<R, W> {
 pub type HTTPContext = Context<BufReader<OwnedReadHalf>, BufWriter<OwnedWriteHalf>>;
 
 impl<R, W> Context<R, W> {
-    pub fn new(reader: R, writer: W, global: Arc<Mutex<GlobalContext>>, addr: SocketAddr) -> Self {
+    pub fn new(reader: R, writer: W, global: Arc<RwLock<GlobalContext>>, addr: SocketAddr) -> Self {
         Self {
             accepted: Utc::now(),
             reader,

@@ -230,7 +230,7 @@ mod aex_tests {
         // --- 模拟业务触发 ---
         // 在实际运行中，这些触发通常发生在 Context 逻辑内
         {
-            let globals = server.globals.lock().await;
+            let globals = server.globals.write().await;
 
             // 触发 Pipe
             globals.pipe.send("audit_log", "Server started".to_string()).await.unwrap();

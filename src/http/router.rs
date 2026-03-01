@@ -1,13 +1,13 @@
-use std::{ collections::HashMap, net::SocketAddr, sync::Arc };
+use std::{ collections::HashMap, net::SocketAddr, sync::{Arc} };
 
 use tokio::{
     io::{ BufReader, BufWriter },
     net::tcp::{ OwnedReadHalf, OwnedWriteHalf },
-    sync::Mutex,
+    sync::RwLock,
 };
 
 use crate::{
-    connection::context::{ GlobalContext, HTTPContext, TypeMapExt },
+    connection::{context::{ HTTPContext, TypeMapExt }, global::GlobalContext},
     http::{
         meta::HttpMetadata,
         params::Params,
@@ -142,7 +142,7 @@ impl Router {
 
     pub async fn handle(
         self: Arc<Self>,
-        global: Arc<Mutex<GlobalContext>>,
+        global: Arc<RwLock<GlobalContext>>,
         reader: BufReader<OwnedReadHalf>,
         writer: BufWriter<OwnedWriteHalf>,
         peer_addr: SocketAddr
