@@ -49,7 +49,7 @@ mod tests {
     #[tokio::test]
     async fn test_context_flow() {
         let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
-        let global = Arc::new(RwLock::new(GlobalContext::new(addr)));
+        let global = Arc::new(GlobalContext::new(addr));
 
         // 模拟 I/O：使用 dummy 向量模拟 reader 和 writer
         let reader = vec![0u8; 10];
@@ -88,7 +88,7 @@ mod tests {
     #[tokio::test]
     async fn test_context_concurrency() {
         let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
-        let global = Arc::new(RwLock::new(GlobalContext::new(addr)));
+        let global = Arc::new(GlobalContext::new(addr));
         let ctx = Arc::new(
             tokio::sync::Mutex::new(Context::<Vec<u8>, Vec<u8>>::new(vec![], vec![], global, addr))
         );
@@ -176,7 +176,7 @@ mod tests {
         let (reader, writer) = io::split(client);
         let remote_addr = "192.168.1.100:12345".parse().unwrap();
 
-        let ctx = Context::new(reader, writer, Arc::clone(&Arc::new(RwLock::new(global))), remote_addr);
+        let ctx = Context::new(reader, writer, Arc::clone(&Arc::new(global)), remote_addr);
 
         // --- 执行业务逻辑测试 ---
 
@@ -185,8 +185,7 @@ mod tests {
         let time_spent = ctx.elapsed();
         assert!(time_spent >= 100, "Elapsed 应该大于 100ms, 当前: {}ms", time_spent);
 
-        let binding = ctx.global.clone();
-        let global = binding.write().await;
+        let global = ctx.global.clone();
 
         // 2. 使用 Event 通知系统有新请求
         global.event.notify("request_received".to_string(), 1024_u32).await;

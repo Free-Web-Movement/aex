@@ -1,6 +1,5 @@
 use chrono::DateTime;
 use chrono::Utc;
-use tokio::sync::RwLock;
 use std::any::TypeId;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -47,7 +46,7 @@ pub struct Context<R, W> {
     pub accepted: DateTime<Utc>,
     pub reader: R,
     pub writer: SharedWriter<W>,
-    pub global: Arc<RwLock<GlobalContext>>,
+    pub global: Arc<GlobalContext>,
     /// 本地 TypeMap：用于存储请求级别的临时变量
     pub local: TypeMap,
 }
@@ -62,7 +61,7 @@ pub struct Context<R, W> {
 pub type HTTPContext = Context<BufReader<OwnedReadHalf>, BufWriter<OwnedWriteHalf>>;
 
 impl<R, W> Context<R, W> {
-    pub fn new(reader: R, writer: W, global: Arc<RwLock<GlobalContext>>, addr: SocketAddr) -> Self {
+    pub fn new(reader: R, writer: W, global: Arc<GlobalContext>, addr: SocketAddr) -> Self {
         Self {
             accepted: Utc::now(),
             reader,

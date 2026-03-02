@@ -5,7 +5,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite};
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::{Mutex};
 
 use crate::connection::global::GlobalContext;
 use crate::crypto::zero_trust_session_key::SessionKey;
@@ -110,7 +110,7 @@ where
 
     pub async fn handle(
         &self,
-        _global: Arc<RwLock<GlobalContext>>,
+        _global: Arc<GlobalContext>,
         reader: OwnedReadHalf,
         writer: OwnedWriteHalf,
     ) -> anyhow::Result<()> {
