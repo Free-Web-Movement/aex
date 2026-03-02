@@ -186,7 +186,7 @@ mod tests {
         
         // 1. 模拟初始化阶段：服务端生成临时 Session 并发给客户端自己的公钥
         // 此时 is_main = false，SessionKey 存在 temp 中
-        let (session_id, server_pub) = manager.create(false).await;
+        let (session_id, _server_pub) = manager.create(false).await;
         
         {
             let temp_map = manager.temp.lock().await;
