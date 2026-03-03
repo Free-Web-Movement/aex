@@ -152,4 +152,33 @@ mod tests {
         let _ = fs::remove_dir_all(test_dir);
         Ok(())
     }
+
+    #[test]
+    fn test_dir_string_output() {
+        // 使用一个确定的路径名
+        let custom_path = "test_data_folder";
+        let storage = Storage::new(Some(custom_path));
+
+        // 验证 dir() 返回的内容
+        let dir_str = storage.dir();
+
+        // 在 Unix 上应该是 "test_data_folder"
+        // 在 Windows 上可能是 "test_data_folder" (PathBuf 会自动处理)
+        assert!(dir_str.contains("test_data_folder"));
+
+        // 清理创建的目录
+        let _ = std::fs::remove_dir(custom_path);
+    }
+
+    #[test]
+    fn test_dir_consistency() {
+        // 验证 dir() 返回的值和内部 PathBuf 转换出来的字符串是一致 of
+        let storage = Storage::new(None);
+        let expected = storage
+            .app_dir
+            .to_str()
+            .expect("Path should be valid UTF-8");
+
+        assert_eq!(storage.dir(), expected);
+    }
 }

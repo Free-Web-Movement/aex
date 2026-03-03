@@ -3,6 +3,9 @@ use std::{collections::HashMap, fs, path::PathBuf};
 
 pub const DEFAULT_APP_DIR: &str = ".aex";
 
+
+
+#[derive(Debug, Clone)]
 pub struct Storage {
     pub app_dir: PathBuf,
     pub files: HashMap<String, PathBuf>,
@@ -33,11 +36,11 @@ impl Storage {
         }
     }
 
-    pub fn save<T>(&self, k: String, t: T) -> anyhow::Result<()>
+    pub fn save<T>(&self, k: String, t: &T) -> anyhow::Result<()>
     where
         T: Serialize,
     {
-        let json = serde_json::to_vec_pretty(&t)?;
+        let json = serde_json::to_vec_pretty(t)?;
         let default_path = PathBuf::from(DEFAULT_APP_DIR);
         let file = self.files.get(&k).unwrap_or_else(|| &default_path);
         fs::write(file, json)?;
@@ -58,5 +61,10 @@ impl Storage {
 
         let bytes = fs::read(&file)?;
         Ok(Some(serde_json::from_slice(&bytes)?))
+    }
+
+    pub fn dir(&self) -> &str {
+        let str = self.app_dir.as_os_str().to_str().unwrap();
+        str
     }
 }
