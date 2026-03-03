@@ -2,7 +2,6 @@ use std::net::SocketAddr;
 use std::{collections::HashMap, sync::Arc};
 
 use tokio::net::UdpSocket;
-use tokio::sync::RwLock;
 
 use crate::connection::global::GlobalContext;
 use crate::tcp::types::{Codec, Command, Frame};
@@ -47,7 +46,7 @@ where
 
     pub async fn handle(
         self: Arc<Self>,
-        _global: Arc<RwLock<GlobalContext>>,
+        _global: Arc<GlobalContext>,
         socket: Arc<UdpSocket>,
     ) -> anyhow::Result<()> {
         let mut buf = [0u8; 65535]; // UDP 最大报文长度

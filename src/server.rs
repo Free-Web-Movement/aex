@@ -12,7 +12,6 @@ use crate::http::router::Router as HttpRouter;
 use crate::tcp::router::Router as TcpRouter;
 use crate::tcp::types::{Command, Frame, RawCodec}; // 确保引入了 Command
 use crate::udp::router::Router as UdpRouter;
-use tokio::sync::RwLock;
 use crate::connection::global::GlobalContext;
 
 /// AexServer: 核心多协议服务器
@@ -26,7 +25,7 @@ where
     pub http_router: Option<Arc<HttpRouter>>,
     pub tcp_router: Option<Arc<TcpRouter<F, C, K>>>,
     pub udp_router: Option<Arc<UdpRouter<F, C, K>>>,
-    pub globals: Arc<RwLock<GlobalContext>>,
+    pub globals: Arc<GlobalContext>,
     _phantom: std::marker::PhantomData<(F, C)>, // 修正 PhantomData 包含 C
 }
 
@@ -42,7 +41,7 @@ where
             http_router: None,
             tcp_router: None,
             udp_router: None,
-            globals: Arc::new(RwLock::new(GlobalContext::new(addr))),
+            globals: Arc::new(GlobalContext::new(addr)),
             _phantom: std::marker::PhantomData,
         }
     }
@@ -144,8 +143,7 @@ where
     where
         T: Send + 'static,
     {
-        let g = self.globals.write().await;
-        g.pipe.register(name, callback).await.unwrap_or_else(|e| {
+        self.globals.pipe.register(name, callback).await.unwrap_or_else(|e| {
             eprintln!("警告: 管道 {} 注册失败: {}", name, e);
         });
         self
@@ -156,8 +154,7 @@ where
     where
         T: Clone + Send + Sync + 'static,
     {
-        let g = self.globals.write().await;
-        g.spread
+        self.globals.spread
             .subscribe(name, callback)
             .await
             .unwrap_or_else(|e| {
@@ -171,9 +168,8 @@ where
     where
         T: Clone + Send + Sync + 'static,
     {
-        let g = self.globals.write().await;
         // 调用我们之前实现的异步版 on
-        Event::<T>::_on(&g.event, event_name.to_string(), callback).await;
+        Event::<T>::_on(&self.globals.event, event_name.to_string(), callback).await;
         self
     }
 }

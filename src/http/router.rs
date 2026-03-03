@@ -3,7 +3,6 @@ use std::{ collections::HashMap, net::SocketAddr, sync::{Arc} };
 use tokio::{
     io::{ BufReader, BufWriter },
     net::tcp::{ OwnedReadHalf, OwnedWriteHalf },
-    sync::RwLock,
 };
 
 use crate::{
@@ -142,7 +141,7 @@ impl Router {
 
     pub async fn handle(
         self: Arc<Self>,
-        global: Arc<RwLock<GlobalContext>>,
+        global: Arc<GlobalContext>,
         reader: BufReader<OwnedReadHalf>,
         writer: BufWriter<OwnedWriteHalf>,
         peer_addr: SocketAddr
