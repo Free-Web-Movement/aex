@@ -136,3 +136,6 @@ impl BiDirectionalConnections {
         }
     }
 }
+
+
+pub type IDExtractor<C> = Arc<dyn Fn(&C) -> u32 + Send + Sync>;

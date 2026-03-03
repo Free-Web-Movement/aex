@@ -21,7 +21,7 @@ mod tests {
         },
         route,
         server::{AexServer, HTTPServer},
-        tcp::types::{Codec, Command, Frame},
+        tcp::types::{Codec, Command, Frame, RawCodec},
     };
     use bincode::{Decode, Encode};
     use futures::FutureExt;
@@ -183,11 +183,11 @@ mod tests {
         let actual_addr = listener.local_addr().unwrap();
         drop(listener); // 释放端口给 AexServer
 
-        let server = AexServer::<MockProtocol, MockProtocol, u32>::new(actual_addr);
+        let server = AexServer::new(actual_addr);
         let server = server.http(hr);
 
         tokio::spawn(async move {
-            if let Err(e) = server.start().await {
+            if let Err(e) = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await {
                 eprintln!("Server exit: {}", e);
             }
         });
@@ -284,11 +284,11 @@ mod tests {
         let actual_addr = listener.local_addr().unwrap();
         drop(listener);
 
-        let server = AexServer::<MockProtocol, MockProtocol, u32>::new(actual_addr);
+        let server = AexServer::new(actual_addr);
         let server = server.http(hr);
 
         tokio::spawn(async move {
-            let _ = server.start().await;
+            let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;
         });
 
         // --- 4. 发起真实请求验证 ---
@@ -364,10 +364,10 @@ mod tests {
             .unwrap()
             .local_addr()
             .unwrap();
-        let server = AexServer::<MockProtocol, MockProtocol, u32>::new(actual_addr);
+        let server = AexServer::new(actual_addr);
         let server = server.http(hr);
         tokio::spawn(async move {
-            let _ = server.start().await;
+            let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;
         });
 
         sleep(Duration::from_millis(200)).await;
@@ -393,10 +393,10 @@ mod tests {
             .local_addr()
             .unwrap();
 
-        let server = AexServer::<MockProtocol, MockProtocol, u32>::new(actual_addr);
+        let server = AexServer::new(actual_addr);
         let server = server.http(hr);
         tokio::spawn(async move {
-            let _ = server.start().await;
+            let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;
         });
 
         tokio::time::sleep(Duration::from_millis(200)).await;
@@ -438,9 +438,9 @@ mod tests {
     //         // --- 启动服务器 ---
     //         let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
     //         let actual_addr = tokio::net::TcpListener::bind(addr).await.unwrap().local_addr().unwrap();
-    //         let mut server = AexServer::<MockProtocol, MockProtocol, u32>::new(actual_addr);
+    //         let mut server = AexServer::new(actual_addr);
     //         let server = server.http(hr);
-    //         tokio::spawn(async move { let _ = server.start().await; });
+    //         tokio::spawn(async move { let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await; });
 
     //         tokio::time::sleep(Duration::from_millis(200)).await;
 
@@ -472,10 +472,10 @@ mod tests {
             .unwrap()
             .local_addr()
             .unwrap();
-        let server = AexServer::<MockProtocol, MockProtocol, u32>::new(actual_addr);
+        let server = AexServer::new(actual_addr);
         let server = server.http(hr);
         tokio::spawn(async move {
-            let _ = server.start().await;
+            let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;
         });
 
         tokio::time::sleep(Duration::from_millis(200)).await;
@@ -530,10 +530,10 @@ mod tests {
             .unwrap()
             .local_addr()
             .unwrap();
-        let server = AexServer::<MockProtocol, MockProtocol, u32>::new(actual_addr);
+        let server = AexServer::new(actual_addr);
         let server = server.http(hr);
         tokio::spawn(async move {
-            let _ = server.start().await;
+            let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;
         });
 
         sleep(Duration::from_millis(200)).await;
@@ -593,10 +593,10 @@ mod tests {
             .unwrap()
             .local_addr()
             .unwrap();
-        let server = AexServer::<MockProtocol, MockProtocol, u32>::new(actual_addr);
+        let server = AexServer::new(actual_addr);
         let server = server.http(hr);
         tokio::spawn(async move {
-            let _ = server.start().await;
+            let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;
         });
 
         tokio::time::sleep(Duration::from_millis(200)).await;
@@ -636,7 +636,7 @@ mod tests {
         let mut hr = Router::new(NodeType::Static("root".into()));
         let mw_hit_count = Arc::new(AtomicUsize::new(0));
 
-        let server = AexServer::<MockProtocol, MockProtocol, u32>::new(actual_addr);
+        let server = AexServer::new(actual_addr);
 
         let count = mw_hit_count.clone();
         let mw_any: Arc<Executor> = Arc::new(move |_| {
@@ -660,7 +660,7 @@ mod tests {
 
         let server = server.http(hr);
         tokio::spawn(async move {
-            let _ = server.start().await;
+            let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;
         });
 
         tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
@@ -734,7 +734,7 @@ mod tests {
 
         let server = HTTPServer::new(actual_addr).http(hr);
         tokio::spawn(async move {
-            let _ = server.start().await;
+            let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;
         });
 
         // 给服务器起步时间，避免 Connection Refused
@@ -802,7 +802,7 @@ mod tests {
         // --- 4. 启动服务器 ---
         let server = HTTPServer::new(actual_addr).http(hr);
         tokio::spawn(async move {
-            let _ = server.start().await;
+            let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;
         });
 
         tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
@@ -874,7 +874,7 @@ mod tests {
         // --- 4. 启动服务器 ---
         let server = HTTPServer::new(actual_addr).http(hr);
         tokio::spawn(async move {
-            let _ = server.start().await;
+            let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;
         });
 
         tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;

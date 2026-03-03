@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use aex::tcp::types::{Codec, Command, Frame, RawCodec, StreamExecutor, frame_config};
+    use aex::tcp::types::{Codec, Command, Frame, RawCodec, frame_config};
     use bincode::{Decode, Encode, decode_from_slice, encode_to_vec};
     use serde::{Deserialize, Serialize};
 
@@ -48,11 +48,11 @@ mod tests {
 
     #[test]
     fn test_raw_codec_implementation() {
-        let raw_data = vec![1, 2, 3, 4, 5];
+        let raw_data = vec![1, 0, 0, 0, 1];
         let raw = RawCodec(raw_data.clone());
 
         // 测试 Command trait
-        assert_eq!(raw.id(), 0);
+        assert_eq!(raw.id(), 1);
         assert!(Command::validate(&raw)); // 测试默认实现
 
         // 测试 Frame trait
@@ -124,15 +124,9 @@ mod tests {
         assert!(dummy.validate()); // 覆盖 Command::validate 默认路径
     }
 
-    // 验证 StreamExecutor 类型定义（编译期验证）
-    #[test]
-    fn test_stream_executor_signature() {
-        let _: StreamExecutor = Box::new(|_r, _w| Box::pin(async { Ok(true) }));
-    }
-
     #[test]
     fn test_raw_codec_roundtrip() {
-        let original_data = vec![1, 2, 3, 4, 0xFF];
+        let original_data = vec![1, 0, 0, 0, 0xFF];
         let raw = RawCodec(original_data.clone());
 
         // 1. 调用实例方法 encode
@@ -147,7 +141,7 @@ mod tests {
 
         // 3. 验证数据和接口
         assert_eq!(decoded.0, original_data);
-        assert_eq!(decoded.id(), 0);
+        assert_eq!(decoded.id(), 1);
         assert_eq!(decoded.payload(), Some(original_data));
     }
 
@@ -197,6 +191,7 @@ mod tests {
         let (decoded, len): (RawCodec, usize) =
             decode_from_slice(&encoded, config).expect("Derived Decode should work with RawCodec");
 
+        assert!(raw.is_flat());
         assert_eq!(len, encoded.len());
         assert_eq!(decoded.0, data);
     }

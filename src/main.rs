@@ -3,20 +3,22 @@ use aex::http::meta::HttpMetadata;
 use aex::http::protocol::header::HeaderKey;
 use aex::http::protocol::media_type::SubMediaType;
 use aex::http::protocol::status::StatusCode;
-use aex::http::router::{NodeType, Router as HttpRouter};
+use aex::http::router::Router as HttpRouter;
 use aex::server::AexServer;
 use aex::tcp::router::Router as TcpRouter;
 use aex::tcp::types::{Command, RawCodec};
 use aex::udp::router::Router as UdpRouter;
 use aex::{exe, get, route};
+use tokio::net::UdpSocket;
 use std::net::SocketAddr;
+use std::sync::Arc;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let addr: SocketAddr = "0.0.0.0:8080".parse()?;
 
     // --- 1. HTTP 路由配置 ---
-    let mut http_router = HttpRouter::new(NodeType::Static("root".into()));
+    let mut http_router = HttpRouter::default();
 
     route!(
         http_router,
@@ -38,20 +40,20 @@ async fn main() -> anyhow::Result<()> {
 
     // --- 2. TCP 路由配置 (使用 RawCodec) ---
     // 提取器：取二进制前4字节作为 ID
-    let mut tcp_router = TcpRouter::<RawCodec, RawCodec, u32>::new(|c| c.id());
+    let mut tcp_router = TcpRouter::new();
 
     // 注册 TCP 指令 1001
-    tcp_router.on(1001, |cmd, _reader, _writer| async move {
+    tcp_router.on::<RawCodec, _, _>(1001, |cmd, _reader, _writer| async move {
         println!("[TCP] Received 1001, payload len: {}", cmd.0.len());
         // 这里可以继续使用 reader/writer 进行长连接交互
         Ok(true)
     });
 
     // --- 3. UDP 路由配置 (使用 RawCodec) ---
-    let mut udp_router = UdpRouter::<RawCodec, RawCodec, u32>::new(|c| c.id());
+    let mut udp_router = UdpRouter::new();
 
     // 注册 UDP 指令 2002
-    udp_router.on(2002, |payload, peer, socket| async move {
+    udp_router.on::<RawCodec,_,_>(2002, |payload: RawCodec, peer, socket: Arc<UdpSocket> | async move {
         println!("[UDP] Received 2002 from {}, data: {:?}", peer, payload);
         // UDP 回包示例
         let response = b"UDP ACK".to_vec();
@@ -65,7 +67,7 @@ async fn main() -> anyhow::Result<()> {
         .http(http_router)
         .tcp(tcp_router)
         .udp(udp_router)
-        .start()
+        .start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id()))
         .await?;
 
     Ok(())

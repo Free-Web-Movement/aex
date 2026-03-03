@@ -1,7 +1,3 @@
-use std::pin::Pin;
-
-use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
-
 use anyhow::Result;
 use bincode;
 use serde::{Deserialize, Serialize};
@@ -35,14 +31,14 @@ pub trait Codec: Serialize + for<'de> Deserialize<'de> + Encode + Decode<()> + S
     }
 }
 
-pub type StreamExecutor = Box<
-    dyn Fn(
-            OwnedReadHalf,
-            OwnedWriteHalf,
-        ) -> Pin<Box<dyn Future<Output = anyhow::Result<bool>> + Send>>
-        + Send
-        + Sync,
->;
+// pub type StreamExecutor = Box<
+//     dyn Fn(
+//             OwnedReadHalf,
+//             OwnedWriteHalf,
+//         ) -> Pin<Box<dyn Future<Output = anyhow::Result<bool>> + Send>>
+//         + Send
+//         + Sync,
+// >;
 
 pub trait Frame: Codec {
     // 生成校验数据
@@ -55,6 +51,11 @@ pub trait Frame: Codec {
 
     // 处理逻辑
     fn command(&self) -> Option<&Vec<u8>>;
+
+    // 是否Command与Frame只有一个
+    fn is_flat(&self) -> bool {
+        true
+    }
 
     // 用于数据校验
     fn sign<F>(&self, signer: F) -> Vec<u8>
@@ -101,6 +102,9 @@ impl Frame for RawCodec {
     fn payload(&self) -> Option<Vec<u8>> {
         Some(self.0.clone())
     }
+    fn is_flat(&self) -> bool {
+        true
+    }
     fn command(&self) -> Option<&Vec<u8>> {
         Some(&self.0)
     }
@@ -108,7 +112,7 @@ impl Frame for RawCodec {
 
 impl Command for RawCodec {
     fn id(&self) -> u32 {
-        0 // 纯数据指令，ID 固定为 0
+        u32::from_le_bytes(self.0[0..4].try_into().unwrap_or_default())
     }
     fn data(&self) -> &Vec<u8> {
         &self.0

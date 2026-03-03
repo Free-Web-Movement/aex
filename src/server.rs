@@ -7,34 +7,24 @@ use tokio::net::UdpSocket;
 use crate::communicators::event::{Event, EventCallback};
 use crate::communicators::pipe::PipeCallback;
 use crate::communicators::spreader::SpreadCallback;
+use crate::connection::global::GlobalContext;
+use crate::connection::types::IDExtractor;
 use crate::http::protocol::method::HttpMethod;
 use crate::http::router::Router as HttpRouter;
 use crate::tcp::router::Router as TcpRouter;
-use crate::tcp::types::{Command, Frame, RawCodec}; // 确保引入了 Command
+use crate::tcp::types::{Command, Frame};
 use crate::udp::router::Router as UdpRouter;
-use crate::connection::global::GlobalContext;
 
 /// AexServer: 核心多协议服务器
-pub struct AexServer<F, C, K = u32>
-where
-    F: Frame + Send + Sync + 'static,
-    C: Command + Send + Sync + 'static, // 统一使用 Command 约束
-    K: Eq + std::hash::Hash + Send + Sync + 'static,
-{
+pub struct AexServer {
     pub addr: SocketAddr,
     pub http_router: Option<Arc<HttpRouter>>,
-    pub tcp_router: Option<Arc<TcpRouter<F, C, K>>>,
-    pub udp_router: Option<Arc<UdpRouter<F, C, K>>>,
+    pub tcp_router: Option<Arc<TcpRouter>>,
+    pub udp_router: Option<Arc<UdpRouter>>,
     pub globals: Arc<GlobalContext>,
-    _phantom: std::marker::PhantomData<(F, C)>, // 修正 PhantomData 包含 C
 }
 
-impl<F, C, K> AexServer<F, C, K>
-where
-    F: Frame + Send + Sync + 'static,
-    C: Command + Send + Sync + 'static,
-    K: Eq + std::hash::Hash + Send + Sync + 'static,
-{
+impl AexServer {
     pub fn new(addr: SocketAddr) -> Self {
         Self {
             addr,
@@ -42,7 +32,6 @@ where
             tcp_router: None,
             udp_router: None,
             globals: Arc::new(GlobalContext::new(addr)),
-            _phantom: std::marker::PhantomData,
         }
     }
 
@@ -51,42 +40,55 @@ where
         self
     }
 
-    pub fn tcp(mut self, router: TcpRouter<F, C, K>) -> Self {
+    pub fn tcp(mut self, router: TcpRouter) -> Self {
         self.tcp_router = Some(Arc::new(router));
         self
     }
 
-    pub fn udp(mut self, router: UdpRouter<F, C, K>) -> Self {
+    pub fn udp(mut self, router: UdpRouter) -> Self {
         self.udp_router = Some(Arc::new(router));
         self
     }
 
     /// 🚀 统一启动入口
-    pub async fn start(self) -> anyhow::Result<()> {
+    pub async fn start<F, C>(self, extractor: IDExtractor<C>) -> anyhow::Result<()>
+    where
+        F: Frame + Send + Sync + 'static,
+        C: Command + Send + Sync + 'static,
+    {
         let server = Arc::new(self);
+
+        let extractor_udp = extractor.clone();
 
         // 1. 启动 UDP 监听 (后台协程)
         if server.udp_router.is_some() {
             let server_udp = server.clone();
             tokio::spawn(async move {
-                if let Err(e) = server_udp.start_udp().await {
+                if let Err(e) = server_udp.start_udp::<F, C>(extractor_udp.clone()).await {
                     eprintln!("[AEX] UDP Server Error: {}", e);
                 }
             });
         }
 
         // 2. 启动 TCP 监听 (主协程阻塞)
-        server.start_tcp().await
+        server.start_tcp::<F, C>(extractor).await
     }
 
     /// 🛠️ TCP 核心分发循环
-    pub async fn start_tcp(&self) -> anyhow::Result<()> {
+    pub async fn start_tcp<F, C>(&self, extractor: IDExtractor<C>) -> anyhow::Result<()>
+    where
+        F: Frame + Send + Sync + 'static,
+        C: Command + Send + Sync + 'static,
+    {
         let listener = TcpListener::bind(self.addr).await?;
         println!("[AEX] TCP listener started on {}", self.addr);
 
         loop {
             let (socket, peer_addr) = listener.accept().await?;
             let server_ctx = Arc::new(self.clone_internal()); // 辅助方法或直接克隆
+            let extractor_ctx = extractor.clone();
+
+            println!("inside tcp loop!");
 
             tokio::spawn(async move {
                 let (mut reader, writer) = socket.into_split();
@@ -100,13 +102,18 @@ where
                     let reader = BufReader::new(reader);
                     let writer = BufWriter::new(writer);
                     let rh = hr.clone();
-                    return rh.handle(server_ctx.globals.clone(), reader, writer, peer_addr).await;
+                    return rh
+                        .handle(server_ctx.globals.clone(), reader, writer, peer_addr)
+                        .await;
                 }
 
                 // 自定义 TCP
                 if let Some(tr) = &server_ctx.tcp_router {
                     // TcpRouter::<F, C, K>::set_crypto_session(server_ctx.globals.clone()).await;
-                    return tr.clone().handle(server_ctx.globals.clone(), reader, writer).await;
+                    return tr
+                        .clone()
+                        .handle::<F, C>(server_ctx.globals.clone(), reader, writer, extractor_ctx)
+                        .await;
                 }
 
                 Ok::<(), anyhow::Error>(())
@@ -115,12 +122,18 @@ where
     }
 
     /// 🛠️ UDP 核心分发循环
-    pub async fn start_udp(&self) -> anyhow::Result<()> {
+    pub async fn start_udp<F, C>(&self, extractor: IDExtractor<C>) -> anyhow::Result<()>
+    where
+        F: Frame + Send + Sync + 'static,
+        C: Command + Send + Sync + 'static,
+    {
         if let Some(router) = &self.udp_router {
             let socket = Arc::new(UdpSocket::bind(self.addr).await?);
             println!("[AEX] UDP listener started on {}", self.addr);
             let rt = router.clone();
-            return rt.handle(self.globals.clone(), socket).await;
+            return rt
+                .handle::<F, C>(self.globals.clone(), socket, extractor)
+                .await;
         }
         Ok(())
     }
@@ -134,7 +147,6 @@ where
             tcp_router: self.tcp_router.clone(),
             udp_router: self.udp_router.clone(),
             globals: self.globals.clone(),
-            _phantom: std::marker::PhantomData,
         }
     }
 
@@ -143,9 +155,13 @@ where
     where
         T: Send + 'static,
     {
-        self.globals.pipe.register(name, callback).await.unwrap_or_else(|e| {
-            eprintln!("警告: 管道 {} 注册失败: {}", name, e);
-        });
+        self.globals
+            .pipe
+            .register(name, callback)
+            .await
+            .unwrap_or_else(|e| {
+                eprintln!("警告: 管道 {} 注册失败: {}", name, e);
+            });
         self
     }
 
@@ -154,7 +170,8 @@ where
     where
         T: Clone + Send + Sync + 'static,
     {
-        self.globals.spread
+        self.globals
+            .spread
             .subscribe(name, callback)
             .await
             .unwrap_or_else(|e| {
@@ -174,4 +191,4 @@ where
     }
 }
 
-pub type HTTPServer = AexServer<RawCodec, RawCodec, u32>;
+pub type HTTPServer = AexServer;

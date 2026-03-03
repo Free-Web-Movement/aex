@@ -1,16 +1,11 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 use aex::{
-    connection::context::TypeMapExt,
-    exe, get,
-    http::{
+    connection::context::TypeMapExt, exe, get, http::{
         meta::HttpMetadata,
         middlewares::validator::{to_validator, value_to_string},
         router::{NodeType, Router},
-    },
-    post, route,
-    server::HTTPServer,
-    v,
+    }, post, route, server::HTTPServer, tcp::types::{Command, RawCodec}, v
 };
 use zz_validator::ast::Value;
 #[tokio::test]
@@ -47,7 +42,8 @@ async fn test_to_validator_integration_full() {
 
     let server = HTTPServer::new(actual_addr).http(hr);
     tokio::spawn(async move {
-        let _ = server.start().await;
+        
+        let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;
     });
 
     tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
@@ -122,7 +118,7 @@ async fn test_v_macro_integration_full() {
 
     let server = HTTPServer::new(actual_addr).http(hr);
     tokio::spawn(async move {
-        let _ = server.start().await;
+        let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;
     });
     tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
 
@@ -204,7 +200,7 @@ async fn test_validator_to_handler_data_flow() {
 
     let server = HTTPServer::new(actual_addr).http(hr);
     tokio::spawn(async move {
-        let _ = server.start().await;
+        let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;
     });
     tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
 
@@ -259,7 +255,7 @@ async fn test_validator_conversion_logic_hardcore() {
 
     let server = HTTPServer::new(actual_addr).http(hr);
     tokio::spawn(async move {
-        let _ = server.start().await;
+        let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;
     });
     tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
 
@@ -322,7 +318,7 @@ async fn test_validator_edge_cases_and_fallback() {
 
     let server = HTTPServer::new(actual_addr).http(hr);
     tokio::spawn(async move {
-        let _ = server.start().await;
+        let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;
     });
     tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
 
@@ -389,7 +385,7 @@ async fn test_validator_boolean_strict_error_integration() {
 
     let server = HTTPServer::new(actual_addr).http(hr);
     tokio::spawn(async move {
-        let _ = server.start().await;
+        let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;
     });
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
@@ -444,7 +440,7 @@ async fn test_validator_integer_strict_error_integration() {
     // 3. 启动 AexServer
     let server = HTTPServer::new(actual_addr).http(hr);
     tokio::spawn(async move {
-        let _ = server.start().await;
+        let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;
     });
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
@@ -515,7 +511,7 @@ async fn test_validator_float_strict_error_integration() {
     // 3. 启动 AexServer
     let server = HTTPServer::new(actual_addr).http(hr);
     tokio::spawn(async move {
-        let _ = server.start().await;
+        let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;
     });
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
@@ -598,7 +594,7 @@ async fn test_validator_float_auto_completion_promotion() {
 
     let server = HTTPServer::new(actual_addr).http(hr);
     tokio::spawn(async move {
-        let _ = server.start().await;
+        let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;
     });
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
@@ -673,7 +669,7 @@ async fn test_validator_value_to_string_fallback() {
 
     let server = HTTPServer::new(actual_addr).http(hr);
     tokio::spawn(async move {
-        let _ = server.start().await;
+        let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;
     });
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
@@ -758,7 +754,7 @@ async fn test_validator_params_none_fallback() {
     // 2. 启动服务器并发送请求
     let server = HTTPServer::new(actual_addr).http(hr);
     tokio::spawn(async move {
-        let _ = server.start().await;
+        let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;
     });
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 

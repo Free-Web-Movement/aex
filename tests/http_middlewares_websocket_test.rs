@@ -10,7 +10,7 @@ mod websocket_tests {
             router::{NodeType, Router},
         },
         post, route,
-        server::HTTPServer,
+        server::HTTPServer, tcp::types::{Command, RawCodec},
     };
     use std::{collections::HashMap, net::SocketAddr, sync::Arc};
     use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader, BufWriter};
@@ -373,7 +373,7 @@ mod websocket_tests {
         // --- 3. 启动服务器 ---
         let server = HTTPServer::new(actual_addr).http(hr);
         tokio::spawn(async move {
-            let _ = server.start().await;
+            let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;
         });
 
         // 等待服务器启动
@@ -456,7 +456,7 @@ mod websocket_tests {
 
         let server = HTTPServer::new(actual_addr).http(hr);
         tokio::spawn(async move {
-            let _ = server.start().await;
+            let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;
         });
         tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
 
@@ -546,7 +546,7 @@ mod websocket_tests {
 
         let server = HTTPServer::new(actual_addr).http(hr);
         tokio::spawn(async move {
-            let _ = server.start().await;
+            let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;
         });
         tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
 
@@ -615,7 +615,7 @@ mod websocket_tests {
 
         let server = HTTPServer::new(actual_addr).http(hr);
         tokio::spawn(async move {
-            let _ = server.start().await;
+            let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;
         });
         tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
 
@@ -670,7 +670,7 @@ mod websocket_tests {
 
         let server = HTTPServer::new(actual_addr).http(hr);
         tokio::spawn(async move {
-            let _ = server.start().await;
+            let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;
         });
         tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
 
@@ -739,7 +739,7 @@ mod websocket_tests {
 
         let server = HTTPServer::new(actual_addr).http(hr);
         tokio::spawn(async move {
-            let _ = server.start().await;
+            let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;
         });
         tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
 
@@ -830,7 +830,7 @@ mod websocket_tests {
 
         let server = HTTPServer::new(actual_addr).http(hr);
         tokio::spawn(async move {
-            let _ = server.start().await;
+            let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;
         });
         tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
 
@@ -934,7 +934,7 @@ mod websocket_tests {
 
         let server = HTTPServer::new(actual_addr).http(hr);
         tokio::spawn(async move {
-            let _ = server.start().await;
+            let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;
         });
         tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
 
@@ -1009,7 +1009,7 @@ mod websocket_tests {
 
         let server = HTTPServer::new(actual_addr).http(hr);
         tokio::spawn(async move {
-            let _ = server.start().await;
+            let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;
         });
         tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
 
@@ -1079,7 +1079,7 @@ mod websocket_tests {
 
         let server = HTTPServer::new(actual_addr).http(hr);
         tokio::spawn(async move {
-            let _ = server.start().await;
+            let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;
         });
         tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
 
@@ -1162,7 +1162,7 @@ mod websocket_tests {
 
         let server = HTTPServer::new(actual_addr).http(hr);
         tokio::spawn(async move {
-            let _ = server.start().await;
+            let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;
         });
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
@@ -1250,7 +1250,7 @@ async fn test_websocket_custom_close_codes_range() {
     route!(hr, get!("/custom_code", exe!(|_ctx| { true }), vec![ws_mw.into()]));
 
     let server = HTTPServer::new(actual_addr).http(hr);
-    tokio::spawn(async move { let _ = server.start().await; });
+    tokio::spawn(async move { let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await; });
     tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
 
     // 2. 客户端连接并握手
@@ -1311,7 +1311,7 @@ async fn test_websocket_strict_protocol_validation() {
     route!(hr, get!("/strict", exe!(|_ctx| { true }), vec![ws_mw.into()]));
 
     let server = HTTPServer::new(actual_addr).http(hr);
-    tokio::spawn(async move { let _ = server.start().await; });
+    tokio::spawn(async move { let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await; });
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
     // 辅助闭包：快速发起连接并完成握手

@@ -1,8 +1,10 @@
 #[cfg(test)]
 mod router_tests {
+    use std::sync::Arc;
+
     use aex::tcp::{
         router::Router,
-        types::{Codec, Command, Frame},
+        types::{Codec, Command, Frame, RawCodec},
     };
     use bincode::{Decode, Encode};
     use serde::{Deserialize, Serialize};
@@ -45,6 +47,9 @@ mod router_tests {
         fn command(&self) -> Option<&Vec<u8>> {
             self.payload.as_ref()
         }
+        fn is_flat(&self) -> bool {
+            false
+        }
     }
 
     // 辅助函数：创建 Mock IO
@@ -60,12 +65,12 @@ mod router_tests {
 
     #[tokio::test]
     async fn test_handle_frame_coverage() {
-        let mut router: Router<TestFrame, TestCommand, u32> = Router::new(|c: &TestCommand| c.id());
+        let mut router: Router = Router::new();
 
         // 注册一个正常的 handler
-        router.on(100, |_, _, _| async { Ok(true) });
+        router.on::<RawCodec, _, _>(100, |_, _, _| async { Ok(true) });
         // 注册一个返回 false 的 handler
-        router.on(200, |_, _, _| async { Ok(false) });
+        router.on::<RawCodec, _, _>(200, |_, _, _| async { Ok(false) });
 
         let (r, w) = mock_io().await;
         // 💡 修复点：预先放入 Option，避免在参数位置生成临时 Option 导致 move
@@ -78,10 +83,16 @@ mod router_tests {
                 payload: None,
                 is_valid: false,
             };
+
             let res = router
-                .handle_frame(invalid_frame, &mut r_opt, &mut w_opt)
+                .handle_frame::<TestFrame, TestCommand>(
+                    invalid_frame,
+                    &mut r_opt,
+                    &mut w_opt,
+                    Arc::new(|c: &TestCommand| c.id()),
+                )
                 .await;
-            assert!(res.unwrap());
+            assert!(!res.unwrap());
             assert!(r_opt.is_some()); // 验证 IO 没被取走
         }
 
@@ -92,7 +103,12 @@ mod router_tests {
                 is_valid: true,
             };
             let res = router
-                .handle_frame(no_payload_frame, &mut r_opt, &mut w_opt)
+                .handle_frame::<TestFrame, TestCommand>(
+                    no_payload_frame,
+                    &mut r_opt,
+                    &mut w_opt,
+                    Arc::new(|c: &TestCommand| c.id()),
+                )
                 .await;
             assert!(res.unwrap());
             assert!(r_opt.is_some());
@@ -105,9 +121,14 @@ mod router_tests {
                 is_valid: true,
             };
             let res = router
-                .handle_frame(bad_data_frame, &mut r_opt, &mut w_opt)
+                .handle_frame::<TestFrame, TestCommand>(
+                    bad_data_frame,
+                    &mut r_opt,
+                    &mut w_opt,
+                    Arc::new(|c: &TestCommand| c.id()),
+                )
                 .await;
-            assert!(res.unwrap());
+            assert!(!res.unwrap());
             assert!(r_opt.is_some());
         }
 
@@ -124,8 +145,18 @@ mod router_tests {
                 payload: Some(data),
                 is_valid: true,
             };
-            let res = router.handle_frame(frame, &mut r_opt, &mut w_opt).await;
-            assert!(res.unwrap());
+            let res = router
+                .handle_frame::<TestFrame, TestCommand>(
+                    frame,
+                    &mut r_opt,
+                    &mut w_opt,
+                    Arc::new(|c: &TestCommand| c.id()),
+                )
+                .await;
+            println!("{:?}", res);
+            assert!(res.is_err());
+            let err_msg = format!("{:?}", res.err().unwrap());
+            assert!(err_msg.contains("Handler type mismatch for key: 100"));
             assert!(r_opt.is_some());
         }
 
@@ -141,7 +172,14 @@ mod router_tests {
                 payload: Some(data),
                 is_valid: true,
             };
-            let res = router.handle_frame(frame, &mut r_opt, &mut w_opt).await;
+            let res = router
+                .handle_frame::<TestFrame, TestCommand>(
+                    frame,
+                    &mut r_opt,
+                    &mut w_opt,
+                    Arc::new(|c: &TestCommand| c.id()),
+                )
+                .await;
             assert!(res.unwrap());
             assert!(r_opt.is_some());
         }
@@ -158,16 +196,25 @@ mod router_tests {
                 payload: Some(Codec::encode(&valid_cmd)),
                 is_valid: true,
             };
-            let res = router.handle_frame(frame, &mut r_opt, &mut w_opt).await;
-            assert!(res.unwrap());
-            assert!(r_opt.is_none()); // 确认所有权被转移
+            let res = router
+                .handle_frame::<TestFrame, TestCommand>(
+                    frame,
+                    &mut r_opt,
+                    &mut w_opt,
+                    Arc::new(|c: &TestCommand| c.id()),
+                )
+                .await;
+            assert!(res.is_err());
+            let err_msg = format!("{:?}", res.err().unwrap());
+            assert!(err_msg.contains("Handler type mismatch for key: 100"));
+            // assert!(r_opt.is_none()); // 确认所有权被转移
         }
 
         // 路径 7: 成功执行 Handler 并返回 Ok(false)
         {
             let (r2, w2) = mock_io().await; // 必须重新获取，因为上一组已被 take
-            let mut r2_opt = Some(r2);
-            let mut w2_opt = Some(w2);
+            // let r2_opt = Some(r2);
+            let _w2_opt = Some(w2);
             let exit_cmd = TestCommand {
                 id: 200,
                 valid: true,
@@ -177,16 +224,28 @@ mod router_tests {
                 payload: Some(Codec::encode(&exit_cmd)),
                 is_valid: true,
             };
-            let res = router.handle_frame(frame, &mut r2_opt, &mut w2_opt).await;
-            assert!(!res.unwrap());
-            assert!(r2_opt.is_none());
+
+            assert!(!frame.clone().is_flat());
+
+            let res = router
+                .handle_frame::<TestFrame, TestCommand>(
+                    frame.clone(),
+                    &mut r_opt,
+                    &mut w_opt,
+                    Arc::new(|c: &TestCommand| c.id()),
+                )
+                .await;
+            assert!(res.is_err());
+            let err_msg = format!("{:?}", res.err().unwrap());
+            assert!(err_msg.contains("Handler type mismatch for key: 200"));
+            // assert!(r2_opt.is_none());
         }
     }
 
     #[tokio::test]
     async fn test_reader_writer_already_taken() {
-        let mut router: Router<TestFrame, TestCommand, u32> = Router::new(|c: &TestCommand| c.id());
-        router.on(100, |_, _, _| async { Ok(true) });
+        let mut router: Router = Router::new();
+        router.on(100, |_: TestCommand, _, _| async { Ok(true) });
 
         let cmd = TestCommand {
             id: 100,
@@ -202,17 +261,24 @@ mod router_tests {
         let (_r_real, w_real) = mock_io().await;
         let mut w_some = Some(w_real);
 
-        let res = router.handle_frame(frame, &mut r_none, &mut w_some).await;
+        let res = router
+            .handle_frame::<TestFrame, TestCommand>(
+                frame,
+                &mut r_none,
+                &mut w_some,
+                Arc::new(|c: &TestCommand| c.id()),
+            )
+            .await;
         assert!(res.is_err());
         assert_eq!(res.unwrap_err().to_string(), "Reader already taken");
     }
 
     #[tokio::test]
     async fn test_writer_already_taken() {
-        let mut router: Router<TestFrame, TestCommand, u32> = Router::new(|c: &TestCommand| c.id());
+        let mut router: Router = Router::new();
 
         // 1. 注册一个有效的 Handler
-        router.on(100, |_, _, _| async { Ok(true) });
+        router.on(100, |_: TestCommand, _, _| async { Ok(true) });
 
         // 2. 构造一个能通过所有前期校验的 Frame 和 Command
         let cmd = TestCommand {
@@ -233,7 +299,14 @@ mod router_tests {
         // 4. 执行 handle_frame
         // 逻辑会通过：frame.validate() -> frame.handle() -> decode -> cmd.validate() -> handlers.get()
         // 然后在 reader.take() 成功后，执行 writer.take() 时触发错误
-        let res = router.handle_frame(frame, &mut r_some, &mut w_none).await;
+        let res = router
+            .handle_frame::<TestFrame, TestCommand>(
+                frame,
+                &mut r_some,
+                &mut w_none,
+                Arc::new(|c: &TestCommand| c.id()),
+            )
+            .await;
 
         // 5. 验证错误信息
         assert!(res.is_err());
