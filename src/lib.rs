@@ -6,3 +6,4 @@ pub mod connection;
 pub mod communicators;
 pub mod crypto;
 pub mod time;
+pub mod storage;
