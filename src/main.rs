@@ -46,7 +46,7 @@ async fn main() -> anyhow::Result<()> {
     // 注册 TCP 指令 1001
     tcp_router.on::<RawCodec, RawCodec, _, _>(
         1001,
-        |_global: Arc<GlobalContext>, frame, cmd, _reader, _writer| {
+        |_global: Arc<GlobalContext>, _frame, cmd, _reader, _writer| {
             let cmd = cmd.clone();
             // let frame = frame.clone();
             async move {
@@ -61,9 +61,9 @@ async fn main() -> anyhow::Result<()> {
     let mut udp_router = UdpRouter::new();
 
     // 注册 UDP 指令 2002
-    udp_router.on::<RawCodec, _, _>(
+    udp_router.on::<RawCodec, RawCodec, _, _>(
         2002,
-        |_global: Arc<GlobalContext>, payload: RawCodec, peer, socket: Arc<UdpSocket>| async move {
+        |_global: Arc<GlobalContext>, _frame: RawCodec, payload: RawCodec, peer, socket: Arc<UdpSocket>| async move {
             println!("[UDP] Received 2002 from {}, data: {:?}", peer, payload);
             // UDP 回包示例
             let response = b"UDP ACK".to_vec();

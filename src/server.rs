@@ -124,7 +124,7 @@ impl AexServer {
     /// 🛠️ UDP 核心分发循环
     pub async fn start_udp<F, C>(&self, extractor: IDExtractor<C>) -> anyhow::Result<()>
     where
-        F: Frame + Send + Sync + 'static,
+        F: Frame + Send + Sync + Clone + 'static,
         C: Command + Send + Sync + 'static,
     {
         if let Some(router) = &self.udp_router {

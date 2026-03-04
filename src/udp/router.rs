@@ -13,8 +13,9 @@ pub struct Router {
     pub handlers: HashMap<u32, Box<dyn Any + Send + Sync>>,
 }
 
-pub type UdpHandler<C> = dyn Fn(
+pub type UdpHandler<F, C> = dyn Fn(
         Arc<GlobalContext>,
+        F,
         C,
         SocketAddr,
         Arc<UdpSocket>,
@@ -29,15 +30,17 @@ impl Router {
         }
     }
     // 注册 Handler 的方法与 TCP 类似，只需适配 PacketExecutor 的闭包即可
-    pub fn on<C, FFut, Fut>(&mut self, key: u32, f: FFut)
+    pub fn on<F, C, FFut, Fut>(&mut self, key: u32, f: FFut)
     where
+        F: Frame + Send + Sync + Clone + 'static,
         C: Command + Send + Sync + 'static,
-        FFut: Fn(Arc<GlobalContext>, C, SocketAddr, Arc<UdpSocket>) -> Fut + Send + Sync + 'static,
+        FFut: Fn(Arc<GlobalContext>, F, C, SocketAddr, Arc<UdpSocket>) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = anyhow::Result<bool>> + Send + 'static,
     {
         // ⚡ 修正：直接构造 Box<UdpHandler<C>>
-        let handler: Box<UdpHandler<C>> =
-            Box::new(move |global, cmd, addr, socket| Box::pin(f(global, cmd, addr, socket)));
+        let handler: Box<UdpHandler<F, C>> = Box::new(move |global, frame, cmd, addr, socket| {
+            Box::pin(f(global, frame, cmd, addr, socket))
+        });
 
         // ⚡ 关键：直接把 handler 存入，不要再加一层 Box::new(...)
         // 这样 Any 里面存的就是 Box<UdpHandler<C>>
@@ -51,7 +54,7 @@ impl Router {
         extractor: IDExtractor<C>,
     ) -> anyhow::Result<()>
     where
-        F: Frame + Send + Sync + 'static,
+        F: Frame + Send + Sync + Clone +'static,
         C: Command + Send + Sync + 'static,
     {
         let mut buf = [0u8; 65535];
@@ -77,7 +80,7 @@ impl Router {
                 // 2. 开发者定义的路由分支：一级消息体 vs 二级消息体
                 if frame.is_flat() {
                     // ⚡ 一级消息体：Frame 实例直接下转为 Command
-                    let boxed_f = Box::new(frame) as Box<dyn Any>;
+                    let boxed_f = Box::new(frame.clone()) as Box<dyn Any>;
                     if let Ok(cmd) = boxed_f.downcast::<C>() {
                         let c_val = *cmd;
                         key = (extractor_ctx)(&c_val);
@@ -88,7 +91,7 @@ impl Router {
                     }
                 } else {
                     // ⚡ 二级消息体：从 Frame 中剥离 Payload 并解码
-                    if let Some(payload) = frame.command() {
+                    if let Some(payload) = frame.clone().command() {
                         if let Ok(cmd) = <C as Codec>::decode(&payload) {
                             if cmd.validate() {
                                 key = (extractor_ctx)(&cmd);
@@ -101,8 +104,8 @@ impl Router {
                 // 3. 路由分发 (执行业务 Handler)
                 if let Some(cmd) = final_cmd {
                     if let Some(any_handler) = router_ctx.handlers.get(&key) {
-                        if let Some(handler) = any_handler.downcast_ref::<Box<UdpHandler<C>>>() {
-                            if let Err(e) = handler(global, cmd, peer_addr, socket_ctx).await {
+                        if let Some(handler) = any_handler.downcast_ref::<Box<UdpHandler<F, C>>>() {
+                            if let Err(e) = handler(global, frame, cmd, peer_addr, socket_ctx).await {
                                 eprintln!("[UDP Handler Error]: {:?}", e);
                             }
                         }

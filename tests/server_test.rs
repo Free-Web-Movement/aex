@@ -66,7 +66,7 @@ mod aex_tests {
 
             // 4. 注册 UDP 路由 (ID 20)
             let mut ur = UdpRouter::new();
-            ur.on::<RawCodec, _, _>(20, | _, _, addr, socket| async move {
+            ur.on::<RawCodec, RawCodec, _, _>(20, | _, _, _, addr, socket| async move {
                 socket.send_to(b"udp_ok", addr).await?;
                 Ok(true)
             });
