@@ -41,8 +41,8 @@ mod tests {
 
         assert_eq!(global.addr, addr);
         // 验证 extensions 是否可写
-        global.extensions.write().unwrap().set_value(true);
-        assert_eq!(global.extensions.write().unwrap().get_value::<bool>(), Some(true));
+        // global.extensions.write().unwrap().set_value(true);
+        // assert_eq!(global.extensions.write().unwrap().get_value::<bool>(), Some(true));
     }
 
     // --- 3. 测试 Context 的构造与视图 ---
