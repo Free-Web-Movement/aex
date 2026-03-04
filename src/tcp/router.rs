@@ -4,7 +4,6 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite};
-use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 
 use crate::connection::global::GlobalContext;
 use crate::connection::types::IDExtractor;
@@ -65,8 +64,8 @@ impl Router {
         &self,
         global: Arc<GlobalContext>,
         frame: F,
-        reader: &mut Option<OwnedReadHalf>,
-        writer: &mut Option<OwnedWriteHalf>,
+        reader: &mut Option<Box<dyn AsyncRead + Unpin + Send>>,
+        writer: &mut Option<Box<dyn AsyncWrite + Unpin + Send>>,
         extractor: IDExtractor<C>,
     ) -> anyhow::Result<bool>
     where
@@ -98,12 +97,12 @@ impl Router {
                 }
 
                 if let Some(any_handler) = self.handlers.get(&key) {
-                    // ⚡ 最小修改：匹配 on 存入的 Box<Box<...>> 结构
                     let handler = any_handler
                         .downcast_ref::<Box<CommandHandler<F, C>>>()
                         .ok_or_else(|| anyhow::anyhow!("Handler type mismatch for key: {}", key))?;
 
-                    // ⚡ 最小修改：修复错误字符串以适配单元测试断言
+                    // ⚡ 关键：使用 take() 拿走所有权，留下 None
+                    // 这样你就得到了 Box<dyn AsyncRead + Send + Unpin>
                     let r = reader
                         .take()
                         .ok_or_else(|| anyhow::anyhow!("Reader already taken"))?;
@@ -111,14 +110,12 @@ impl Router {
                         .take()
                         .ok_or_else(|| anyhow::anyhow!("Writer already taken"))?;
 
-                    match c {
-                        Some(mut cmd) => {
-                            return handler(global, &mut frame.clone(), &mut cmd, Box::new(r), Box::new(w)).await;
-                        }
-                        None => {
-                            eprintln!("Command not implemented!");
-                        }
-                    }
+                    // 现在 r 和 w 正好符合 Handler 的参数要求
+                    let result = handler(global, &mut frame.clone(), &mut c.unwrap(), r, w).await?;
+
+                    // 如果你希望在 Handler 执行完后继续在 loop 中使用这些流，
+                    // Handler 必须在返回值中把它们还回来（见下文建议）。
+                    return Ok(result);
                 }
             }
         }
@@ -128,66 +125,61 @@ impl Router {
 
     pub async fn handle<F, C>(
         &self,
+        
         global: Arc<GlobalContext>,
-        reader: OwnedReadHalf,
-        writer: OwnedWriteHalf,
+        // ⚡ 直接传入 Option 的 mutable 引用，这样 handle_frame 才能 take 走并放回
+        reader: &mut Option<Box<dyn AsyncRead + Unpin + Send>>,
+        writer: &mut Option<Box<dyn AsyncWrite + Unpin + Send>>,
         extractor: IDExtractor<C>,
     ) -> anyhow::Result<()>
     where
         F: Frame + Send + Sync + Clone + 'static,
         C: Command + Send + Sync + 'static,
     {
-        let mut r_opt = Some(reader);
-        let mut w_opt = Some(writer);
-
-        let mut session_buf: Vec<u8> = Vec::with_capacity(4096); // ⚡ 优化：持有未处理数据的缓冲区
-        // 固定的轻量级缓冲区，仅用于读取 Frame 头
+        let mut session_buf: Vec<u8> = Vec::with_capacity(4096);
         let mut buf = vec![0u8; 1024];
         println!("inside handle!");
 
         loop {
-            println!("inside loop!");
-
-            let r = match r_opt.as_mut() {
-                Some(r) => r,
-                None => break,
+            // ⚡ 修复点 1：解包 Option 拿到里面的 Box (它才实现了 AsyncRead)
+            // 使用 as_deref_mut() 拿到 &mut (dyn AsyncRead + ...)
+            let n = match reader.as_deref_mut() {
+                Some(r) => r.read(&mut buf).await?,
+                None => {
+                    println!("Reader taken and not returned!");
+                    break;
+                }
             };
 
-            let n = r.read(&mut buf).await?;
             if n == 0 {
                 break;
             }
-            session_buf.extend_from_slice(&buf[..n]); // ⚡ 将新读到的数据追加到缓冲区
+            session_buf.extend_from_slice(&buf[..n]);
 
-            // ⚡ 循环尝试解码，直到缓冲区数据不足以构成一个完整 Frame
             while !session_buf.is_empty() {
                 match <F as Codec>::decode(&session_buf) {
                     Ok(frame) => {
-                        // 计算已消费长度（这需要你的 Codec 提供已读长度，
-                        // 如果没有，假设 decode 消费了全部。但标准做法是返回 (Frame, consumed_bytes)）
-                        // 临时简单处理：假设每次 decode 一个完整 Frame 后清空（单包模式）
+                        // ⚡ 修复点 2：直接透传外部传入的 reader/writer (它们已经是 Option)
+                        // handle_frame 内部会使用 reader.take()
                         let should_continue = self
                             .handle_frame(
                                 global.clone(),
                                 frame,
-                                &mut r_opt,
-                                &mut w_opt,
+                                reader, // 这里传递的是 &mut Option<Box<...>>
+                                writer,
                                 extractor.clone(),
                             )
                             .await?;
 
-                        session_buf.clear(); // ⚡ 生产环境应根据 consumed_bytes 移除：session_buf.drain(..len);
+                        session_buf.clear();
 
-                        if !should_continue || r_opt.is_none() {
-                            println!("inside ok!");
+                        // ⚡ 修复点 3：检查 reader 是否被 Handler 归还
+                        if !should_continue || reader.is_none() {
+                            println!("Handler terminated connection or kept the stream");
                             return Ok(());
                         }
                     }
-                    Err(_) => {
-                        // ⚡ 关键：如果是 UnexpectedEnd (长度不足)，跳出 while 继续 read
-                        println!("inside ok!");
-                        break;
-                    }
+                    Err(_) => break,
                 }
             }
         }

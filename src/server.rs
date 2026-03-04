@@ -1,6 +1,6 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tokio::io::{BufReader, BufWriter};
+use tokio::io::{AsyncRead, AsyncWrite, BufReader, BufWriter};
 use tokio::net::TcpListener;
 use tokio::net::UdpSocket;
 
@@ -109,10 +109,23 @@ impl AexServer {
 
                 // 自定义 TCP
                 if let Some(tr) = &server_ctx.tcp_router {
-                    // TcpRouter::<F, C, K>::set_crypto_session(server_ctx.globals.clone()).await;
+                    // ⚡ 包装 Buffer 以提升 I/O 性能
+                    let buf_reader = BufReader::new(reader);
+                    let buf_writer = BufWriter::new(writer);
+
+                    let mut r_opt: Option<Box<dyn AsyncRead + Unpin + Send>> =
+                        Some(Box::new(buf_reader));
+                    let mut w_opt: Option<Box<dyn AsyncWrite + Unpin + Send>> =
+                        Some(Box::new(buf_writer));
+
                     return tr
                         .clone()
-                        .handle::<F, C>(server_ctx.globals.clone(), reader, writer, extractor_ctx)
+                        .handle::<F, C>(
+                            server_ctx.globals.clone(),
+                            &mut r_opt,
+                            &mut w_opt,
+                            extractor_ctx,
+                        )
                         .await;
                 }
 

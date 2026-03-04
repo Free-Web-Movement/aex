@@ -11,7 +11,10 @@ mod router_tests {
     };
     use bincode::{Decode, Encode};
     use serde::{Deserialize, Serialize};
-    use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
+    use tokio::{
+        io::{AsyncRead, AsyncWrite},
+        net::tcp::{OwnedReadHalf, OwnedWriteHalf},
+    };
 
     // --- 模拟对象准备 ---
 
@@ -81,8 +84,11 @@ mod router_tests {
 
         let (r, w) = mock_io().await;
         // 💡 修复点：预先放入 Option，避免在参数位置生成临时 Option 导致 move
-        let mut r_opt = Some(r);
-        let mut w_opt = Some(w);
+        // let mut r_opt = Some(r);
+        // let mut w_opt = Some(w);
+
+        let mut r_opt: Option<Box<dyn AsyncRead + Send + Unpin>> = Some(Box::new(r));
+        let mut w_opt: Option<Box<dyn AsyncWrite + Send + Unpin>> = Some(Box::new(w));
 
         // 路径 1: frame.validate() == false
         {
@@ -264,7 +270,10 @@ mod router_tests {
 
         let arc_g = Arc::new(global);
 
-        router.on::<TestFrame, TestCommand, _, _>(100, |_, _, _: &mut TestCommand, _, _| async move { Ok(true) });
+        router.on::<TestFrame, TestCommand, _, _>(
+            100,
+            |_, _, _: &mut TestCommand, _, _| async move { Ok(true) },
+        );
         // router.on::<RawCodec, RawCodec, _, _>(100, |_, _:&mut _,  _: &mut TestCommand, _, _| async { Ok(true) });
 
         let cmd = TestCommand {
@@ -277,9 +286,10 @@ mod router_tests {
             is_valid: true,
         };
 
-        let mut r_none: Option<OwnedReadHalf> = None;
         let (_r_real, w_real) = mock_io().await;
-        let mut w_some = Some(w_real);
+
+        let mut r_none: Option<Box<dyn AsyncRead + Send + Unpin>> = None;
+        let mut w_some: Option<Box<dyn AsyncWrite + Send + Unpin>> = Some(Box::new(w_real));
 
         let res = router
             .handle_frame::<TestFrame, TestCommand>(
@@ -304,7 +314,10 @@ mod router_tests {
 
         // 1. 注册一个有效的 Handler
         // router.on(100, |_, _: TestCommand, _, _| async { Ok(true) });
-        router.on::<TestFrame, TestCommand, _, _>(100, |_, _, _: &mut TestCommand, _, _| async move { Ok(true) });
+        router.on::<TestFrame, TestCommand, _, _>(
+            100,
+            |_, _, _: &mut TestCommand, _, _| async move { Ok(true) },
+        );
 
         // 2. 构造一个能通过所有前期校验的 Frame 和 Command
         let cmd = TestCommand {
@@ -319,12 +332,15 @@ mod router_tests {
 
         // 3. 核心：提供 Reader 但将 Writer 设为 None
         let (r_real, _w_real) = mock_io().await;
-        let mut r_some = Some(r_real);
-        let mut w_none: Option<OwnedWriteHalf> = None;
+        // let mut r_some = Some(r_real);
+        // let mut w_none: Option<OwnedWriteHalf> = None;
 
         // 4. 执行 handle_frame
         // 逻辑会通过：frame.validate() -> frame.handle() -> decode -> cmd.validate() -> handlers.get()
         // 然后在 reader.take() 成功后，执行 writer.take() 时触发错误
+
+        let mut r_some: Option<Box<dyn AsyncRead + Send + Unpin>> = Some(Box::new(r_real));
+        let mut w_none: Option<Box<dyn AsyncWrite + Send + Unpin>> = None;
         let res = router
             .handle_frame::<TestFrame, TestCommand>(
                 arc_g.clone(),
