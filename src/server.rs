@@ -53,7 +53,7 @@ impl AexServer {
     /// 🚀 统一启动入口
     pub async fn start<F, C>(self, extractor: IDExtractor<C>) -> anyhow::Result<()>
     where
-        F: Frame + Send + Sync + 'static,
+        F: Frame + Send + Sync + Clone + 'static,
         C: Command + Send + Sync + 'static,
     {
         let server = Arc::new(self);
@@ -77,7 +77,7 @@ impl AexServer {
     /// 🛠️ TCP 核心分发循环
     pub async fn start_tcp<F, C>(&self, extractor: IDExtractor<C>) -> anyhow::Result<()>
     where
-        F: Frame + Send + Sync + 'static,
+        F: Frame + Send + Sync + Clone + 'static,
         C: Command + Send + Sync + 'static,
     {
         let listener = TcpListener::bind(self.addr).await?;

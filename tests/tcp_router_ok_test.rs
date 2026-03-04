@@ -75,9 +75,9 @@ mod router_tests {
         let arc_g = Arc::new(global);
 
         // 注册一个正常的 handler
-        router.on::<RawCodec, _, _>(100, |_, _, _, _| async { Ok(true) });
+        router.on::<RawCodec, RawCodec, _, _>(100, |_, _, _, _, _| async { Ok(true) });
         // 注册一个返回 false 的 handler
-        router.on::<RawCodec, _, _>(200, |_, _, _, _| async { Ok(false) });
+        router.on::<RawCodec, RawCodec, _, _>(200, |_, _, _, _, _| async { Ok(false) });
 
         let (r, w) = mock_io().await;
         // 💡 修复点：预先放入 Option，避免在参数位置生成临时 Option 导致 move
@@ -264,7 +264,8 @@ mod router_tests {
 
         let arc_g = Arc::new(global);
 
-        router.on(100, |_, _: TestCommand, _, _| async { Ok(true) });
+        router.on::<TestFrame, TestCommand, _, _>(100, |_, _, _: &mut TestCommand, _, _| async move { Ok(true) });
+        // router.on::<RawCodec, RawCodec, _, _>(100, |_, _:&mut _,  _: &mut TestCommand, _, _| async { Ok(true) });
 
         let cmd = TestCommand {
             id: 100,
@@ -302,7 +303,8 @@ mod router_tests {
         let arc_g = Arc::new(global);
 
         // 1. 注册一个有效的 Handler
-        router.on(100, |_, _: TestCommand, _, _| async { Ok(true) });
+        // router.on(100, |_, _: TestCommand, _, _| async { Ok(true) });
+        router.on::<TestFrame, TestCommand, _, _>(100, |_, _, _: &mut TestCommand, _, _| async move { Ok(true) });
 
         // 2. 构造一个能通过所有前期校验的 Frame 和 Command
         let cmd = TestCommand {

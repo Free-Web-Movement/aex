@@ -14,9 +14,10 @@ use crate::tcp::types::{Codec, Command, Frame};
 // use crate::tcp::types::{Codec, Frame, Command, RawCodec, frame_config};
 
 /// ⚡ 修复后的 Handler 签名：使用 BoxFuture 确保异步闭包可用
-pub type CommandHandler<C> = dyn Fn(
+pub type CommandHandler<F, C> = dyn Fn(
         Arc<GlobalContext>,
-        C,
+        &mut F,
+        &mut C,
         Box<dyn AsyncRead + Unpin + Send>,
         Box<dyn AsyncWrite + Unpin + Send>,
     ) -> Pin<Box<dyn Future<Output = anyhow::Result<bool>> + Send>>
@@ -35,18 +36,25 @@ impl Router {
     }
 
     /// 修复语法：正确构建 Pin<Box<dyn Future>>
-    pub fn on<C, FFut, Fut>(&mut self, key: u32, f: FFut)
+    pub fn on<F, C, FFut, Fut>(&mut self, key: u32, f: FFut)
     where
+        F: Frame + Send + Sync + Clone + 'static,
         C: Command + Send + Sync + 'static,
-        FFut: Fn(        Arc<GlobalContext>,
-C, Box<dyn AsyncRead + Unpin + Send>, Box<dyn AsyncWrite + Unpin + Send>) -> Fut
+        FFut: Fn(
+                Arc<GlobalContext>,
+                &mut F,
+                &mut C,
+                Box<dyn AsyncRead + Unpin + Send>,
+                Box<dyn AsyncWrite + Unpin + Send>,
+            ) -> Fut
             + Send
             + Sync
             + 'static,
         Fut: Future<Output = anyhow::Result<bool>> + Send + 'static,
     {
         // ⚡ 这里的 handler 类型是 Box<CommandHandler<C>>
-        let handler: Box<CommandHandler<C>> = Box::new(move |global, cmd, r, w| Box::pin(f(global, cmd, r, w)));
+        let handler: Box<CommandHandler<F, C>> =
+            Box::new(move |global, frame, cmd, r, w| Box::pin(f(global, frame, cmd, r, w)));
 
         // ⚡ 最小修改：直接存入这个 Box。
         self.handlers.insert(key, Box::new(handler));
@@ -62,7 +70,7 @@ C, Box<dyn AsyncRead + Unpin + Send>, Box<dyn AsyncWrite + Unpin + Send>) -> Fut
         extractor: IDExtractor<C>,
     ) -> anyhow::Result<bool>
     where
-        F: Frame + Send + Sync + 'static,
+        F: Frame + Send + Sync + Clone + 'static,
         C: Command + Send + Sync + 'static,
     {
         if !frame.validate() {
@@ -78,7 +86,7 @@ C, Box<dyn AsyncRead + Unpin + Send>, Box<dyn AsyncWrite + Unpin + Send>) -> Fut
                     c = Some(cmd);
                 } else {
                     // 只有在 decode 失败且满足 F == C 时才尝试直接转换
-                    let boxed_f = Box::new(frame) as Box<dyn Any>;
+                    let boxed_f = Box::new(frame.clone()) as Box<dyn Any>;
                     if let Ok(cmd) = boxed_f.downcast::<C>() {
                         let c_val = *cmd; // 这里拿到了 C 的所有权
                         key = (extractor)(&c_val);
@@ -92,7 +100,7 @@ C, Box<dyn AsyncRead + Unpin + Send>, Box<dyn AsyncWrite + Unpin + Send>) -> Fut
                 if let Some(any_handler) = self.handlers.get(&key) {
                     // ⚡ 最小修改：匹配 on 存入的 Box<Box<...>> 结构
                     let handler = any_handler
-                        .downcast_ref::<Box<CommandHandler<C>>>()
+                        .downcast_ref::<Box<CommandHandler<F, C>>>()
                         .ok_or_else(|| anyhow::anyhow!("Handler type mismatch for key: {}", key))?;
 
                     // ⚡ 最小修改：修复错误字符串以适配单元测试断言
@@ -104,7 +112,9 @@ C, Box<dyn AsyncRead + Unpin + Send>, Box<dyn AsyncWrite + Unpin + Send>) -> Fut
                         .ok_or_else(|| anyhow::anyhow!("Writer already taken"))?;
 
                     match c {
-                        Some(cmd) => return handler(global, cmd, Box::new(r), Box::new(w)).await,
+                        Some(mut cmd) => {
+                            return handler(global, &mut frame.clone(), &mut cmd, Box::new(r), Box::new(w)).await;
+                        }
                         None => {
                             eprintln!("Command not implemented!");
                         }
@@ -124,7 +134,7 @@ C, Box<dyn AsyncRead + Unpin + Send>, Box<dyn AsyncWrite + Unpin + Send>) -> Fut
         extractor: IDExtractor<C>,
     ) -> anyhow::Result<()>
     where
-        F: Frame + Send + Sync + 'static,
+        F: Frame + Send + Sync + Clone + 'static,
         C: Command + Send + Sync + 'static,
     {
         let mut r_opt = Some(reader);
@@ -157,7 +167,13 @@ C, Box<dyn AsyncRead + Unpin + Send>, Box<dyn AsyncWrite + Unpin + Send>) -> Fut
                         // 如果没有，假设 decode 消费了全部。但标准做法是返回 (Frame, consumed_bytes)）
                         // 临时简单处理：假设每次 decode 一个完整 Frame 后清空（单包模式）
                         let should_continue = self
-                            .handle_frame(global.clone(), frame, &mut r_opt, &mut w_opt, extractor.clone())
+                            .handle_frame(
+                                global.clone(),
+                                frame,
+                                &mut r_opt,
+                                &mut w_opt,
+                                extractor.clone(),
+                            )
                             .await?;
 
                         session_buf.clear(); // ⚡ 生产环境应根据 consumed_bytes 移除：session_buf.drain(..len);

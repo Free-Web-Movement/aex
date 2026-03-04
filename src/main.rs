@@ -44,12 +44,16 @@ async fn main() -> anyhow::Result<()> {
     let mut tcp_router = TcpRouter::new();
 
     // 注册 TCP 指令 1001
-    tcp_router.on::<RawCodec, _, _>(
+    tcp_router.on::<RawCodec, RawCodec, _, _>(
         1001,
-        |_global: Arc<GlobalContext>, cmd, _reader, _writer| async move {
-            println!("[TCP] Received 1001, payload len: {}", cmd.0.len());
-            // 这里可以继续使用 reader/writer 进行长连接交互
-            Ok(true)
+        |_global: Arc<GlobalContext>, frame, cmd, _reader, _writer| {
+            let cmd = cmd.clone();
+            // let frame = frame.clone();
+            async move {
+                println!("[TCP] Received 1001, payload len: {}", cmd.0.len());
+                // 这里可以继续使用 reader/writer 进行长连接交互
+                Ok(true)
+            }
         },
     );
 

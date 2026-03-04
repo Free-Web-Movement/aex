@@ -62,11 +62,11 @@ mod aex_tests {
 
             // 3. 注册 TCP 路由 (ID 10)
             let mut tr = TcpRouter::new();
-            tr.on::<RawCodec, _, _>(10, |_, _, _, _| async move { Ok(true) });
+            tr.on::<RawCodec, RawCodec, _, _>(10, |_, _, _: &mut _, _, _| async move { Ok(true) });
 
             // 4. 注册 UDP 路由 (ID 20)
             let mut ur = UdpRouter::new();
-            ur.on::<RawCodec, _, _>(20, |_, _, addr, socket| async move {
+            ur.on::<RawCodec, _, _>(20, | _, _, addr, socket| async move {
                 socket.send_to(b"udp_ok", addr).await?;
                 Ok(true)
             });
