@@ -13,7 +13,12 @@ pub struct Router {
     pub handlers: HashMap<u32, Box<dyn Any + Send + Sync>>,
 }
 
-pub type UdpHandler<C> = dyn Fn(C, SocketAddr, Arc<UdpSocket>) -> Pin<Box<dyn Future<Output = anyhow::Result<bool>> + Send>>
+pub type UdpHandler<C> = dyn Fn(
+        Arc<GlobalContext>,
+        C,
+        SocketAddr,
+        Arc<UdpSocket>,
+    ) -> Pin<Box<dyn Future<Output = anyhow::Result<bool>> + Send>>
     + Send
     + Sync;
 
@@ -27,12 +32,12 @@ impl Router {
     pub fn on<C, FFut, Fut>(&mut self, key: u32, f: FFut)
     where
         C: Command + Send + Sync + 'static,
-        FFut: Fn(C, SocketAddr, Arc<UdpSocket>) -> Fut + Send + Sync + 'static,
+        FFut: Fn(Arc<GlobalContext>, C, SocketAddr, Arc<UdpSocket>) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = anyhow::Result<bool>> + Send + 'static,
     {
         // ⚡ 修正：直接构造 Box<UdpHandler<C>>
         let handler: Box<UdpHandler<C>> =
-            Box::new(move |cmd, addr, socket| Box::pin(f(cmd, addr, socket)));
+            Box::new(move |global, cmd, addr, socket| Box::pin(f(global, cmd, addr, socket)));
 
         // ⚡ 关键：直接把 handler 存入，不要再加一层 Box::new(...)
         // 这样 Any 里面存的就是 Box<UdpHandler<C>>
@@ -41,7 +46,7 @@ impl Router {
 
     pub async fn handle<F, C>(
         self: Arc<Self>,
-        _global: Arc<GlobalContext>,
+        global: Arc<GlobalContext>,
         socket: Arc<UdpSocket>,
         extractor: IDExtractor<C>,
     ) -> anyhow::Result<()>
@@ -57,6 +62,7 @@ impl Router {
             let router_ctx = self.clone();
             let socket_ctx = socket.clone();
             let extractor_ctx = extractor.clone();
+            let global = global.clone();
 
             tokio::spawn(async move {
                 // 1. Frame 解码与基础校验
@@ -83,9 +89,7 @@ impl Router {
                 } else {
                     // ⚡ 二级消息体：从 Frame 中剥离 Payload 并解码
                     if let Some(payload) = frame.command() {
-
                         if let Ok(cmd) = <C as Codec>::decode(&payload) {
-
                             if cmd.validate() {
                                 key = (extractor_ctx)(&cmd);
                                 final_cmd = Some(cmd);
@@ -98,7 +102,7 @@ impl Router {
                 if let Some(cmd) = final_cmd {
                     if let Some(any_handler) = router_ctx.handlers.get(&key) {
                         if let Some(handler) = any_handler.downcast_ref::<Box<UdpHandler<C>>>() {
-                            if let Err(e) = handler(cmd, peer_addr, socket_ctx).await {
+                            if let Err(e) = handler(global, cmd, peer_addr, socket_ctx).await {
                                 eprintln!("[UDP Handler Error]: {:?}", e);
                             }
                         }

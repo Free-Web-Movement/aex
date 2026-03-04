@@ -102,9 +102,6 @@ impl Frame for RawCodec {
     fn payload(&self) -> Option<Vec<u8>> {
         Some(self.0.clone())
     }
-    fn is_flat(&self) -> bool {
-        true
-    }
     fn command(&self) -> Option<&Vec<u8>> {
         Some(&self.0)
     }

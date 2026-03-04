@@ -8,18 +8,17 @@ mod tests {
     #[derive(Serialize, Deserialize, Encode, Decode, Debug, PartialEq, Eq)]
     struct TestCommand {
         pub id: u32,
-        pub data: Vec<u8>
+        pub data: Vec<u8>,
     }
     impl Codec for TestCommand {}
     impl Command for TestCommand {
         fn id(&self) -> u32 {
             self.id
         }
-        
+
         fn data(&self) -> &Vec<u8> {
             &self.data
         }
-        
     }
 
     #[test]
@@ -110,7 +109,7 @@ mod tests {
             fn id(&self) -> u32 {
                 99
             }
-            
+
             fn data(&self) -> &Vec<u8> {
                 &self.0
             }
@@ -215,4 +214,49 @@ mod tests {
 
         assert!(raw.verify(&signature, |_| true));
     }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn test_raw_codec_overrides() {
+            // 1. 初始化数据，前4字节作为 ID (小端序 100)
+            let mut data = vec![100, 0, 0, 0];
+            data.extend_from_slice(b"hello world");
+
+            let codec = RawCodec(data.clone());
+
+            // 2. 测试 Command Trait 的 data 方法
+            // 验证返回的数据是否与内部数据一致
+            assert_eq!(Command::data(&codec), &data);
+            assert_eq!(codec.id(), 100);
+
+            // 3. 测试 Frame Trait 的 is_flat 方法
+            // 虽然默认是 true，我们在实现里也写了 true。
+            // 为了证明“覆盖”生效，我们可以临时把实现改成 false 再运行此测试。
+            assert!(codec.is_flat());
+
+            println!("Successfully called data() and is_flat()");
+        }
+
+        #[test]
+        fn test_trait_polymorphism() {
+            let codec = RawCodec(vec![1, 0, 0, 0, 255]);
+
+            // 使用泛型约束来确保调用的是 Trait 方法
+            fn check_frame<T: Frame>(f: &T) -> bool {
+                f.is_flat()
+            }
+
+            fn check_command<T: Command>(c: &T) -> u32 {
+                c.id()
+            }
+
+            assert!(check_frame(&codec));
+            assert_eq!(check_command(&codec), 1);
+            assert!(!codec.is_trusted())
+        }
+    }
+
 }

@@ -1,10 +1,13 @@
 #[cfg(test)]
 mod router_tests {
-    use std::sync::Arc;
+    use std::{net::SocketAddr, sync::Arc};
 
-    use aex::tcp::{
-        router::Router,
-        types::{Codec, Command, Frame, RawCodec},
+    use aex::{
+        connection::global::GlobalContext,
+        tcp::{
+            router::Router,
+            types::{Codec, Command, Frame, RawCodec},
+        },
     };
     use bincode::{Decode, Encode};
     use serde::{Deserialize, Serialize};
@@ -66,11 +69,15 @@ mod router_tests {
     #[tokio::test]
     async fn test_handle_frame_coverage() {
         let mut router: Router = Router::new();
+        let addr: SocketAddr = "127.0.0.1:8080".parse().unwrap();
+        let global = GlobalContext::new(addr);
+
+        let arc_g = Arc::new(global);
 
         // 注册一个正常的 handler
-        router.on::<RawCodec, _, _>(100, |_, _, _| async { Ok(true) });
+        router.on::<RawCodec, _, _>(100, |_, _, _, _| async { Ok(true) });
         // 注册一个返回 false 的 handler
-        router.on::<RawCodec, _, _>(200, |_, _, _| async { Ok(false) });
+        router.on::<RawCodec, _, _>(200, |_, _, _, _| async { Ok(false) });
 
         let (r, w) = mock_io().await;
         // 💡 修复点：预先放入 Option，避免在参数位置生成临时 Option 导致 move
@@ -86,6 +93,7 @@ mod router_tests {
 
             let res = router
                 .handle_frame::<TestFrame, TestCommand>(
+                    arc_g.clone(),
                     invalid_frame,
                     &mut r_opt,
                     &mut w_opt,
@@ -104,6 +112,7 @@ mod router_tests {
             };
             let res = router
                 .handle_frame::<TestFrame, TestCommand>(
+                    arc_g.clone(),
                     no_payload_frame,
                     &mut r_opt,
                     &mut w_opt,
@@ -122,6 +131,7 @@ mod router_tests {
             };
             let res = router
                 .handle_frame::<TestFrame, TestCommand>(
+                    arc_g.clone(),
                     bad_data_frame,
                     &mut r_opt,
                     &mut w_opt,
@@ -147,6 +157,7 @@ mod router_tests {
             };
             let res = router
                 .handle_frame::<TestFrame, TestCommand>(
+                    arc_g.clone(),
                     frame,
                     &mut r_opt,
                     &mut w_opt,
@@ -174,6 +185,7 @@ mod router_tests {
             };
             let res = router
                 .handle_frame::<TestFrame, TestCommand>(
+                    arc_g.clone(),
                     frame,
                     &mut r_opt,
                     &mut w_opt,
@@ -198,6 +210,7 @@ mod router_tests {
             };
             let res = router
                 .handle_frame::<TestFrame, TestCommand>(
+                    arc_g.clone(),
                     frame,
                     &mut r_opt,
                     &mut w_opt,
@@ -212,7 +225,7 @@ mod router_tests {
 
         // 路径 7: 成功执行 Handler 并返回 Ok(false)
         {
-            let (r2, w2) = mock_io().await; // 必须重新获取，因为上一组已被 take
+            let (_r2, w2) = mock_io().await; // 必须重新获取，因为上一组已被 take
             // let r2_opt = Some(r2);
             let _w2_opt = Some(w2);
             let exit_cmd = TestCommand {
@@ -229,6 +242,7 @@ mod router_tests {
 
             let res = router
                 .handle_frame::<TestFrame, TestCommand>(
+                    arc_g.clone(),
                     frame.clone(),
                     &mut r_opt,
                     &mut w_opt,
@@ -245,7 +259,12 @@ mod router_tests {
     #[tokio::test]
     async fn test_reader_writer_already_taken() {
         let mut router: Router = Router::new();
-        router.on(100, |_: TestCommand, _, _| async { Ok(true) });
+        let addr: SocketAddr = "127.0.0.1:8080".parse().unwrap();
+        let global = GlobalContext::new(addr);
+
+        let arc_g = Arc::new(global);
+
+        router.on(100, |_, _: TestCommand, _, _| async { Ok(true) });
 
         let cmd = TestCommand {
             id: 100,
@@ -263,6 +282,7 @@ mod router_tests {
 
         let res = router
             .handle_frame::<TestFrame, TestCommand>(
+                arc_g.clone(),
                 frame,
                 &mut r_none,
                 &mut w_some,
@@ -276,9 +296,13 @@ mod router_tests {
     #[tokio::test]
     async fn test_writer_already_taken() {
         let mut router: Router = Router::new();
+        let addr: SocketAddr = "127.0.0.1:8080".parse().unwrap();
+        let global = GlobalContext::new(addr);
+
+        let arc_g = Arc::new(global);
 
         // 1. 注册一个有效的 Handler
-        router.on(100, |_: TestCommand, _, _| async { Ok(true) });
+        router.on(100, |_, _: TestCommand, _, _| async { Ok(true) });
 
         // 2. 构造一个能通过所有前期校验的 Frame 和 Command
         let cmd = TestCommand {
@@ -301,6 +325,7 @@ mod router_tests {
         // 然后在 reader.take() 成功后，执行 writer.take() 时触发错误
         let res = router
             .handle_frame::<TestFrame, TestCommand>(
+                arc_g.clone(),
                 frame,
                 &mut r_some,
                 &mut w_none,

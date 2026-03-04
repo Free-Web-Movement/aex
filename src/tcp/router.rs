@@ -15,6 +15,7 @@ use crate::tcp::types::{Codec, Command, Frame};
 
 /// ⚡ 修复后的 Handler 签名：使用 BoxFuture 确保异步闭包可用
 pub type CommandHandler<C> = dyn Fn(
+        Arc<GlobalContext>,
         C,
         Box<dyn AsyncRead + Unpin + Send>,
         Box<dyn AsyncWrite + Unpin + Send>,
@@ -37,14 +38,15 @@ impl Router {
     pub fn on<C, FFut, Fut>(&mut self, key: u32, f: FFut)
     where
         C: Command + Send + Sync + 'static,
-        FFut: Fn(C, Box<dyn AsyncRead + Unpin + Send>, Box<dyn AsyncWrite + Unpin + Send>) -> Fut
+        FFut: Fn(        Arc<GlobalContext>,
+C, Box<dyn AsyncRead + Unpin + Send>, Box<dyn AsyncWrite + Unpin + Send>) -> Fut
             + Send
             + Sync
             + 'static,
         Fut: Future<Output = anyhow::Result<bool>> + Send + 'static,
     {
         // ⚡ 这里的 handler 类型是 Box<CommandHandler<C>>
-        let handler: Box<CommandHandler<C>> = Box::new(move |cmd, r, w| Box::pin(f(cmd, r, w)));
+        let handler: Box<CommandHandler<C>> = Box::new(move |global, cmd, r, w| Box::pin(f(global, cmd, r, w)));
 
         // ⚡ 最小修改：直接存入这个 Box。
         self.handlers.insert(key, Box::new(handler));
@@ -53,6 +55,7 @@ impl Router {
     /// 核心分发逻辑
     pub async fn handle_frame<F, C>(
         &self,
+        global: Arc<GlobalContext>,
         frame: F,
         reader: &mut Option<OwnedReadHalf>,
         writer: &mut Option<OwnedWriteHalf>,
@@ -101,7 +104,7 @@ impl Router {
                         .ok_or_else(|| anyhow::anyhow!("Writer already taken"))?;
 
                     match c {
-                        Some(cmd) => return handler(cmd, Box::new(r), Box::new(w)).await,
+                        Some(cmd) => return handler(global, cmd, Box::new(r), Box::new(w)).await,
                         None => {
                             eprintln!("Command not implemented!");
                         }
@@ -115,7 +118,7 @@ impl Router {
 
     pub async fn handle<F, C>(
         &self,
-        _global: Arc<GlobalContext>,
+        global: Arc<GlobalContext>,
         reader: OwnedReadHalf,
         writer: OwnedWriteHalf,
         extractor: IDExtractor<C>,
@@ -154,7 +157,7 @@ impl Router {
                         // 如果没有，假设 decode 消费了全部。但标准做法是返回 (Frame, consumed_bytes)）
                         // 临时简单处理：假设每次 decode 一个完整 Frame 后清空（单包模式）
                         let should_continue = self
-                            .handle_frame(frame, &mut r_opt, &mut w_opt, extractor.clone())
+                            .handle_frame(global.clone(), frame, &mut r_opt, &mut w_opt, extractor.clone())
                             .await?;
 
                         session_buf.clear(); // ⚡ 生产环境应根据 consumed_bytes 移除：session_buf.drain(..len);

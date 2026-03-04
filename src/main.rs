@@ -1,4 +1,5 @@
 use aex::connection::context::TypeMapExt;
+use aex::connection::global::GlobalContext;
 use aex::http::meta::HttpMetadata;
 use aex::http::protocol::header::HeaderKey;
 use aex::http::protocol::media_type::SubMediaType;
@@ -9,9 +10,9 @@ use aex::tcp::router::Router as TcpRouter;
 use aex::tcp::types::{Command, RawCodec};
 use aex::udp::router::Router as UdpRouter;
 use aex::{exe, get, route};
-use tokio::net::UdpSocket;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use tokio::net::UdpSocket;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -43,23 +44,29 @@ async fn main() -> anyhow::Result<()> {
     let mut tcp_router = TcpRouter::new();
 
     // 注册 TCP 指令 1001
-    tcp_router.on::<RawCodec, _, _>(1001, |cmd, _reader, _writer| async move {
-        println!("[TCP] Received 1001, payload len: {}", cmd.0.len());
-        // 这里可以继续使用 reader/writer 进行长连接交互
-        Ok(true)
-    });
+    tcp_router.on::<RawCodec, _, _>(
+        1001,
+        |_global: Arc<GlobalContext>, cmd, _reader, _writer| async move {
+            println!("[TCP] Received 1001, payload len: {}", cmd.0.len());
+            // 这里可以继续使用 reader/writer 进行长连接交互
+            Ok(true)
+        },
+    );
 
     // --- 3. UDP 路由配置 (使用 RawCodec) ---
     let mut udp_router = UdpRouter::new();
 
     // 注册 UDP 指令 2002
-    udp_router.on::<RawCodec,_,_>(2002, |payload: RawCodec, peer, socket: Arc<UdpSocket> | async move {
-        println!("[UDP] Received 2002 from {}, data: {:?}", peer, payload);
-        // UDP 回包示例
-        let response = b"UDP ACK".to_vec();
-        let _ = socket.send_to(&response, peer).await;
-        Ok(true)
-    });
+    udp_router.on::<RawCodec, _, _>(
+        2002,
+        |_global: Arc<GlobalContext>, payload: RawCodec, peer, socket: Arc<UdpSocket>| async move {
+            println!("[UDP] Received 2002 from {}, data: {:?}", peer, payload);
+            // UDP 回包示例
+            let response = b"UDP ACK".to_vec();
+            let _ = socket.send_to(&response, peer).await;
+            Ok(true)
+        },
+    );
 
     // --- 4. 组装并启动服务器 ---
     // 借力于 HTTPServer 类型别名或直接使用 AexServer
