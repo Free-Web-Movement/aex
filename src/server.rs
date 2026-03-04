@@ -7,6 +7,7 @@ use tokio::net::UdpSocket;
 use crate::communicators::event::{Event, EventCallback};
 use crate::communicators::pipe::PipeCallback;
 use crate::communicators::spreader::SpreadCallback;
+use crate::connection::context::TypeMapExt;
 use crate::connection::global::GlobalContext;
 use crate::connection::types::IDExtractor;
 use crate::http::protocol::method::HttpMethod;
@@ -16,11 +17,9 @@ use crate::tcp::types::{Command, Frame};
 use crate::udp::router::Router as UdpRouter;
 
 /// AexServer: 核心多协议服务器
+#[derive(Clone)]
 pub struct AexServer {
     pub addr: SocketAddr,
-    pub http_router: Option<Arc<HttpRouter>>,
-    pub tcp_router: Option<Arc<TcpRouter>>,
-    pub udp_router: Option<Arc<UdpRouter>>,
     pub globals: Arc<GlobalContext>,
 }
 
@@ -28,40 +27,44 @@ impl AexServer {
     pub fn new(addr: SocketAddr) -> Self {
         Self {
             addr,
-            http_router: None,
-            tcp_router: None,
-            udp_router: None,
+            // http_router: None,
+            // tcp_router: None,
+            // udp_router: None,
             globals: Arc::new(GlobalContext::new(addr)),
         }
     }
 
-    pub fn http(mut self, router: HttpRouter) -> Self {
-        self.http_router = Some(Arc::new(router));
+    pub fn http(&self, router: HttpRouter) -> &Self {
+        self.globals.routers.set_value(Arc::new(router));
+        // self.http_router = Some(Arc::new(router));
         self
     }
 
-    pub fn tcp(mut self, router: TcpRouter) -> Self {
-        self.tcp_router = Some(Arc::new(router));
+    pub fn tcp(&self, router: TcpRouter) -> &Self {
+        self.globals.routers.set_value(Arc::new(router));
+        // self.tcp_router = Some(Arc::new(router));
         self
     }
 
-    pub fn udp(mut self, router: UdpRouter) -> Self {
-        self.udp_router = Some(Arc::new(router));
+    pub fn udp(&self, router: UdpRouter) -> &Self {
+        self.globals.routers.set_value(Arc::new(router));
+        // self.udp_router = Some(Arc::new(router));
         self
     }
 
     /// 🚀 统一启动入口
-    pub async fn start<F, C>(self, extractor: IDExtractor<C>) -> anyhow::Result<()>
+    pub async fn start<F, C>(&self, extractor: IDExtractor<C>) -> anyhow::Result<()>
     where
         F: Frame + Send + Sync + Clone + 'static,
         C: Command + Send + Sync + 'static,
     {
-        let server = Arc::new(self);
+        let server = Arc::new(self.clone());
 
         let extractor_udp = extractor.clone();
 
         // 1. 启动 UDP 监听 (后台协程)
-        if server.udp_router.is_some() {
+        let router: Option<Arc<UdpRouter>> = server.globals.routers.get_value();
+        if router.is_some() {
             let server_udp = server.clone();
             tokio::spawn(async move {
                 if let Err(e) = server_udp.start_udp::<F, C>(extractor_udp.clone()).await {
@@ -87,14 +90,13 @@ impl AexServer {
             let (socket, peer_addr) = listener.accept().await?;
             let server_ctx = Arc::new(self.clone_internal()); // 辅助方法或直接克隆
             let extractor_ctx = extractor.clone();
-
-            println!("inside tcp loop!");
-
             tokio::spawn(async move {
                 let (mut reader, writer) = socket.into_split();
 
                 // 协议嗅探：HTTP
-                if let Some(hr) = &server_ctx.http_router
+                let router: Option<Arc<HttpRouter>> = server_ctx.globals.routers.get_value();
+
+                if let Some(hr) = &router
                     && HttpMethod::is_http_connection(&mut reader)
                         .await
                         .unwrap_or_default()
@@ -108,7 +110,9 @@ impl AexServer {
                 }
 
                 // 自定义 TCP
-                if let Some(tr) = &server_ctx.tcp_router {
+                let router: Option<Arc<TcpRouter>> = server_ctx.globals.routers.get_value();
+
+                if let Some(tr) = &router {
                     // ⚡ 包装 Buffer 以提升 I/O 性能
                     let buf_reader = BufReader::new(reader);
                     let buf_writer = BufWriter::new(writer);
@@ -140,7 +144,9 @@ impl AexServer {
         F: Frame + Send + Sync + Clone + 'static,
         C: Command + Send + Sync + 'static,
     {
-        if let Some(router) = &self.udp_router {
+        let router: Option<Arc<UdpRouter>> = self.globals.routers.get_value();
+
+        if let Some(router) = &router {
             let socket = Arc::new(UdpSocket::bind(self.addr).await?);
             println!("[AEX] UDP listener started on {}", self.addr);
             let rt = router.clone();
@@ -156,9 +162,6 @@ impl AexServer {
     fn clone_internal(&self) -> Self {
         Self {
             addr: self.addr,
-            http_router: self.http_router.clone(),
-            tcp_router: self.tcp_router.clone(),
-            udp_router: self.udp_router.clone(),
             globals: self.globals.clone(),
         }
     }

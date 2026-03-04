@@ -371,7 +371,7 @@ mod websocket_tests {
         route!(hr, get!("/ws", ws_handler, vec![ws_middleware.into()]));
 
         // --- 3. 启动服务器 ---
-        let server = HTTPServer::new(actual_addr).http(hr);
+        let server = HTTPServer::new(actual_addr).http(hr).clone();
         tokio::spawn(async move {
             let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;
         });
@@ -454,7 +454,7 @@ mod websocket_tests {
             get!("/ws", sentinel_handler, vec![ws_middleware.into()])
         );
 
-        let server = HTTPServer::new(actual_addr).http(hr);
+        let server = HTTPServer::new(actual_addr).http(hr).clone();
         tokio::spawn(async move {
             let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;
         });
@@ -544,7 +544,7 @@ mod websocket_tests {
             post!("/ws", sentinel_handler, vec![ws_middleware.into()])
         );
 
-        let server = HTTPServer::new(actual_addr).http(hr);
+        let server = HTTPServer::new(actual_addr).http(hr).clone();
         tokio::spawn(async move {
             let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;
         });
@@ -613,7 +613,7 @@ mod websocket_tests {
             get!("/ws", sentinel_handler, vec![ws_middleware.into()])
         );
 
-        let server = HTTPServer::new(actual_addr).http(hr);
+        let server = HTTPServer::new(actual_addr).http(hr).clone();
         tokio::spawn(async move {
             let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;
         });
@@ -668,7 +668,7 @@ mod websocket_tests {
             get!("/trigger", exe!(|_ctx| { true }), vec![ws_mw.into()])
         );
 
-        let server = HTTPServer::new(actual_addr).http(hr);
+        let server = HTTPServer::new(actual_addr).http(hr).clone();
         tokio::spawn(async move {
             let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;
         });
@@ -737,7 +737,7 @@ mod websocket_tests {
             get!("/read_test", exe!(|_ctx| { true }), vec![ws_mw.into()])
         );
 
-        let server = HTTPServer::new(actual_addr).http(hr);
+        let server = HTTPServer::new(actual_addr).http(hr).clone();
         tokio::spawn(async move {
             let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;
         });
@@ -828,7 +828,7 @@ mod websocket_tests {
             get!("/protocol", exe!(|_ctx| { true }), vec![ws_mw.into()])
         );
 
-        let server = HTTPServer::new(actual_addr).http(hr);
+        let server = HTTPServer::new(actual_addr).http(hr).clone();
         tokio::spawn(async move {
             let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;
         });
@@ -932,7 +932,7 @@ mod websocket_tests {
             get!("/len127", exe!(|_ctx| { true }), vec![ws_mw.into()])
         );
 
-        let server = HTTPServer::new(actual_addr).http(hr);
+        let server = HTTPServer::new(actual_addr).http(hr).clone();
         tokio::spawn(async move {
             let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;
         });
@@ -1007,7 +1007,7 @@ mod websocket_tests {
         // 换一个不带 pong 字样的路径，彻底消除干扰
         route!(hr, get!("/t", exe!(|_ctx| { true }), vec![ws_mw.into()]));
 
-        let server = HTTPServer::new(actual_addr).http(hr);
+        let server = HTTPServer::new(actual_addr).http(hr).clone();
         tokio::spawn(async move {
             let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;
         });
@@ -1077,7 +1077,7 @@ mod websocket_tests {
             get!("/large_send", exe!(|_ctx| { true }), vec![ws_mw.into()])
         );
 
-        let server = HTTPServer::new(actual_addr).http(hr);
+        let server = HTTPServer::new(actual_addr).http(hr).clone();
         tokio::spawn(async move {
             let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;
         });
@@ -1160,7 +1160,7 @@ mod websocket_tests {
         let ws_mw = WebSocket::to_middleware(ws);
         route!(hr, get!("/ws", exe!(|_ctx| { true }), vec![ws_mw.into()]));
 
-        let server = HTTPServer::new(actual_addr).http(hr);
+        let server = HTTPServer::new(actual_addr).http(hr).clone();
         tokio::spawn(async move {
             let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;
         });
@@ -1249,7 +1249,7 @@ async fn test_websocket_custom_close_codes_range() {
     let ws_mw = WebSocket::to_middleware(WebSocket { on_text: None, on_binary: None });
     route!(hr, get!("/custom_code", exe!(|_ctx| { true }), vec![ws_mw.into()]));
 
-    let server = HTTPServer::new(actual_addr).http(hr);
+    let server = HTTPServer::new(actual_addr).http(hr).clone();
     tokio::spawn(async move { let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await; });
     tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
 
@@ -1310,7 +1310,7 @@ async fn test_websocket_strict_protocol_validation() {
     let ws_mw = WebSocket::to_middleware(ws);
     route!(hr, get!("/strict", exe!(|_ctx| { true }), vec![ws_mw.into()]));
 
-    let server = HTTPServer::new(actual_addr).http(hr);
+    let server = HTTPServer::new(actual_addr).http(hr).clone();
     tokio::spawn(async move { let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await; });
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 

@@ -1,12 +1,16 @@
 // --- [GlobalContext] ---
 
-use std::{ any::{ Any, TypeId }, net::SocketAddr, sync::Arc };
+use std::{
+    any::{Any, TypeId},
+    net::SocketAddr,
+    sync::Arc,
+};
 
 use tokio::sync::RwLock;
 
 use crate::{
-    communicators::{ event::EventEmitter, pipe::PipeManager, spreader::SpreadManager },
-    connection::context::{ SERVER_NAME, TypeMap },
+    communicators::{event::EventEmitter, pipe::PipeManager, spreader::SpreadManager},
+    connection::context::{SERVER_NAME, TypeMap},
     crypto::session_key_manager::PairedSessionKey,
 };
 
@@ -22,6 +26,7 @@ pub struct GlobalContext {
     pub paired_session_keys: Option<PairedSessionKey>,
     /// 全局 TypeMap：允许灵活添加数据库连接池、全局配置等
     pub extensions: Arc<RwLock<TypeMap>>,
+    pub routers: TypeMap,
 }
 
 impl GlobalContext {
@@ -29,9 +34,9 @@ impl GlobalContext {
         Self {
             addr,
             // 假设 Node 和 ConnectionManager 都有默认初始化方法
-            local_node: Arc::new(
-                RwLock::new(crate::connection::node::Node::from_addr(addr, None, None))
-            ),
+            local_node: Arc::new(RwLock::new(crate::connection::node::Node::from_addr(
+                addr, None, None,
+            ))),
             manager: Arc::new(crate::connection::manager::ConnectionManager::new()),
             pipe: PipeManager::default(),
             spread: SpreadManager::default(),
@@ -39,6 +44,7 @@ impl GlobalContext {
             name: SERVER_NAME.to_string(),
             paired_session_keys: None,
             extensions: Arc::new(RwLock::new(TypeMap::default())),
+            routers: TypeMap::default(),
         }
     }
 

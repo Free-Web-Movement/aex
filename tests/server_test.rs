@@ -77,7 +77,7 @@ mod aex_tests {
             drop(temp_listener); // 释放临时绑定的端口以便 Server 使用
 
             server.addr = actual_addr;
-            let server = server.http(hr).tcp(tr).udp(ur);
+            let server = server.http(hr).tcp(tr).udp(ur).clone();
 
             // 启动服务器
             tokio::spawn(async move {
