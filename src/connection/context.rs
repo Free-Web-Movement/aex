@@ -1,9 +1,10 @@
 use chrono::DateTime;
 use chrono::Utc;
-use tokio::io::AsyncBufRead;
+use std::any::Any;
 use std::any::TypeId;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use tokio::io::AsyncBufRead;
 use tokio::io::AsyncWrite;
 
 use crate::connection::global::GlobalContext;
@@ -67,7 +68,7 @@ impl<'a> Context<'a> {
     pub fn req(&mut self) -> Request<'_> {
         Request {
             // ⚡ 这里透传 &mut Option，Request 内部决定是 read 还是 take()
-            reader: self.reader, 
+            reader: self.reader,
             local: &mut self.local,
         }
     }
@@ -85,5 +86,20 @@ impl<'a> Context<'a> {
             .signed_duration_since(self.accepted)
             .num_milliseconds()
             .max(0) as u64
+    }
+
+    /// 存入扩展实例 (Async)
+    pub async fn set<T: Send + Sync + 'static>(&self, data: T) {
+        let key = TypeId::of::<T>();
+        let value: Box<dyn Any + Send + Sync> = Box::new(data);
+        self.local.insert(key, value);
+    }
+
+    /// 获取扩展实例的克隆 (Async)
+    pub async fn get<T: Clone + Send + Sync + 'static>(&self) -> Option<T> {
+        let key = TypeId::of::<T>();
+        self.local
+            .get(&key)
+            .and_then(|boxed_val| boxed_val.downcast_ref::<T>().cloned())
     }
 }

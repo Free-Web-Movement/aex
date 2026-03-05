@@ -1,9 +1,9 @@
 #[cfg(test)]
 mod tests {
     
-    use std::{net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr}, sync::atomic::Ordering};
+    use std::{net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr}, sync::{Arc, atomic::Ordering}};
     use aex::connection::{node::Node, protocol::Protocol, types::{ConnectionEntry, NetworkScope}};
-    use tokio::net::{TcpListener, tcp::OwnedWriteHalf};
+    use tokio::{net::{TcpListener, tcp::OwnedWriteHalf}, sync::Mutex};
     use tokio_util::sync::CancellationToken;
 
     // 辅助函数：快速创建一个 mock 的 OwnedWriteHalf
@@ -42,7 +42,6 @@ mod tests {
     #[tokio::test]
     async fn test_connection_entry_lifecycle() {
         let addr: SocketAddr = "127.0.0.1:8080".parse().unwrap();
-        let writer = mock_writer().await;
         let token = CancellationToken::new();
         
         // 创建一个真正的任务以获取 AbortHandle
@@ -51,7 +50,7 @@ mod tests {
         }).abort_handle();
         
         // 1. 测试 new_empty_node (初始状态 node 应该是 None)
-        let entry = ConnectionEntry::new_empty_node(addr, writer, handle, token);
+        let entry = ConnectionEntry::new_empty_node(addr, None, handle, token);
 
         // 验证初始化时间戳
         assert!(entry.uptime_secs() <= 1);
@@ -91,7 +90,7 @@ mod tests {
         let writer = mock_writer().await;
         let entry = ConnectionEntry::new_empty_node(
             addr, 
-            writer, 
+            Some(Arc::new(Mutex::new(writer))), 
             tokio::spawn(async {}).abort_handle(), 
             CancellationToken::new()
         );
@@ -131,7 +130,7 @@ mod tests {
             let abort_handle = handle.abort_handle();
             let _entry = ConnectionEntry::new_empty_node(
                 addr, 
-                writer, 
+                None, 
                 abort_handle, 
                 CancellationToken::new()
             );

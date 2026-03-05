@@ -91,7 +91,8 @@ impl AexServer {
             let server_ctx = Arc::new(self.clone_internal()); // 辅助方法或直接克隆
             let extractor_ctx = extractor.clone();
             let addr = peer_addr.clone();
-            tokio::spawn(async move {
+            let manager = server_ctx.globals.manager.clone();
+            let join_handler = tokio::spawn(async move {
                 let (mut reader, writer) = socket.into_split();
 
                 // 协议嗅探：HTTP
@@ -122,7 +123,6 @@ impl AexServer {
                         Some(Box::new(buf_reader));
                     let mut w_opt: Option<Box<dyn AsyncWrite + Unpin + Send>> =
                         Some(Box::new(buf_writer));
-
                     return tr
                         .clone()
                         .handle::<F, C>(
@@ -134,9 +134,9 @@ impl AexServer {
                         )
                         .await;
                 }
-
                 Ok::<(), anyhow::Error>(())
             });
+            manager.add(addr, join_handler.abort_handle(), true);
         }
     }
 

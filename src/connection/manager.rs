@@ -38,7 +38,6 @@ impl ConnectionManager {
     pub fn add(
         &self,
         addr: SocketAddr,
-        writer: OwnedWriteHalf,
         handle: tokio::task::AbortHandle,
         is_client: bool
     ) {
@@ -58,7 +57,7 @@ impl ConnectionManager {
         let entry = Arc::new(ConnectionEntry {
             addr,
             node: Arc::new(RwLock::new(None)), // 初始时没有节点信息，握手完成后会填充
-            writer: Arc::new(Mutex::new(writer)),
+            writer: None,
             abort_handle: handle,
             connected_at: now, // 💡 记录建立时间
             cancel_token: child_token,
