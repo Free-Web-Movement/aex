@@ -2,11 +2,21 @@
 mod tests {
     use aex::{
         communicators::event::Event,
-        connection::{context::{ Context, TypeMap, TypeMapExt }, global::GlobalContext},
+        connection::{
+            context::{Context, TypeMap, TypeMapExt},
+            global::GlobalContext,
+        },
     };
     use futures::FutureExt;
-    use tokio::{io, sync::RwLock};
-    use std::{ net::SocketAddr, sync::{ Arc, atomic::{ AtomicUsize, Ordering } } };
+    use std::{
+        io::Cursor,
+        net::SocketAddr,
+        sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        },
+    };
+    use tokio::io::{self, AsyncBufRead, AsyncWrite, BufReader};
 
     // --- 1. 测试 TypeMap 的存取逻辑 ---
     #[test]
@@ -52,35 +62,48 @@ mod tests {
         let global = Arc::new(GlobalContext::new(addr));
 
         // 模拟 I/O：使用 dummy 向量模拟 reader 和 writer
-        let reader = vec![0u8; 10];
-        let writer = vec![0u8; 10];
+        let reader_data = Cursor::new(vec![0u8; 10]);
+        let writer_data = Cursor::new(vec![0u8; 10]);
+        let mut reader: Option<Box<dyn AsyncBufRead + Send + Unpin>> =
+            Some(Box::new(BufReader::new(reader_data)));
 
-        let mut ctx = Context::new(reader, writer, global.clone(), addr);
+        let mut writer: Option<Box<dyn AsyncWrite + Send + Unpin>> = Some(Box::new(writer_data));
+
+        let mut ctx = Context::new(&mut reader, &mut writer, global.clone(), addr);
 
         // 测试地址一致性
         assert_eq!(ctx.addr, addr);
 
         // 测试 local TypeMap 在 context 中的独立性
         ctx.local.set_value("request_scoped".to_string());
-        assert_eq!(ctx.local.get_value::<String>(), Some("request_scoped".to_string()));
+        assert_eq!(
+            ctx.local.get_value::<String>(),
+            Some("request_scoped".to_string())
+        );
 
         // --- 测试视图构造 ---
 
         // 1. Request 视图
         {
-            let req_view = ctx.req().await;
+            let req_view = ctx.req();
             // 验证字段引用正确
-            assert_eq!(req_view.local.get_value::<String>(), Some("request_scoped".to_string()));
+            assert_eq!(
+                req_view.local.get_value::<String>(),
+                Some("request_scoped".to_string())
+            );
         }
 
         // 2. Response 视图
         {
             let res_view = ctx.res();
             // 验证字段引用正确
-            assert_eq!(res_view.local.get_value::<String>(), Some("request_scoped".to_string()));
+            assert_eq!(
+                res_view.local.get_value::<String>(),
+                Some("request_scoped".to_string())
+            );
 
             // 验证 writer 是被包裹在 Arc<Mutex<W>> 中的
-            let _lock = res_view.writer.lock().await;
+            let _lock = res_view.writer;
         }
     }
 
@@ -89,18 +112,19 @@ mod tests {
     async fn test_context_concurrency() {
         let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
         let global = Arc::new(GlobalContext::new(addr));
-        let ctx = Arc::new(
-            tokio::sync::Mutex::new(Context::<Vec<u8>, Vec<u8>>::new(vec![], vec![], global, addr))
-        );
 
-        let ctx_clone = ctx.clone();
-        let handle = tokio::spawn(async move {
-            let guard = ctx_clone.lock().await;
-            guard.local.set_value(99usize);
-        });
+        let reader_data = Cursor::new(vec![0u8; 10]);
+        let writer_data = Cursor::new(vec![0u8; 10]);
+        let mut reader: Option<Box<dyn AsyncBufRead + Send + Unpin>> =
+            Some(Box::new(BufReader::new(reader_data)));
 
-        handle.await.unwrap();
-        assert_eq!(ctx.lock().await.local.get_value::<usize>(), Some(99));
+        let mut writer: Option<Box<dyn AsyncWrite + Send + Unpin>> = Some(Box::new(writer_data));
+
+        let ctx = Context::new(&mut reader, &mut writer, global.clone(), addr);
+
+        ctx.local.set_value(99 as usize);
+
+        assert_eq!(ctx.local.get_value::<usize>(), Some(99));
     }
 
     #[tokio::test]
@@ -126,47 +150,49 @@ mod tests {
             "request_received".to_string(),
             Arc::new(move |req_id: u32| {
                 let c = Arc::clone(&ec);
-                (
-                    async move {
-                        println!("Event 收到请求 ID: {}", req_id);
-                        c.fetch_add(1, Ordering::SeqCst);
-                    }
-                ).boxed() // 👈 关键点：返回一个被包装的 Future
-            })
-        ).await;
+                (async move {
+                    println!("Event 收到请求 ID: {}", req_id);
+                    c.fetch_add(1, Ordering::SeqCst);
+                })
+                .boxed() // 👈 关键点：返回一个被包装的 Future
+            }),
+        )
+        .await;
 
         // Pipe: 监听 "audit_log" (N:1)
         let pc = Arc::clone(&pipe_counter);
-        global.pipe
+        global
+            .pipe
             .register(
                 "audit_log",
                 Box::new(move |msg: String| {
                     let c = Arc::clone(&pc);
-                    (
-                        async move {
-                            println!("Pipe 审计日志: {}", msg);
-                            c.fetch_add(1, Ordering::SeqCst);
-                        }
-                    ).boxed()
-                })
-            ).await
+                    (async move {
+                        println!("Pipe 审计日志: {}", msg);
+                        c.fetch_add(1, Ordering::SeqCst);
+                    })
+                    .boxed()
+                }),
+            )
+            .await
             .unwrap();
 
         // Spread: 订阅 "broadcast" (1:N)
         let sc = Arc::clone(&spread_counter);
-        global.spread
+        global
+            .spread
             .subscribe(
                 "broadcast",
                 Box::new(move |val: i32| {
                     let c = Arc::clone(&sc);
-                    (
-                        async move {
-                            println!("Spread 广播接收: {}", val);
-                            c.fetch_add(1, Ordering::SeqCst);
-                        }
-                    ).boxed()
-                })
-            ).await
+                    (async move {
+                        println!("Spread 广播接收: {}", val);
+                        c.fetch_add(1, Ordering::SeqCst);
+                    })
+                    .boxed()
+                }),
+            )
+            .await
             .unwrap();
 
         // --- 模拟连接进入 ---
@@ -176,23 +202,44 @@ mod tests {
         let (reader, writer) = io::split(client);
         let remote_addr = "192.168.1.100:12345".parse().unwrap();
 
-        let ctx = Context::new(reader, writer, Arc::clone(&Arc::new(global)), remote_addr);
+        // let reader_data = Cursor::new(vec![0u8; 10]);
+        // let writer_data = Cursor::new(vec![0u8; 10]);
+        let mut reader: Option<Box<dyn AsyncBufRead + Send + Unpin>> =
+            Some(Box::new(BufReader::new(reader)));
+
+        let mut writer: Option<Box<dyn AsyncWrite + Send + Unpin>> = Some(Box::new(writer));
+
+        let ctx = Context::new(&mut reader, &mut writer, Arc::clone(&Arc::new(global)), remote_addr);
+
+        // let ctx = Context::new(reader, writer, Arc::clone(&Arc::new(global)), remote_addr);
 
         // --- 执行业务逻辑测试 ---
 
         // 1. 测试 elapsed (模拟处理耗时)
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
         let time_spent = ctx.elapsed();
-        assert!(time_spent >= 100, "Elapsed 应该大于 100ms, 当前: {}ms", time_spent);
+        assert!(
+            time_spent >= 100,
+            "Elapsed 应该大于 100ms, 当前: {}ms",
+            time_spent
+        );
 
         let global = ctx.global.clone();
 
         // 2. 使用 Event 通知系统有新请求
-        global.event.notify("request_received".to_string(), 1024_u32).await;
+        global
+            .event
+            .notify("request_received".to_string(), 1024_u32)
+            .await;
 
         // 3. 使用 Pipe 发送结构化日志
-        global.pipe
-            .send("audit_log", format!("Client {} processed in {}ms", ctx.addr, time_spent)).await
+        global
+            .pipe
+            .send(
+                "audit_log",
+                format!("Client {} processed in {}ms", ctx.addr, time_spent),
+            )
+            .await
             .unwrap();
 
         // 4. 使用 Spread 发布全局通知
@@ -203,9 +250,21 @@ mod tests {
         // 给异步任务一点点执行时间 (通知是 spawn 出来的)
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
 
-        assert_eq!(event_counter.load(Ordering::SeqCst), 1, "Event 应该触发一次");
-        assert_eq!(pipe_counter.load(Ordering::SeqCst), 1, "Pipe 应该处理一条日志");
-        assert_eq!(spread_counter.load(Ordering::SeqCst), 1, "Spread 应该收到一个广播");
+        assert_eq!(
+            event_counter.load(Ordering::SeqCst),
+            1,
+            "Event 应该触发一次"
+        );
+        assert_eq!(
+            pipe_counter.load(Ordering::SeqCst),
+            1,
+            "Pipe 应该处理一条日志"
+        );
+        assert_eq!(
+            spread_counter.load(Ordering::SeqCst),
+            1,
+            "Spread 应该收到一个广播"
+        );
 
         println!("Context 集成功能全数测试通过！");
     }

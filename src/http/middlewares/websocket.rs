@@ -1,5 +1,5 @@
 use crate::{
-    connection::context::{HTTPContext, TypeMapExt},
+    connection::context::{Context, TypeMapExt},
     http::{
         meta::HttpMetadata,
         protocol::{header::HeaderKey, method::HttpMethod},
@@ -11,7 +11,7 @@ use base64::engine::general_purpose::STANDARD;
 use sha1::{Digest, Sha1};
 use std::{collections::HashMap, sync::Arc};
 use tokio::{
-    io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader, BufWriter},
+    io::{AsyncBufRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
     sync::Mutex,
 };
 
@@ -41,13 +41,10 @@ impl WebSocket {
     }
 
     /// 完成 WebSocket 握手 (泛型化)
-    pub async fn handshake<W>(
-        writer: &mut BufWriter<W>,
+    pub async fn handshake<'a>(
+        writer: &'a mut (dyn AsyncWrite + Send + Unpin),
         headers: &HashMap<HeaderKey, String>,
-    ) -> anyhow::Result<()>
-    where
-        W: AsyncWrite + Unpin,
-    {
+    ) -> anyhow::Result<()> {
         let key = headers
             .get(&HeaderKey::SecWebSocketKey)
             .ok_or_else(|| anyhow::anyhow!("missing Sec-WebSocket-Key"))?;
@@ -71,46 +68,41 @@ impl WebSocket {
     }
 
     /// 发送文本消息 (泛型化)
-    pub async fn send_text<W>(writer: &mut BufWriter<W>, msg: &str) -> anyhow::Result<()>
-    where
-        W: AsyncWrite + Unpin,
-    {
+    pub async fn send_text<'a>(
+        writer: &'a mut (dyn AsyncWrite + Send + Unpin),
+        msg: &str,
+    ) -> anyhow::Result<()> {
         Self::send_frame(writer, 0x1, msg.as_bytes()).await
     }
 
     /// 发送二进制消息 (泛型化)
-    pub async fn send_binary<W>(writer: &mut BufWriter<W>, payload: &[u8]) -> anyhow::Result<()>
-    where
-        W: AsyncWrite + Unpin,
-    {
+    pub async fn send_binary<'a>(
+        writer: &'a mut (dyn AsyncWrite + Send + Unpin),
+        payload: &[u8],
+    ) -> anyhow::Result<()> {
         Self::send_frame(writer, 0x2, payload).await
     }
 
     /// 发送 ping (泛型化)
-    pub async fn send_ping<W>(writer: &mut BufWriter<W>) -> anyhow::Result<()>
-    where
-        W: AsyncWrite + Unpin,
-    {
+    pub async fn send_ping<'a>(
+        writer: &'a mut (dyn AsyncWrite + Send + Unpin),
+    ) -> anyhow::Result<()> {
         Self::send_frame(writer, 0x9, &[]).await
     }
 
     /// 发送 pong (泛型化)
-    pub async fn send_pong<W>(writer: &mut BufWriter<W>) -> anyhow::Result<()>
-    where
-        W: AsyncWrite + Unpin,
-    {
+    pub async fn send_pong<'a>(
+        writer: &'a mut (dyn AsyncWrite + Send + Unpin),
+    ) -> anyhow::Result<()> {
         Self::send_frame(writer, 0xa, &[]).await
     }
 
     /// 关闭连接 (泛型化)
-    pub async fn close<W>(
-        writer: &mut BufWriter<W>,
+    pub async fn close<'a>(
+        writer: &'a mut (dyn AsyncWrite + Send + Unpin),
         code: u16,
         reason: Option<&str>,
-    ) -> anyhow::Result<()>
-    where
-        W: AsyncWrite + Unpin,
-    {
+    ) -> anyhow::Result<()> {
         let reason_bytes = reason.unwrap_or("").as_bytes();
         let mut payload = Vec::with_capacity(2 + reason_bytes.len());
         payload.extend_from_slice(&code.to_be_bytes());
@@ -122,14 +114,10 @@ impl WebSocket {
     }
 
     /// 读取一个完整消息 (泛型化)
-    pub async fn read_full<R, W>(
-        reader: &mut BufReader<R>,
-        writer: &mut BufWriter<W>,
-    ) -> anyhow::Result<(u8, Vec<u8>)>
-    where
-        R: AsyncRead + Unpin,
-        W: AsyncWrite + Unpin,
-    {
+    pub async fn read_full<'a>(
+        reader: &'a mut (dyn AsyncBufRead + Send + Unpin),
+        writer: &'a mut (dyn AsyncWrite + Send + Unpin),
+    ) -> anyhow::Result<(u8, Vec<u8>)> {
         loop {
             let mut header = [0u8; 2];
             reader.read_exact(&mut header).await?;
@@ -213,14 +201,11 @@ impl WebSocket {
     }
 
     /// 内部封装：发送任意 opcode 帧 (泛型化)
-    pub async fn send_frame<W>(
-        writer: &mut BufWriter<W>,
+    pub async fn send_frame<'a>(
+        writer: &'a mut (dyn AsyncWrite + Send + Unpin),
         opcode: u8,
         payload: &[u8],
-    ) -> anyhow::Result<()>
-    where
-        W: AsyncWrite + Unpin,
-    {
+    ) -> anyhow::Result<()> {
         let mut frame = Vec::with_capacity(2 + payload.len());
         frame.push(0x80 | (opcode & 0x0f));
 
@@ -235,19 +220,28 @@ impl WebSocket {
         }
 
         frame.extend_from_slice(payload);
-        writer.write_all(&frame).await?;
+        writer.write(&frame).await?;
         writer.flush().await?;
         Ok(())
     }
 
     /// WebSocket 运行循环 (泛型化)
-    pub async fn run(ws: &WebSocket, ctx: &mut HTTPContext) -> anyhow::Result<()> {
+    pub async fn run(ws: &WebSocket, ctx: &mut Context<'_>) -> anyhow::Result<()> {
         loop {
             let (opcode, payload) = {
-                let mut writer_lock = ctx.writer.lock().await;
-                match Self::read_full(&mut ctx.reader, &mut writer_lock).await {
+                // let mut writer_lock = ctx.writer;
+                let w = ctx
+                    .writer
+                    .as_deref_mut()
+                    .unwrap();
+                let r = ctx
+                    .reader
+                    .as_deref_mut()
+                    .unwrap();
+
+                match Self::read_full(r, w).await {
                     Ok(v) => v,
-                    Err(e) => return Err(e), // 👈 修改这里：由 break 改为 return Err(e)
+                    Err(e) => return Err(e),
                 }
             };
 
@@ -258,18 +252,18 @@ impl WebSocket {
                         let text = match String::from_utf8(payload) {
                             Ok(s) => s,
                             Err(_) => {
-                                let mut writer_lock = ctx.writer.lock().await;
+                                // let mut writer_lock = ctx.writer.lock().await;
+                                let w = ctx.writer.as_deref_mut().unwrap();
                                 // RFC 规定：Text 帧格式错误应返回 1007
-                                let _ =
-                                    Self::close(&mut writer_lock, 1007, Some("invalid utf8")).await;
+                                let _ = Self::close(w, 1007, Some("invalid utf8")).await;
                                 break;
                             }
                         };
 
                         if !handler(ws, ctx, text).await {
-                            let mut writer_lock = ctx.writer.lock().await;
-                            let _ =
-                                Self::close(&mut writer_lock, 1000, Some("handler rejected")).await;
+                            // let mut writer_lock = ctx.writer.lock().await;
+                            let w = ctx.writer.as_deref_mut().unwrap();
+                            let _ = Self::close(w, 1000, Some("handler rejected")).await;
                             break;
                         }
                     }
@@ -278,9 +272,9 @@ impl WebSocket {
                     if let Some(handler) = &ws.on_binary {
                         let handler = handler.clone();
                         if !handler(ws, ctx, payload).await {
-                            let mut writer_lock = ctx.writer.lock().await;
-                            let _ =
-                                Self::close(&mut writer_lock, 1000, Some("handler rejected")).await;
+                            let w = ctx.writer.as_deref_mut().unwrap();
+
+                            let _ = Self::close(w, 1000, Some("handler rejected")).await;
                             break;
                         }
                     }
@@ -320,7 +314,7 @@ impl WebSocket {
         use futures::FutureExt;
         let ws = Arc::new(Mutex::new(ws));
 
-        Box::new(move |ctx: &mut HTTPContext| {
+        Box::new(move |ctx: &mut Context<'_>| {
             let ws = ws.clone();
             (async move {
                 let meta = ctx.local.get_value::<HttpMetadata>().unwrap();
@@ -336,8 +330,9 @@ impl WebSocket {
 
                 // 构建 WebSocket 并握手
                 {
-                    let mut writer_lock = ctx.writer.lock().await;
-                    if let Err(e) = Self::handshake(&mut writer_lock, &meta.headers).await {
+                    // let mut writer_lock = ctx.writer.lock().await;
+                    let w = ctx.writer.as_deref_mut().unwrap();
+                    if let Err(e) = Self::handshake(w, &meta.headers).await {
                         eprintln!("WebSocket handshake failed: {:?}", e);
                         return false;
                     }

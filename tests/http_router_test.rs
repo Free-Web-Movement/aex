@@ -11,7 +11,7 @@ mod tests {
 
     use aex::{
         all,
-        connection::context::{HTTPContext, TypeMapExt},
+        connection::context::{Context, TypeMapExt},
         exe, get,
         http::{
             meta::HttpMetadata,
@@ -151,7 +151,7 @@ mod tests {
         hr.insert(
             "/api/user/:id",
             Some("GET"),
-            Arc::new(|ctx: &mut HTTPContext| {
+            Arc::new(|ctx: &mut Context<'_>| {
                 async move {
                     let mut meta = ctx.local.get_value::<HttpMetadata>().unwrap();
                     let user_id = meta
@@ -263,7 +263,7 @@ mod tests {
         hr.insert(
             "/assets/*",
             Some("GET"),
-            Arc::new(move |ctx: &mut HTTPContext| {
+            Arc::new(move |ctx: &mut Context<'_>| {
                 let c = count.clone();
                 async move {
                     c.fetch_add(1, Ordering::SeqCst);
@@ -331,7 +331,7 @@ mod tests {
         let handler_executed = Arc::new(AtomicUsize::new(0));
 
         // 拦截中间件
-        let mw_blocker: Arc<Executor> = Arc::new(|ctx: &mut HTTPContext| {
+        let mw_blocker: Arc<Executor> = Arc::new(|ctx: &mut Context<'_>| {
             async move {
                 let mut meta = ctx.local.get_value::<HttpMetadata>().unwrap();
                 meta.status = StatusCode::Forbidden; // 403
@@ -415,7 +415,7 @@ mod tests {
     //         hr.insert(
     //             "/submit",
     //             Some("POST"),
-    //             Arc::new(|ctx: &mut HTTPContext| {
+    //             Arc::new(|ctx: &mut Context<'_>| {
     //                 async move {
     //                     let mut meta = ctx.local.get_value::<HttpMetadata>().unwrap();
 
@@ -495,7 +495,7 @@ mod tests {
         hr.insert(
             "/submit",
             Some("POST"),
-            Arc::new(|ctx: &mut HTTPContext| {
+            Arc::new(|ctx: &mut Context<'_>| {
                 async move {
                     let mut meta = ctx.local.get_value::<HttpMetadata>().unwrap();
 
@@ -566,7 +566,7 @@ mod tests {
         hr.insert(
             "/universal",
             None, // 内部会转为 "*"
-            Arc::new(|ctx: &mut HTTPContext| {
+            Arc::new(|ctx: &mut Context<'_>| {
                 async move {
                     let mut meta = ctx.local.get_value::<HttpMetadata>().unwrap();
                     let method = meta.method.to_str().to_owned();

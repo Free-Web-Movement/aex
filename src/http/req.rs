@@ -2,31 +2,35 @@ use std::{collections::HashMap, time::Duration};
 
 use anyhow::{Context, bail};
 use tokio::{
-    io::{AsyncBufReadExt, AsyncReadExt},
+    io::{AsyncBufRead, AsyncBufReadExt},
     time::timeout,
 };
 
 use crate::{
     connection::context::{TypeMap, TypeMapExt},
     http::{
-        meta::HttpMetadata, middlewares::websocket::WebSocket, params::Params, protocol::{
-            content_type::ContentType, header::{HeaderKey, Headers}, media_type::MediaType,
-            method::HttpMethod, status::StatusCode, version::HttpVersion,
-        }
+        meta::HttpMetadata,
+        middlewares::websocket::WebSocket,
+        params::Params,
+        protocol::{
+            content_type::ContentType,
+            header::{HeaderKey, Headers},
+            media_type::MediaType,
+            method::HttpMethod,
+            status::StatusCode,
+            version::HttpVersion,
+        },
     },
 };
 pub const MAX_CAPACITY: i32 = 1024;
 pub const TIME_LIMIT: i32 = 500;
 
-pub struct Request<'a, R> {
-    pub reader: &'a mut R,
+pub struct Request<'a> {
+    pub reader: &'a mut Option<Box<dyn AsyncBufRead + Send + Unpin>>,
     pub local: &'a mut TypeMap,
 }
 
-impl<'a, R> Request<'a, R>
-where
-    R: AsyncReadExt + AsyncBufReadExt + Unpin,
-{
+impl<'a> Request<'a> {
     pub async fn parse_to_local(&mut self) -> anyhow::Result<()> {
         // 1. 解析请求行 (Method, Path, Version)
         let line = self.read_line_with_limit().await?;
@@ -126,17 +130,23 @@ where
 
     async fn read_line_with_limit(&mut self) -> anyhow::Result<Vec<u8>> {
         let mut buf = Vec::with_capacity(MAX_CAPACITY as usize);
-        let n = timeout(
-            Duration::from_millis(TIME_LIMIT as u64),
-            self.reader.read_until(b'\n', &mut buf),
-        )
-        .await
-        .map_err(|_| anyhow::anyhow!("Read timeout"))??;
 
-        if n == 0 {
-            bail!("Connection closed");
+        // ⚡ 穿透 Option 和 Box 拿到 dyn AsyncBufRead
+        if let Some(r) = self.reader.as_deref_mut() {
+            let n = timeout(
+                Duration::from_millis(TIME_LIMIT as u64),
+                r.read_until(b'\n', &mut buf),
+            )
+            .await
+            .map_err(|_| anyhow::anyhow!("Read timeout"))??;
+
+            if n == 0 {
+                bail!("Connection closed");
+            }
+            Ok(buf)
+        } else {
+            Err(anyhow::anyhow!("Reader taken!"))
         }
-        Ok(buf)
     }
 
     async fn parse_headers_from_reader(&mut self) -> anyhow::Result<HashMap<HeaderKey, String>> {
@@ -148,9 +158,10 @@ where
                 break;
             }
             if let Some(pos) = line.find(':')
-                && let Some(key) = HeaderKey::from_str(line[..pos].trim()) {
-                    map.insert(key, line[pos + 1..].trim().to_string());
-                }
+                && let Some(key) = HeaderKey::from_str(line[..pos].trim())
+            {
+                map.insert(key, line[pos + 1..].trim().to_string());
+            }
         }
         Ok(map)
     }
@@ -162,7 +173,11 @@ where
 
     /// 快速获取所有的 Params
     pub fn params(&self) -> Option<Params> {
-        self.local.get_value::<HttpMetadata>().unwrap().params.clone()
+        self.local
+            .get_value::<HttpMetadata>()
+            .unwrap()
+            .params
+            .clone()
     }
 
     /// 获取特定的 Path 参数 (e.g., /user/:id)
@@ -189,7 +204,10 @@ where
     /// @param reader: 实现异步读的流（如 TcpStream 的 ReadHalf）
     /// @param local: 用于存储解析结果的 TypeMap
     /// @param peer_addr: 远程节点的物理地址
-    pub fn new(reader: &'a mut R, local: &'a mut TypeMap) -> Self {
+    pub fn new(
+        reader: &'a mut Option<Box<dyn AsyncBufRead + Send + Unpin>>,
+        local: &'a mut TypeMap,
+    ) -> Self {
         Self { reader, local }
     }
 }

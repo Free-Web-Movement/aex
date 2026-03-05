@@ -1,6 +1,6 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tokio::io::{AsyncRead, AsyncWrite, BufReader, BufWriter};
+use tokio::io::{AsyncBufRead, AsyncWrite, BufReader, BufWriter};
 use tokio::net::TcpListener;
 use tokio::net::UdpSocket;
 
@@ -90,6 +90,7 @@ impl AexServer {
             let (socket, peer_addr) = listener.accept().await?;
             let server_ctx = Arc::new(self.clone_internal()); // 辅助方法或直接克隆
             let extractor_ctx = extractor.clone();
+            let addr = peer_addr.clone();
             tokio::spawn(async move {
                 let (mut reader, writer) = socket.into_split();
 
@@ -117,7 +118,7 @@ impl AexServer {
                     let buf_reader = BufReader::new(reader);
                     let buf_writer = BufWriter::new(writer);
 
-                    let mut r_opt: Option<Box<dyn AsyncRead + Unpin + Send>> =
+                    let mut r_opt: Option<Box<dyn AsyncBufRead + Unpin + Send>> =
                         Some(Box::new(buf_reader));
                     let mut w_opt: Option<Box<dyn AsyncWrite + Unpin + Send>> =
                         Some(Box::new(buf_writer));
@@ -125,6 +126,7 @@ impl AexServer {
                     return tr
                         .clone()
                         .handle::<F, C>(
+                            addr,
                             server_ctx.globals.clone(),
                             &mut r_opt,
                             &mut w_opt,

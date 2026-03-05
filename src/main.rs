@@ -46,7 +46,7 @@ async fn main() -> anyhow::Result<()> {
     // 注册 TCP 指令 1001
     tcp_router.on::<RawCodec, RawCodec, _, _>(
         1001,
-        |_global: Arc<GlobalContext>, _frame, cmd, _reader, _writer| {
+        |_ctx, _frame, cmd| {
             let cmd = cmd.clone();
             // let frame = frame.clone();
             async move {

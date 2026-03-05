@@ -10,7 +10,8 @@ mod websocket_tests {
             router::{NodeType, Router},
         },
         post, route,
-        server::HTTPServer, tcp::types::{Command, RawCodec},
+        server::HTTPServer,
+        tcp::types::{Command, RawCodec},
     };
     use std::{collections::HashMap, net::SocketAddr, sync::Arc};
     use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader, BufWriter};
@@ -350,9 +351,9 @@ mod websocket_tests {
         let ws_logic = WebSocket {
             on_text: Some(Arc::new(|_ws, ctx, text| {
                 Box::pin(async move {
-                    let mut writer = ctx.writer.lock().await;
+                    let w = ctx.writer.as_deref_mut().unwrap();
                     // 收到消息转为大写并回传
-                    WebSocket::send_text(&mut writer, &format!("ACK: {}", text))
+                    WebSocket::send_text(w, &format!("ACK: {}", text))
                         .await
                         .unwrap();
                     true
@@ -373,7 +374,9 @@ mod websocket_tests {
         // --- 3. 启动服务器 ---
         let server = HTTPServer::new(actual_addr).http(hr).clone();
         tokio::spawn(async move {
-            let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;
+            let _ = server
+                .start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id()))
+                .await;
         });
 
         // 等待服务器启动
@@ -456,7 +459,9 @@ mod websocket_tests {
 
         let server = HTTPServer::new(actual_addr).http(hr).clone();
         tokio::spawn(async move {
-            let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;
+            let _ = server
+                .start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id()))
+                .await;
         });
         tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
 
@@ -546,7 +551,9 @@ mod websocket_tests {
 
         let server = HTTPServer::new(actual_addr).http(hr).clone();
         tokio::spawn(async move {
-            let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;
+            let _ = server
+                .start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id()))
+                .await;
         });
         tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
 
@@ -615,7 +622,9 @@ mod websocket_tests {
 
         let server = HTTPServer::new(actual_addr).http(hr).clone();
         tokio::spawn(async move {
-            let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;
+            let _ = server
+                .start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id()))
+                .await;
         });
         tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
 
@@ -670,7 +679,9 @@ mod websocket_tests {
 
         let server = HTTPServer::new(actual_addr).http(hr).clone();
         tokio::spawn(async move {
-            let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;
+            let _ = server
+                .start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id()))
+                .await;
         });
         tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
 
@@ -724,8 +735,9 @@ mod websocket_tests {
         let ws = WebSocket {
             on_text: Some(Arc::new(|_, ctx, _| {
                 Box::pin(async move {
-                    let mut w = ctx.writer.lock().await;
-                    let _ = WebSocket::send_text(&mut w, "ok").await;
+                    let w = ctx.writer.as_deref_mut().unwrap();
+
+                    let _ = WebSocket::send_text(w, "ok").await;
                     true
                 })
             })),
@@ -739,7 +751,9 @@ mod websocket_tests {
 
         let server = HTTPServer::new(actual_addr).http(hr).clone();
         tokio::spawn(async move {
-            let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;
+            let _ = server
+                .start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id()))
+                .await;
         });
         tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
 
@@ -830,7 +844,9 @@ mod websocket_tests {
 
         let server = HTTPServer::new(actual_addr).http(hr).clone();
         tokio::spawn(async move {
-            let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;
+            let _ = server
+                .start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id()))
+                .await;
         });
         tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
 
@@ -917,8 +933,9 @@ mod websocket_tests {
             on_text: Some(Arc::new(|_, ctx, text| {
                 Box::pin(async move {
                     if text.len() == 200 {
-                        let mut w = ctx.writer.lock().await;
-                        let _ = WebSocket::send_text(&mut w, "len_ok").await;
+                        // let mut w = ctx.writer.lock().await;
+                        let w = ctx.writer.as_deref_mut().unwrap();
+                        let _ = WebSocket::send_text(w, "len_ok").await;
                     }
                     true
                 })
@@ -934,7 +951,9 @@ mod websocket_tests {
 
         let server = HTTPServer::new(actual_addr).http(hr).clone();
         tokio::spawn(async move {
-            let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;
+            let _ = server
+                .start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id()))
+                .await;
         });
         tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
 
@@ -995,8 +1014,8 @@ mod websocket_tests {
         let ws = WebSocket {
             on_text: Some(Arc::new(|_, ctx, _text| {
                 Box::pin(async move {
-                    let mut w = ctx.writer.lock().await;
-                    let _ = WebSocket::send_text(&mut w, "ack").await;
+                    let w = ctx.writer.as_deref_mut().unwrap();
+                    let _ = WebSocket::send_text(w, "ack").await;
                     true
                 })
             })),
@@ -1009,7 +1028,9 @@ mod websocket_tests {
 
         let server = HTTPServer::new(actual_addr).http(hr).clone();
         tokio::spawn(async move {
-            let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;
+            let _ = server
+                .start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id()))
+                .await;
         });
         tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
 
@@ -1062,8 +1083,8 @@ mod websocket_tests {
                 Box::pin(async move {
                     if text == "send_large" {
                         let large_data = vec![b'A'; 65537];
-                        let mut w = ctx.writer.lock().await;
-                        let _ = WebSocket::send_binary(&mut w, &large_data).await;
+                        let w = ctx.writer.as_deref_mut().unwrap();
+                        let _ = WebSocket::send_binary(w, &large_data).await;
                     }
                     true
                 })
@@ -1079,7 +1100,9 @@ mod websocket_tests {
 
         let server = HTTPServer::new(actual_addr).http(hr).clone();
         tokio::spawn(async move {
-            let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;
+            let _ = server
+                .start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id()))
+                .await;
         });
         tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
 
@@ -1162,7 +1185,9 @@ mod websocket_tests {
 
         let server = HTTPServer::new(actual_addr).http(hr).clone();
         tokio::spawn(async move {
-            let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;
+            let _ = server
+                .start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id()))
+                .await;
         });
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
@@ -1235,142 +1260,175 @@ mod websocket_tests {
     }
 
     #[tokio::test]
-async fn test_websocket_custom_close_codes_range() {
-    use tokio::net::{TcpListener, TcpStream};
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    async fn test_websocket_custom_close_codes_range() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::{TcpListener, TcpStream};
 
-    // 1. 启动服务器
-    let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
-    let listener = TcpListener::bind(addr).await.unwrap();
-    let actual_addr = listener.local_addr().unwrap();
-    drop(listener);
+        // 1. 启动服务器
+        let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
+        let listener = TcpListener::bind(addr).await.unwrap();
+        let actual_addr = listener.local_addr().unwrap();
+        drop(listener);
 
-    let mut hr = Router::new(NodeType::Static("root".into()));
-    let ws_mw = WebSocket::to_middleware(WebSocket { on_text: None, on_binary: None });
-    route!(hr, get!("/custom_code", exe!(|_ctx| { true }), vec![ws_mw.into()]));
+        let mut hr = Router::new(NodeType::Static("root".into()));
+        let ws_mw = WebSocket::to_middleware(WebSocket {
+            on_text: None,
+            on_binary: None,
+        });
+        route!(
+            hr,
+            get!("/custom_code", exe!(|_ctx| { true }), vec![ws_mw.into()])
+        );
 
-    let server = HTTPServer::new(actual_addr).http(hr).clone();
-    tokio::spawn(async move { let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await; });
-    tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
+        let server = HTTPServer::new(actual_addr).http(hr).clone();
+        tokio::spawn(async move {
+            let _ = server
+                .start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id()))
+                .await;
+        });
+        tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
 
-    // 2. 客户端连接并握手
-    let mut stream = TcpStream::connect(actual_addr).await.unwrap();
-    stream.write_all(b"GET /custom_code HTTP/1.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n").await.unwrap();
-    let mut buf = [0u8; 1024];
-    let _ = stream.read(&mut buf).await.unwrap();
-
-    // --- 测试目标：自定义状态码 4000 (命中 3000..=4999 分支) ---
-    // 构造 Payload: [0x0F, 0xA0] (即 4000 的大端序)
-    let custom_code: u16 = 4000;
-    let code_bytes = custom_code.to_be_bytes();
-    let mask = [0x11, 0x22, 0x33, 0x44];
-    
-    let masked_payload = [
-        code_bytes[0] ^ mask[0],
-        code_bytes[1] ^ mask[1],
-    ];
-
-    // 发送关闭帧: FIN+Close(0x88), Masked(0x82), MaskKey, Payload
-    let mut frame = vec![0x88, 0x82];
-    frame.extend_from_slice(&mask);
-    frame.extend_from_slice(&masked_payload);
-    
-    stream.write_all(&frame).await.unwrap();
-
-    // 3. 验证服务端响应
-    // 源码逻辑：parse_close_payload 成功返回 Ok((4000, None))
-    // 随后 run 会调用 Self::close(writer, 4000, None) 并 bail
-    let _n = stream.read(&mut buf).await.unwrap();
-    
-    assert_eq!(buf[0], 0x88, "应响应关闭帧");
-    let received_code = u16::from_be_bytes([buf[2], buf[3]]);
-    
-    // 如果该分支没测到（即报错了），received_code 会是 1002
-    // 如果测试通过，received_code 应该是我们发送的 4000
-    assert_eq!(received_code, 4000, "服务端应允许并原样回传 3000-4999 范围内的自定义状态码");
-}
-
-#[tokio::test]
-async fn test_websocket_strict_protocol_validation() {
-    use tokio::net::{TcpListener, TcpStream};
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-
-    // 1. 启动服务器
-    let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
-    let listener = TcpListener::bind(addr).await.unwrap();
-    let actual_addr = listener.local_addr().unwrap();
-    drop(listener);
-
-    let mut hr = Router::new(NodeType::Static("root".into()));
-    // 提供一个正常的 Handler 供 UTF-8 测试使用
-    let ws = WebSocket {
-        on_text: Some(Arc::new(|_, _, _| Box::pin(async move { true }))),
-        on_binary: None,
-    };
-    let ws_mw = WebSocket::to_middleware(ws);
-    route!(hr, get!("/strict", exe!(|_ctx| { true }), vec![ws_mw.into()]));
-
-    let server = HTTPServer::new(actual_addr).http(hr).clone();
-    tokio::spawn(async move { let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await; });
-    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-
-    // 辅助闭包：快速发起连接并完成握手
-    let connect_ws = || async {
+        // 2. 客户端连接并握手
         let mut stream = TcpStream::connect(actual_addr).await.unwrap();
-        stream.write_all(b"GET /strict HTTP/1.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n").await.unwrap();
+        stream.write_all(b"GET /custom_code HTTP/1.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n").await.unwrap();
         let mut buf = [0u8; 1024];
         let _ = stream.read(&mut buf).await.unwrap();
-        stream
-    };
 
-    // --- 分支 1: 测试保留位校验 (RSV1 set) ---
-    {
-        let mut stream = connect_ws().await;
-        // 0xF1 = FIN(1), RSV1(1), RSV2(0), RSV3(0), Opcode(1 - Text)
-        // 按照代码应触发 1002
-        stream.write_all(&[0xF1, 0x80, 0, 0, 0, 0]).await.unwrap();
-        let mut buf = [0u8; 10];
-        stream.read_exact(&mut buf[..4]).await.unwrap();
-        assert_eq!(u16::from_be_bytes([buf[2], buf[3]]), 1002, "设置RSV位应返回1002");
-    }
-
-    // --- 分支 2: 测试分片拦截 (!fin) ---
-    {
-        let mut stream = connect_ws().await;
-        // 0x01 = FIN(0), Opcode(1) -> 分片起始帧
-        stream.write_all(&[0x01, 0x80, 0, 0, 0, 0]).await.unwrap();
-        let mut buf = [0u8; 10];
-        stream.read_exact(&mut buf[..4]).await.unwrap();
-        assert_eq!(u16::from_be_bytes([buf[2], buf[3]]), 1002, "不支持分片应返回1002");
-    }
-
-    // --- 分支 3: 测试连续帧拦截 (opcode 0) ---
-    {
-        let mut stream = connect_ws().await;
-        // 0x80 = FIN(1), Opcode(0) -> 无起始帧的连续帧
-        stream.write_all(&[0x80, 0x80, 0, 0, 0, 0]).await.unwrap();
-        let mut buf = [0u8; 10];
-        stream.read_exact(&mut buf[..4]).await.unwrap();
-        assert_eq!(u16::from_be_bytes([buf[2], buf[3]]), 1002, "孤立的连续帧应返回1002");
-    }
-
-    // --- 分支 4: 测试严格 UTF-8 校验 (1007) ---
-    {
-        let mut stream = connect_ws().await;
-        // 构造非法 UTF-8 负载 (0xFF 在 UTF-8 中无效)
-        let invalid_utf8 = [0xFF, 0xFE];
+        // --- 测试目标：自定义状态码 4000 (命中 3000..=4999 分支) ---
+        // 构造 Payload: [0x0F, 0xA0] (即 4000 的大端序)
+        let custom_code: u16 = 4000;
+        let code_bytes = custom_code.to_be_bytes();
         let mask = [0x11, 0x22, 0x33, 0x44];
-        let masked_payload = [invalid_utf8[0] ^ mask[0], invalid_utf8[1] ^ mask[1]];
-        
-        let mut frame = vec![0x81, 0x82]; // FIN, Text, Masked, Len 2
+
+        let masked_payload = [code_bytes[0] ^ mask[0], code_bytes[1] ^ mask[1]];
+
+        // 发送关闭帧: FIN+Close(0x88), Masked(0x82), MaskKey, Payload
+        let mut frame = vec![0x88, 0x82];
         frame.extend_from_slice(&mask);
         frame.extend_from_slice(&masked_payload);
-        
+
         stream.write_all(&frame).await.unwrap();
-        
-        let mut buf = [0u8; 10];
-        stream.read_exact(&mut buf[..4]).await.unwrap();
-        assert_eq!(u16::from_be_bytes([buf[2], buf[3]]), 1007, "非法UTF-8文本帧应返回1007");
+
+        // 3. 验证服务端响应
+        // 源码逻辑：parse_close_payload 成功返回 Ok((4000, None))
+        // 随后 run 会调用 Self::close(writer, 4000, None) 并 bail
+        let _n = stream.read(&mut buf).await.unwrap();
+
+        assert_eq!(buf[0], 0x88, "应响应关闭帧");
+        let received_code = u16::from_be_bytes([buf[2], buf[3]]);
+
+        // 如果该分支没测到（即报错了），received_code 会是 1002
+        // 如果测试通过，received_code 应该是我们发送的 4000
+        assert_eq!(
+            received_code, 4000,
+            "服务端应允许并原样回传 3000-4999 范围内的自定义状态码"
+        );
     }
-}
+
+    #[tokio::test]
+    async fn test_websocket_strict_protocol_validation() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::{TcpListener, TcpStream};
+
+        // 1. 启动服务器
+        let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
+        let listener = TcpListener::bind(addr).await.unwrap();
+        let actual_addr = listener.local_addr().unwrap();
+        drop(listener);
+
+        let mut hr = Router::new(NodeType::Static("root".into()));
+        // 提供一个正常的 Handler 供 UTF-8 测试使用
+        let ws = WebSocket {
+            on_text: Some(Arc::new(|_, _, _| Box::pin(async move { true }))),
+            on_binary: None,
+        };
+        let ws_mw = WebSocket::to_middleware(ws);
+        route!(
+            hr,
+            get!("/strict", exe!(|_ctx| { true }), vec![ws_mw.into()])
+        );
+
+        let server = HTTPServer::new(actual_addr).http(hr).clone();
+        tokio::spawn(async move {
+            let _ = server
+                .start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id()))
+                .await;
+        });
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        // 辅助闭包：快速发起连接并完成握手
+        let connect_ws = || async {
+            let mut stream = TcpStream::connect(actual_addr).await.unwrap();
+            stream.write_all(b"GET /strict HTTP/1.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n").await.unwrap();
+            let mut buf = [0u8; 1024];
+            let _ = stream.read(&mut buf).await.unwrap();
+            stream
+        };
+
+        // --- 分支 1: 测试保留位校验 (RSV1 set) ---
+        {
+            let mut stream = connect_ws().await;
+            // 0xF1 = FIN(1), RSV1(1), RSV2(0), RSV3(0), Opcode(1 - Text)
+            // 按照代码应触发 1002
+            stream.write_all(&[0xF1, 0x80, 0, 0, 0, 0]).await.unwrap();
+            let mut buf = [0u8; 10];
+            stream.read_exact(&mut buf[..4]).await.unwrap();
+            assert_eq!(
+                u16::from_be_bytes([buf[2], buf[3]]),
+                1002,
+                "设置RSV位应返回1002"
+            );
+        }
+
+        // --- 分支 2: 测试分片拦截 (!fin) ---
+        {
+            let mut stream = connect_ws().await;
+            // 0x01 = FIN(0), Opcode(1) -> 分片起始帧
+            stream.write_all(&[0x01, 0x80, 0, 0, 0, 0]).await.unwrap();
+            let mut buf = [0u8; 10];
+            stream.read_exact(&mut buf[..4]).await.unwrap();
+            assert_eq!(
+                u16::from_be_bytes([buf[2], buf[3]]),
+                1002,
+                "不支持分片应返回1002"
+            );
+        }
+
+        // --- 分支 3: 测试连续帧拦截 (opcode 0) ---
+        {
+            let mut stream = connect_ws().await;
+            // 0x80 = FIN(1), Opcode(0) -> 无起始帧的连续帧
+            stream.write_all(&[0x80, 0x80, 0, 0, 0, 0]).await.unwrap();
+            let mut buf = [0u8; 10];
+            stream.read_exact(&mut buf[..4]).await.unwrap();
+            assert_eq!(
+                u16::from_be_bytes([buf[2], buf[3]]),
+                1002,
+                "孤立的连续帧应返回1002"
+            );
+        }
+
+        // --- 分支 4: 测试严格 UTF-8 校验 (1007) ---
+        {
+            let mut stream = connect_ws().await;
+            // 构造非法 UTF-8 负载 (0xFF 在 UTF-8 中无效)
+            let invalid_utf8 = [0xFF, 0xFE];
+            let mask = [0x11, 0x22, 0x33, 0x44];
+            let masked_payload = [invalid_utf8[0] ^ mask[0], invalid_utf8[1] ^ mask[1]];
+
+            let mut frame = vec![0x81, 0x82]; // FIN, Text, Masked, Len 2
+            frame.extend_from_slice(&mask);
+            frame.extend_from_slice(&masked_payload);
+
+            stream.write_all(&frame).await.unwrap();
+
+            let mut buf = [0u8; 10];
+            stream.read_exact(&mut buf[..4]).await.unwrap();
+            assert_eq!(
+                u16::from_be_bytes([buf[2], buf[3]]),
+                1007,
+                "非法UTF-8文本帧应返回1007"
+            );
+        }
+    }
 }

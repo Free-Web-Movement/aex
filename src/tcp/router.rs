@@ -1,10 +1,12 @@
 use std::any::Any;
 use std::collections::HashMap;
 use std::future::Future;
+use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::Arc;
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite};
+use tokio::io::{AsyncBufRead, AsyncReadExt, AsyncWrite};
 
+use crate::connection::context::Context;
 use crate::connection::global::GlobalContext;
 use crate::connection::types::IDExtractor;
 use crate::tcp::types::{Codec, Command, Frame};
@@ -13,13 +15,7 @@ use crate::tcp::types::{Codec, Command, Frame};
 // use crate::tcp::types::{Codec, Frame, Command, RawCodec, frame_config};
 
 /// ⚡ 修复后的 Handler 签名：使用 BoxFuture 确保异步闭包可用
-pub type CommandHandler<F, C> = dyn Fn(
-        Arc<GlobalContext>,
-        &mut F,
-        &mut C,
-        Box<dyn AsyncRead + Unpin + Send>,
-        Box<dyn AsyncWrite + Unpin + Send>,
-    ) -> Pin<Box<dyn Future<Output = anyhow::Result<bool>> + Send>>
+pub type CommandHandler<F, C> = dyn Fn(&mut Context<'_>, &mut F, &mut C) -> Pin<Box<dyn Future<Output = anyhow::Result<bool>> + Send>>
     + Send
     + Sync;
 
@@ -39,21 +35,12 @@ impl Router {
     where
         F: Frame + Send + Sync + Clone + 'static,
         C: Command + Send + Sync + 'static,
-        FFut: Fn(
-                Arc<GlobalContext>,
-                &mut F,
-                &mut C,
-                Box<dyn AsyncRead + Unpin + Send>,
-                Box<dyn AsyncWrite + Unpin + Send>,
-            ) -> Fut
-            + Send
-            + Sync
-            + 'static,
+        FFut: Fn(&mut Context<'_>, &mut F, &mut C) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = anyhow::Result<bool>> + Send + 'static,
     {
         // ⚡ 这里的 handler 类型是 Box<CommandHandler<C>>
         let handler: Box<CommandHandler<F, C>> =
-            Box::new(move |global, frame, cmd, r, w| Box::pin(f(global, frame, cmd, r, w)));
+            Box::new(move |ctx, frame, cmd| Box::pin(f(ctx, frame, cmd)));
 
         // ⚡ 最小修改：直接存入这个 Box。
         self.handlers.insert(key, Box::new(handler));
@@ -62,10 +49,8 @@ impl Router {
     /// 核心分发逻辑
     pub async fn handle_frame<F, C>(
         &self,
-        global: Arc<GlobalContext>,
+        ctx: &mut Context<'_>, // 假设你的 Context 定义是 Context<R, W>
         frame: F,
-        reader: &mut Option<Box<dyn AsyncRead + Unpin + Send>>,
-        writer: &mut Option<Box<dyn AsyncWrite + Unpin + Send>>,
         extractor: IDExtractor<C>,
     ) -> anyhow::Result<bool>
     where
@@ -102,16 +87,16 @@ impl Router {
                         .ok_or_else(|| anyhow::anyhow!("Handler type mismatch for key: {}", key))?;
 
                     // ⚡ 关键：使用 take() 拿走所有权，留下 None
-                    // 这样你就得到了 Box<dyn AsyncRead + Send + Unpin>
-                    let r = reader
-                        .take()
-                        .ok_or_else(|| anyhow::anyhow!("Reader already taken"))?;
-                    let w = writer
-                        .take()
-                        .ok_or_else(|| anyhow::anyhow!("Writer already taken"))?;
+                    // 这样你就得到了 Box<dyn AsyncBufRead + Send + Unpin>
+                    // let r = reader
+                    //     .take()
+                    //     .ok_or_else(|| anyhow::anyhow!("Reader already taken"))?;
+                    // let w = writer
+                    //     .take()
+                    //     .ok_or_else(|| anyhow::anyhow!("Writer already taken"))?;
 
                     // 现在 r 和 w 正好符合 Handler 的参数要求
-                    let result = handler(global, &mut frame.clone(), &mut c.unwrap(), r, w).await?;
+                    let result = handler(ctx, &mut frame.clone(), &mut c.unwrap()).await?;
 
                     // 如果你希望在 Handler 执行完后继续在 loop 中使用这些流，
                     // Handler 必须在返回值中把它们还回来（见下文建议）。
@@ -125,10 +110,10 @@ impl Router {
 
     pub async fn handle<F, C>(
         &self,
-        
+        addr: SocketAddr,
         global: Arc<GlobalContext>,
         // ⚡ 直接传入 Option 的 mutable 引用，这样 handle_frame 才能 take 走并放回
-        reader: &mut Option<Box<dyn AsyncRead + Unpin + Send>>,
+        reader: &mut Option<Box<dyn AsyncBufRead + Unpin + Send>>,
         writer: &mut Option<Box<dyn AsyncWrite + Unpin + Send>>,
         extractor: IDExtractor<C>,
     ) -> anyhow::Result<()>
@@ -141,9 +126,9 @@ impl Router {
         println!("inside handle!");
 
         loop {
-            // ⚡ 修复点 1：解包 Option 拿到里面的 Box (它才实现了 AsyncRead)
-            // 使用 as_deref_mut() 拿到 &mut (dyn AsyncRead + ...)
-            let n = match reader.as_deref_mut() {
+            // ⚡ 修复点 1：解包 Option 拿到里面的 Box (它才实现了 AsyncBufRead)
+            // 使用 as_deref_mut() 拿到 &mut (dyn AsyncBufRead + ...)
+            let n = match &mut reader.as_deref_mut() {
                 Some(r) => r.read(&mut buf).await?,
                 None => {
                     println!("Reader taken and not returned!");
@@ -161,14 +146,14 @@ impl Router {
                     Ok(frame) => {
                         // ⚡ 修复点 2：直接透传外部传入的 reader/writer (它们已经是 Option)
                         // handle_frame 内部会使用 reader.take()
+                        // let mut reader: Option<Box<dyn AsyncBufRead + Send + Unpin>> =
+                        //     Some(Box::new(reader));
+                        // let mut writer: Option<Box<dyn AsyncWrite + Send + Unpin>> =
+                        //     Some(Box::new(writer));
+
+                        let mut ctx = Context::new(reader, writer, global.clone(), addr);
                         let should_continue = self
-                            .handle_frame(
-                                global.clone(),
-                                frame,
-                                reader, // 这里传递的是 &mut Option<Box<...>>
-                                writer,
-                                extractor.clone(),
-                            )
+                            .handle_frame::<F, C>(&mut ctx, frame, extractor.clone())
                             .await?;
 
                         session_buf.clear();

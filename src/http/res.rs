@@ -1,32 +1,30 @@
 use std::collections::HashMap;
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncWrite, AsyncWriteExt};
 
 use crate::{
-    connection::context::{SharedWriter, TypeMap, TypeMapExt},
+    connection::context::{ TypeMap, TypeMapExt},
     http::{
         meta::HttpMetadata,
         protocol::{header::HeaderKey, status::StatusCode, version::HttpVersion},
     },
 };
 
-pub struct Response<'a, W> {
-    pub writer: &'a SharedWriter<W>,
+pub struct Response<'a> {
+    pub writer: &'a mut Option<Box<dyn AsyncWrite + Send + Unpin>>,
     pub local: &'a mut TypeMap,
 }
 
-impl<'a, W> Response<'a, W>
-where
-    W: AsyncWriteExt + Unpin,
+impl<'a> Response<'a>
 {
     pub async fn send(
-        &self,
+        &mut self,
         headers: &HashMap<HeaderKey, String>,
         body: &[u8],
         status: StatusCode,
         version: HttpVersion,
     ) -> anyhow::Result<()> {
         // headers.insert("Content-Length".to_string(), body.len().to_string());
-        let mut w = self.writer.lock().await;
+        let w = self.writer.as_deref_mut().unwrap();
         w.write_all(format!("{} {} {}\r\n", version, status as u16, status.to_str()).as_bytes())
             .await?;
         for (k, v) in headers {

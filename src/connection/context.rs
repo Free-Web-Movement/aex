@@ -1,11 +1,10 @@
 use chrono::DateTime;
 use chrono::Utc;
+use tokio::io::AsyncBufRead;
 use std::any::TypeId;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tokio::io::{BufReader, BufWriter};
-use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
-use tokio::sync::{Mutex};
+use tokio::io::AsyncWrite;
 
 use crate::connection::global::GlobalContext;
 use crate::http::req::Request;
@@ -35,61 +34,52 @@ impl TypeMapExt for TypeMap {
         self.insert(TypeId::of::<T>(), Box::new(val));
     }
 }
-
 // --- [Context] ---
-pub type SharedWriter<W> = Arc<Mutex<W>>;
-/// 泛型 Context：AEX 的核心，R 和 W 代表读写流
-pub struct Context<R, W> {
-    // remote socket address
+pub struct Context<'a> {
     pub addr: SocketAddr,
-    // 连接被进入时间
     pub accepted: DateTime<Utc>,
-    pub reader: R,
-    pub writer: SharedWriter<W>,
+    // ⚡ 统一使用 dyn 包装，不再需要 R 和 W 泛型位
+    pub reader: &'a mut Option<Box<dyn AsyncBufRead + Send + Unpin>>,
+    pub writer: &'a mut Option<Box<dyn AsyncWrite + Send + Unpin>>,
     pub global: Arc<GlobalContext>,
-    /// 本地 TypeMap：用于存储请求级别的临时变量
     pub local: TypeMap,
 }
 
-// --- HTTP 业务元数据 (存入 local) ---
-
-// --- [HTTP 语义化扩展] ---
-
-/// 将 Context 特化为 HTTPContext
-/// 这里 R 对应原来的 BufReader<OwnedReadHalf>
-/// W 对应原来的 BufWriter<OwnedWriteHalf>
-pub type HTTPContext = Context<BufReader<OwnedReadHalf>, BufWriter<OwnedWriteHalf>>;
-
-impl<R, W> Context<R, W> {
-    pub fn new(reader: R, writer: W, global: Arc<GlobalContext>, addr: SocketAddr) -> Self {
+impl<'a> Context<'a> {
+    // ⚡ 构造函数：接受外部已经包装好的 Option 引用
+    pub fn new(
+        reader: &'a mut Option<Box<dyn AsyncBufRead + Send + Unpin>>,
+        writer: &'a mut Option<Box<dyn AsyncWrite + Send + Unpin>>,
+        global: Arc<GlobalContext>,
+        addr: SocketAddr,
+    ) -> Self {
         Self {
             accepted: Utc::now(),
             reader,
-            writer: Arc::new(Mutex::new(writer)), // 初始化时即包装
+            writer,
             global,
             local: TypeMap::default(),
             addr,
         }
     }
 
-    /// 构造并返回 Request 视图
-    /// 注意：由于 R 通常在 Mutex 中，这里需要处理锁的生命周期或传入 Guard
-    pub async fn req<'a>(&'a mut self) -> Request<'a, R> {
+    /// 获取 Request 视图
+    pub fn req(&mut self) -> Request<'_> {
         Request {
-            reader: &mut self.reader,
+            // ⚡ 这里透传 &mut Option，Request 内部决定是 read 还是 take()
+            reader: self.reader, 
             local: &mut self.local,
         }
     }
 
-    /// 构造并返回 Response 视图
-    pub fn res<'a>(&'a mut self) -> Response<'a, W> {
+    /// 获取 Response 视图
+    pub fn res(&mut self) -> Response<'_> {
         Response {
-            writer: &mut self.writer,
+            writer: self.writer,
             local: &mut self.local,
         }
     }
 
-    /// 毫秒表示的已经经历时间
     pub fn elapsed(&self) -> u64 {
         Utc::now()
             .signed_duration_since(self.accepted)

@@ -9,7 +9,7 @@ mod tests {
     };
     use std::collections::HashMap;
     use std::io::Cursor;
-    use tokio::io::BufReader;
+    use tokio::io::{AsyncBufRead, BufReader};
 
     #[tokio::test]
     async fn test_parse_to_local_success() {
@@ -22,7 +22,8 @@ mod tests {
                       Transfer-Encoding: chunked\r\n\
                       \r\n";
 
-        let mut reader = BufReader::new(Cursor::new(input));
+        let reader = BufReader::new(Cursor::new(input));
+        let mut reader: Option<Box<dyn AsyncBufRead + Send + Unpin>> = Some(Box::new(reader));
         let mut req = Request::new(&mut reader, &mut local);
 
         let result = req.parse_to_local().await;
@@ -42,8 +43,9 @@ mod tests {
                       Content-Type: multipart/form-data; boundary=X-BOUNDARY\r\n\
                       \r\n";
 
-        let mut reader = BufReader::new(Cursor::new(input));
-        let mut req = Request::new(&mut reader, &mut local);
+        let reader = BufReader::new(Cursor::new(input));
+        let mut reader: Option<Box<dyn AsyncBufRead + Send + Unpin>> = Some(Box::new(reader));
+                let mut req = Request::new(&mut reader, &mut local);
         req.parse_to_local().await.unwrap();
 
         let meta = local.get_value::<HttpMetadata>().unwrap();
@@ -54,17 +56,20 @@ mod tests {
     async fn test_parse_errors() {
         // 1. 测试空输入 (Connection closed)
         let mut local = TypeMap::new();
-        let mut reader = BufReader::new(Cursor::new(b""));
+        let reader = BufReader::new(Cursor::new(b""));
+        let mut reader: Option<Box<dyn AsyncBufRead + Send + Unpin>> = Some(Box::new(reader));
         let mut req = Request::new(&mut reader, &mut local);
         assert!(req.parse_to_local().await.is_err());
 
         // 2. 测试无效的请求行
-        let mut reader = BufReader::new(Cursor::new(b"INVALID_LINE\r\n\r\n"));
+        let reader = BufReader::new(Cursor::new(b"INVALID_LINE\r\n\r\n"));
+        let mut reader: Option<Box<dyn AsyncBufRead + Send + Unpin>> = Some(Box::new(reader));
         let mut req = Request::new(&mut reader, &mut local);
         assert!(req.parse_to_local().await.is_err());
 
         // 3. 测试无效 UTF-8
-        let mut reader = BufReader::new(Cursor::new(vec![0xff, 0xff, 0x0a]));
+        let reader = BufReader::new(Cursor::new(vec![0xff, 0xff, 0x0a]));
+        let mut reader: Option<Box<dyn AsyncBufRead + Send + Unpin>> = Some(Box::new(reader));
         let mut req = Request::new(&mut reader, &mut local);
         assert!(req.parse_to_local().await.is_err());
     }
@@ -73,7 +78,8 @@ mod tests {
     async fn test_cookie_parsing_edge_cases() {
         let mut local = TypeMap::new();
         let input = b"GET / HTTP/1.1\r\nCookie: ;; a=1 ; b=2 ; ;\r\n\r\n";
-        let mut reader = BufReader::new(Cursor::new(input));
+        let reader = BufReader::new(Cursor::new(input));
+        let mut reader: Option<Box<dyn AsyncBufRead + Send + Unpin>> = Some(Box::new(reader));
         let mut req = Request::new(&mut reader, &mut local);
         req.parse_to_local().await.unwrap();
 
@@ -98,7 +104,8 @@ mod tests {
         meta.params = Some(params);
         local.set_value(meta);
 
-        let mut reader = BufReader::new(Cursor::new(b""));
+        let reader = BufReader::new(Cursor::new(b""));
+        let mut reader: Option<Box<dyn AsyncBufRead + Send + Unpin>> = Some(Box::new(reader));
         let req = Request::new(&mut reader, &mut local);
 
         assert_eq!(req.method(), HttpMethod::POST);
@@ -113,7 +120,8 @@ mod tests {
         let mut local = TypeMap::new();
         // 构造一个超过 MAX_CAPACITY 的行 (假设 MAX_CAPACITY 为 1024)
         let long_line = vec![b'a'; 2048];
-        let mut reader = BufReader::new(Cursor::new(long_line));
+        let reader = BufReader::new(Cursor::new(long_line));
+        let mut reader: Option<Box<dyn AsyncBufRead + Send + Unpin>> = Some(Box::new(reader));
         let _req = Request::new(&mut reader, &mut local);
 
         // 由于 read_until 会持续读取直到看到 \n，

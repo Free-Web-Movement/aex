@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod aex_tests {
     use aex::communicators::event::Event;
-    use aex::connection::context::{HTTPContext, TypeMapExt};
+    use aex::connection::context::{Context, TypeMapExt};
     use aex::http::meta::HttpMetadata;
     use aex::http::protocol::header::HeaderKey;
     use aex::http::protocol::status::StatusCode;
@@ -37,7 +37,7 @@ mod aex_tests {
             hr.insert(
                 "/",
                 Some("GET"),
-                Arc::new(|ctx: &mut HTTPContext| {
+                Arc::new(|ctx: &mut Context<'_>| {
                     Box::pin(async move {
                         let meta = &mut ctx.local.get_value::<HttpMetadata>().unwrap();
                         meta.status = StatusCode::Ok;
@@ -62,7 +62,7 @@ mod aex_tests {
 
             // 3. 注册 TCP 路由 (ID 10)
             let mut tr = TcpRouter::new();
-            tr.on::<RawCodec, RawCodec, _, _>(10, |_, _, _: &mut _, _, _| async move { Ok(true) });
+            tr.on::<RawCodec, RawCodec, _, _>(10, |_, _, _: &mut _,| async move { Ok(true) });
 
             // 4. 注册 UDP 路由 (ID 20)
             let mut ur = UdpRouter::new();
