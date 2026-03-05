@@ -12,7 +12,7 @@ mod tests {
             res::Response,
         },
     };
-    use std::{collections::HashMap};
+    use std::{collections::HashMap, sync::Arc};
     use tokio::io::AsyncWrite;
 
     #[tokio::test]
@@ -25,12 +25,12 @@ mod tests {
         let mut writer: Option<Box<dyn AsyncWrite + Send + Unpin>> =
             Some(Box::new(Cursor::new(Vec::new())));
 
-        let mut local = TypeMap::default();
+        let local = Arc::new(TypeMap::new());
 
         {
             let mut response = Response {
                 writer: &mut writer,
-                local: &mut local,
+                local: local.clone(),
             };
 
             let mut headers = HashMap::new();
@@ -87,7 +87,7 @@ mod tests {
         // 我们需要 Cursor 来拥有 Vec，从而满足 Box 的 'static 要求
         let mut writer_opt: Option<Box<dyn AsyncWrite + Send + Unpin>> =
             Some(Box::new(Cursor::new(Vec::new())));
-        let mut local = TypeMap::default();
+        let local = Arc::new(TypeMap::new());
 
         // 2. 构造元数据 (保持不变)
         let mut headers_map = HashMap::new();
@@ -106,7 +106,7 @@ mod tests {
         {
             let mut response = Response {
                 writer: &mut writer_opt,
-                local: &mut local,
+                local: local.clone(),
             };
             let result = response.send_response().await;
             assert!(result.is_ok());
@@ -144,7 +144,7 @@ mod tests {
 
     //     let response = Response {
     //         writer: &writer,
-    //         local: &mut local,
+    //         local: local.clone(),
     //     };
 
     //     // 尝试发送，这应该会因为获取不到锁而挂起

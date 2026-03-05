@@ -9,11 +9,12 @@ mod tests {
     };
     use std::collections::HashMap;
     use std::io::Cursor;
+    use std::sync::Arc;
     use tokio::io::{AsyncBufRead, BufReader};
 
     #[tokio::test]
     async fn test_parse_to_local_success() {
-        let mut local = TypeMap::new();
+        let local = Arc::new(TypeMap::new());
         let input = b"GET /api/test?id=1 HTTP/1.1\r\n\
                       Host: localhost\r\n\
                       Content-Type: application/json\r\n\
@@ -24,7 +25,7 @@ mod tests {
 
         let reader = BufReader::new(Cursor::new(input));
         let mut reader: Option<Box<dyn AsyncBufRead + Send + Unpin>> = Some(Box::new(reader));
-        let mut req = Request::new(&mut reader, &mut local);
+        let mut req = Request::new(&mut reader, local.clone());
 
         let result = req.parse_to_local().await;
         assert!(result.is_ok());
@@ -38,14 +39,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_parse_multipart_boundary() {
-        let mut local = TypeMap::new();
+        let local = Arc::new(TypeMap::new());
         let input = b"POST /upload HTTP/1.1\r\n\
                       Content-Type: multipart/form-data; boundary=X-BOUNDARY\r\n\
                       \r\n";
 
         let reader = BufReader::new(Cursor::new(input));
         let mut reader: Option<Box<dyn AsyncBufRead + Send + Unpin>> = Some(Box::new(reader));
-                let mut req = Request::new(&mut reader, &mut local);
+                let mut req = Request::new(&mut reader, local.clone());
         req.parse_to_local().await.unwrap();
 
         let meta = local.get_value::<HttpMetadata>().unwrap();
@@ -55,32 +56,32 @@ mod tests {
     #[tokio::test]
     async fn test_parse_errors() {
         // 1. 测试空输入 (Connection closed)
-        let mut local = TypeMap::new();
+        let local = Arc::new(TypeMap::new());
         let reader = BufReader::new(Cursor::new(b""));
         let mut reader: Option<Box<dyn AsyncBufRead + Send + Unpin>> = Some(Box::new(reader));
-        let mut req = Request::new(&mut reader, &mut local);
+        let mut req = Request::new(&mut reader, local.clone());
         assert!(req.parse_to_local().await.is_err());
 
         // 2. 测试无效的请求行
         let reader = BufReader::new(Cursor::new(b"INVALID_LINE\r\n\r\n"));
         let mut reader: Option<Box<dyn AsyncBufRead + Send + Unpin>> = Some(Box::new(reader));
-        let mut req = Request::new(&mut reader, &mut local);
+        let mut req = Request::new(&mut reader, local.clone());
         assert!(req.parse_to_local().await.is_err());
 
         // 3. 测试无效 UTF-8
         let reader = BufReader::new(Cursor::new(vec![0xff, 0xff, 0x0a]));
         let mut reader: Option<Box<dyn AsyncBufRead + Send + Unpin>> = Some(Box::new(reader));
-        let mut req = Request::new(&mut reader, &mut local);
+        let mut req = Request::new(&mut reader, local.clone());
         assert!(req.parse_to_local().await.is_err());
     }
 
     #[tokio::test]
     async fn test_cookie_parsing_edge_cases() {
-        let mut local = TypeMap::new();
+        let local = Arc::new(TypeMap::new());
         let input = b"GET / HTTP/1.1\r\nCookie: ;; a=1 ; b=2 ; ;\r\n\r\n";
         let reader = BufReader::new(Cursor::new(input));
         let mut reader: Option<Box<dyn AsyncBufRead + Send + Unpin>> = Some(Box::new(reader));
-        let mut req = Request::new(&mut reader, &mut local);
+        let mut req = Request::new(&mut reader, local.clone());
         req.parse_to_local().await.unwrap();
 
         let meta = local.get_value::<HttpMetadata>().unwrap();
@@ -90,7 +91,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_getters() {
-        let mut local = TypeMap::new();
+        let local = Arc::new(TypeMap::new());
         // 预设 HttpMetadata
         let mut meta = HttpMetadata::default();
         meta.method = HttpMethod::POST;
@@ -106,7 +107,7 @@ mod tests {
 
         let reader = BufReader::new(Cursor::new(b""));
         let mut reader: Option<Box<dyn AsyncBufRead + Send + Unpin>> = Some(Box::new(reader));
-        let req = Request::new(&mut reader, &mut local);
+        let req = Request::new(&mut reader, local.clone());
 
         assert_eq!(req.method(), HttpMethod::POST);
         assert_eq!(req.param("id").unwrap(), "123");
@@ -117,12 +118,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_read_line_limit_exceeded() {
-        let mut local = TypeMap::new();
+        let local = Arc::new(TypeMap::new());
         // 构造一个超过 MAX_CAPACITY 的行 (假设 MAX_CAPACITY 为 1024)
         let long_line = vec![b'a'; 2048];
         let reader = BufReader::new(Cursor::new(long_line));
         let mut reader: Option<Box<dyn AsyncBufRead + Send + Unpin>> = Some(Box::new(reader));
-        let _req = Request::new(&mut reader, &mut local);
+        let _req = Request::new(&mut reader, local.clone());
 
         // 由于 read_until 会持续读取直到看到 \n，
         // 虽然代码里没直接检查长度，但 read_until 内部 buf 会增长。

@@ -1,4 +1,4 @@
-use std::{collections::HashMap, time::Duration};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use anyhow::{Context, bail};
 use tokio::{
@@ -27,7 +27,7 @@ pub const TIME_LIMIT: i32 = 500;
 
 pub struct Request<'a> {
     pub reader: &'a mut Option<Box<dyn AsyncBufRead + Send + Unpin>>,
-    pub local: &'a mut TypeMap,
+    pub local: Arc<TypeMap>,
 }
 
 impl<'a> Request<'a> {
@@ -206,7 +206,7 @@ impl<'a> Request<'a> {
     /// @param peer_addr: 远程节点的物理地址
     pub fn new(
         reader: &'a mut Option<Box<dyn AsyncBufRead + Send + Unpin>>,
-        local: &'a mut TypeMap,
+        local: Arc<TypeMap>,
     ) -> Self {
         Self { reader, local }
     }

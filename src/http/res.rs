@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 use tokio::io::{AsyncWrite, AsyncWriteExt};
 
 use crate::{
@@ -11,7 +11,7 @@ use crate::{
 
 pub struct Response<'a> {
     pub writer: &'a mut Option<Box<dyn AsyncWrite + Send + Unpin>>,
-    pub local: &'a mut TypeMap,
+    pub local: Arc<TypeMap>,
 }
 
 impl<'a> Response<'a>

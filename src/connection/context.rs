@@ -43,7 +43,7 @@ pub struct Context<'a> {
     pub reader: &'a mut Option<Box<dyn AsyncBufRead + Send + Unpin>>,
     pub writer: &'a mut Option<Box<dyn AsyncWrite + Send + Unpin>>,
     pub global: Arc<GlobalContext>,
-    pub local: TypeMap,
+    pub local: Arc<TypeMap>,
 }
 
 impl<'a> Context<'a> {
@@ -59,7 +59,7 @@ impl<'a> Context<'a> {
             reader,
             writer,
             global,
-            local: TypeMap::default(),
+            local: Arc::new(TypeMap::default()),
             addr,
         }
     }
@@ -69,7 +69,7 @@ impl<'a> Context<'a> {
         Request {
             // ⚡ 这里透传 &mut Option，Request 内部决定是 read 还是 take()
             reader: self.reader,
-            local: &mut self.local,
+            local: self.local.clone(),
         }
     }
 
@@ -77,7 +77,7 @@ impl<'a> Context<'a> {
     pub fn res(&mut self) -> Response<'_> {
         Response {
             writer: self.writer,
-            local: &mut self.local,
+            local: self.local.clone(),
         }
     }
 
