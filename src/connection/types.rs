@@ -1,11 +1,12 @@
 use crate::connection::node::Node;
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
+use tokio::io::AsyncWrite;
+use std::fmt;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
-use tokio::net::tcp::OwnedWriteHalf;
 use tokio_util::sync::CancellationToken;
 use tokio::sync::{Mutex, RwLock};
 
@@ -37,13 +38,13 @@ impl NetworkScope {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ConnectionEntry {
     /// 💡 新增：节点的静态信息（ID, Version, 声明的 IPs 等）
     /// 这个数据在握手成功后填入，并在连接生命周期内保持不变
     pub node: Arc<RwLock<Option<Node>>>,
     pub addr: SocketAddr,
-    pub writer: Option<Arc<tokio::sync::Mutex<OwnedWriteHalf>>>,
+    pub writer: Option<Arc<Mutex<Box<dyn AsyncWrite + Send + Unpin>>>>,
     pub abort_handle: tokio::task::AbortHandle,
     pub cancel_token: CancellationToken,
     pub connected_at: u64,
@@ -51,9 +52,23 @@ pub struct ConnectionEntry {
     pub last_seen: Arc<AtomicU64>,
 }
 
+// 手动实现 Debug 以跳过 writer
+impl fmt::Debug for ConnectionEntry {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ConnectionEntry")
+            .field("addr", &self.addr)
+            // 这里我们手动跳过 writer 的内部详情，只打印状态
+            .field("writer", if self.writer.is_some() { &"Connected" } else { &"None" })
+            .field("connected_at", &self.connected_at)
+            // 如果有 last_seen 等字段，照常添加
+            // .field("last_seen", &self.last_seen) 
+            .finish()
+    }
+}
+
 impl ConnectionEntry {
 
-    pub fn new_empty_node(addr: SocketAddr, writer: Option<Arc<Mutex<OwnedWriteHalf>>>, handle: tokio::task::AbortHandle, cancel_token: CancellationToken) -> Self {
+    pub fn new_empty_node(addr: SocketAddr, writer: Option<Arc<Mutex<Box<dyn AsyncWrite + Send + Unpin>>>>, handle: tokio::task::AbortHandle, cancel_token: CancellationToken) -> Self {
         let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
         Self {
             node: Arc::new(RwLock::new(None)),

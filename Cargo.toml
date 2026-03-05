@@ -31,6 +31,7 @@ get_if_addrs = "0.5.3"
 chacha20poly1305 = "0.10.1"
 x25519-dalek = { version = "2.0", features = ["static_secrets", "getrandom"] }
 dirs-next = "2.0.0"
+derivative = "2.2.0"
 
 [profile.release]
 opt-level = "z"

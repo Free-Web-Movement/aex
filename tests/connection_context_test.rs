@@ -268,4 +268,70 @@ mod tests {
 
         println!("Context 集成功能全数测试通过！");
     }
+
+    // 模拟一个复杂的扩展数据结构
+    #[derive(Clone, Debug, PartialEq)]
+    struct UserConfig {
+        id: u64,
+        role: String,
+    }
+
+    use tokio::io::{empty, sink};
+
+    #[tokio::test]
+    async fn test_context_type_map_extensions() {
+        // 1. 准备 Context 环境
+        // 使用空流模拟 reader 和 writer
+        let mut reader_opt: Option<Box<dyn AsyncBufRead + Send + Unpin>> = 
+            Some(Box::new(tokio::io::BufReader::new(empty())));
+        let mut writer_opt: Option<Box<dyn AsyncWrite + Send + Unpin>> = 
+            Some(Box::new(sink()));
+        
+        let global = Arc::new(GlobalContext::new("127.0.0.1:8080".parse().unwrap()));
+        let addr = "127.0.0.1:1234".parse().unwrap();
+
+        let ctx = Context::new(
+            &mut reader_opt,
+            &mut writer_opt,
+            global,
+            addr,
+        );
+
+        // 2. 测试基础类型存储 (String)
+        let test_msg = "AexServerExtension".to_string();
+        ctx.set(test_msg.clone()).await;
+        let retrieved_msg = ctx.get::<String>().await;
+        assert_eq!(retrieved_msg, Some(test_msg));
+
+        // 3. 测试自定义结构体 (UserConfig)
+        let config = UserConfig {
+            id: 1024,
+            role: "admin".to_string(),
+        };
+        ctx.set(config.clone()).await;
+        let retrieved_config = ctx.get::<UserConfig>().await;
+        assert_eq!(retrieved_config, Some(config));
+
+        // 4. 测试“不存在”的类型
+        let non_existent = ctx.get::<u32>().await;
+        assert!(non_existent.is_none());
+
+        // 5. 测试类型覆盖（同一 TypeId 再次 set）
+        ctx.set(42u64).await;
+        ctx.set(99u64).await; // 覆盖旧值
+        assert_eq!(ctx.get::<u64>().await, Some(99u64));
+    }
+
+    #[tokio::test]
+    async fn test_type_map_concurrency_cloning() {
+        // 验证 TypeMap 是否支持跨线程共享的数据结构（如 Arc）
+        let map = TypeMap::default();
+        let shared_data = Arc::new(vec![1, 2, 3]);
+
+        map.set_value(shared_data.clone());
+        
+        let retrieved = map.get_value::<Arc<Vec<i32>>>().expect("Should exist");
+        assert_eq!(*retrieved, vec![1, 2, 3]);
+        assert_eq!(Arc::strong_count(&retrieved), 3); // 原有的 + 存入的 + 刚刚拿出来的
+    }
 }

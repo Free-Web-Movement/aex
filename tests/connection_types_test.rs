@@ -1,20 +1,9 @@
 #[cfg(test)]
 mod tests {
     
-    use std::{net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr}, sync::{Arc, atomic::Ordering}};
+    use std::{net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr}, sync::{atomic::Ordering}};
     use aex::connection::{node::Node, protocol::Protocol, types::{ConnectionEntry, NetworkScope}};
-    use tokio::{net::{TcpListener, tcp::OwnedWriteHalf}, sync::Mutex};
     use tokio_util::sync::CancellationToken;
-
-    // 辅助函数：快速创建一个 mock 的 OwnedWriteHalf
-    async fn mock_writer() -> OwnedWriteHalf {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        let _client = tokio::net::TcpStream::connect(addr).await.unwrap();
-        let (server_stream, _) = listener.accept().await.unwrap();
-        let (_, writer) = server_stream.into_split();
-        writer
-    }
 
     // --- 1. NetworkScope 测试 (覆盖 IPv4/v6 各种分类) ---
     #[test]
@@ -87,10 +76,10 @@ mod tests {
     #[tokio::test]
     async fn test_is_deactivated_logic() {
         let addr: SocketAddr = "127.0.0.1:8080".parse().unwrap();
-        let writer = mock_writer().await;
+        // let writer: (AsyncWrite + Send + Unpin) = mock_writer().await;
         let entry = ConnectionEntry::new_empty_node(
             addr, 
-            Some(Arc::new(Mutex::new(writer))), 
+            None, 
             tokio::spawn(async {}).abort_handle(), 
             CancellationToken::new()
         );
@@ -116,7 +105,7 @@ mod tests {
     #[tokio::test]
     async fn test_drop_aborts_handle() {
         let addr: SocketAddr = "127.0.0.1:8080".parse().unwrap();
-        let writer = mock_writer().await;
+        // let writer = mock_writer().await;
         
         let (tx, mut rx) = tokio::sync::mpsc::channel(1);
         
