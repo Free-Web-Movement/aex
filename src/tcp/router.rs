@@ -5,6 +5,7 @@ use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::io::{AsyncBufRead, AsyncReadExt, AsyncWrite};
+use tokio::sync::Mutex;
 
 use crate::connection::context::Context;
 use crate::connection::global::GlobalContext;
@@ -15,7 +16,7 @@ use crate::tcp::types::{Codec, Command, Frame};
 // use crate::tcp::types::{Codec, Frame, Command, RawCodec, frame_config};
 
 /// ⚡ 修复后的 Handler 签名：使用 BoxFuture 确保异步闭包可用
-pub type CommandHandler<F, C> = dyn Fn(&mut Context<'_>, &mut F, &mut C) -> Pin<Box<dyn Future<Output = anyhow::Result<bool>> + Send>>
+pub type CommandHandler<F, C> = dyn Fn(Arc<Mutex<Context<'_>>>, &mut F, &mut C) -> Pin<Box<dyn Future<Output = anyhow::Result<bool>> + Send>>
     + Send
     + Sync;
 
@@ -35,7 +36,7 @@ impl Router {
     where
         F: Frame + Send + Sync + Clone + 'static,
         C: Command + Send + Sync + 'static,
-        FFut: Fn(&mut Context<'_>, &mut F, &mut C) -> Fut + Send + Sync + 'static,
+        FFut: Fn(Arc<Mutex<Context<'_>>>, &mut F, &mut C) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = anyhow::Result<bool>> + Send + 'static,
     {
         // ⚡ 这里的 handler 类型是 Box<CommandHandler<C>>
@@ -49,7 +50,7 @@ impl Router {
     /// 核心分发逻辑
     pub async fn handle_frame<F, C>(
         &self,
-        ctx: &mut Context<'_>, // 假设你的 Context 定义是 Context<R, W>
+        ctx: Arc<Mutex<Context<'_>>>, // 假设你的 Context 定义是 Context<R, W>
         frame: F,
         extractor: IDExtractor<C>,
     ) -> anyhow::Result<bool>
@@ -151,9 +152,9 @@ impl Router {
                         // let mut writer: Option<Box<dyn AsyncWrite + Send + Unpin>> =
                         //     Some(Box::new(writer));
 
-                        let mut ctx = Context::new(reader, writer, global.clone(), addr);
+                        let ctx = Context::new(reader, writer, global.clone(), addr);
                         let should_continue = self
-                            .handle_frame::<F, C>(&mut ctx, frame, extractor.clone())
+                            .handle_frame::<F, C>(Arc::new(Mutex::new(ctx)), frame, extractor.clone())
                             .await?;
 
                         session_buf.clear();

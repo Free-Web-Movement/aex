@@ -219,7 +219,7 @@ impl Router {
                 // 注意：这里直接从 ctx.reader 读取，因为 Context 暴露了 reader
 
                 if let Some(r) = ctx.reader.as_deref_mut() {
-                    r.read_exact(&mut body_bytes).await.is_ok();
+                    let _ = r.read_exact(&mut body_bytes).await.is_ok();
                     params.set_form(&String::from_utf8_lossy(&body_bytes));
                 } else {
                     return false;
