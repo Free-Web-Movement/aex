@@ -332,4 +332,26 @@ impl ConnectionManager {
         // 执行回调
         f(targets);
     }
+
+    // 获取所有连接
+    pub fn forward<F>(&self, f: F) where F: FnOnce(Vec<Arc<ConnectionEntry>>) {
+        let mut targets = Vec::new();
+
+        // 遍历所有 IP 桶
+        for bucket_ref in self.connections.iter() {
+            let bi_conn = bucket_ref.value();
+
+            // 辅助函数：检查 Node ID 是否匹配
+            let mut collect_matching = |entry: &Arc<ConnectionEntry>| {
+                targets.push(Arc::clone(entry));
+            };
+
+            // 检查该 IP 下的所有客户端和服务器连接
+            bi_conn.clients.iter().for_each(|r| collect_matching(r.value()));
+            bi_conn.servers.iter().for_each(|r| collect_matching(r.value()));
+        }
+
+        // 执行回调
+        f(targets);
+    }
 }

@@ -1,13 +1,17 @@
 #[cfg(test)]
 mod tests {
-    use aex::{connection::{
-        manager::ConnectionManager,
-        node::Node,
-        types::{ BiDirectionalConnections, NetworkScope },
-    }, time::SystemTime};
+    use aex::{
+        connection::{
+            context::BoxWriter,
+            manager::ConnectionManager,
+            node::Node,
+            types::{ BiDirectionalConnections, NetworkScope },
+        },
+        time::SystemTime,
+    };
     use chrono::DateTime;
-    use tokio::runtime::Runtime;
-    use std::{collections::HashSet, net::{ IpAddr, Ipv4Addr, SocketAddr }};
+    use tokio::{ runtime::Runtime, sync::Mutex };
+    use std::{ collections::HashSet, net::{ IpAddr, Ipv4Addr, SocketAddr }, sync::Arc };
     use tokio::task::AbortHandle;
 
     #[tokio::test]
@@ -282,6 +286,72 @@ mod tests {
 
         manager.notify(&node_id, |entries| {
             assert_eq!(entries.len(), 2, "同一个 Node ID 应该能搜到多个连接");
+        });
+    }
+
+    #[test]
+    fn test_connection_update_writer() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let manager = ConnectionManager::new();
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1)), 8080);
+
+        // 1. 添加一个初始连接 (writer 为 None)
+        let handle = rt.block_on(async { tokio::spawn(async {}).abort_handle() });
+        manager.add(addr, handle, true);
+
+        // 验证初始状态确实没有 writer
+        manager.forward(|entries| {
+            let entry = entries
+                .iter()
+                .find(|e| e.addr == addr)
+                .unwrap();
+            assert!(entry.writer.is_none());
+        });
+
+        // 2. 执行 update 操作，注入一个 MockWriter
+
+        let sink = tokio::io::sink();
+        let box_writer: BoxWriter = Box::new(sink);
+        let mock_writer = Arc::new(Mutex::new(box_writer));
+
+        manager.update(addr, true, mock_writer.clone());
+
+        // 3. 验证更新是否成功
+        let mut found_updated = false;
+        manager.forward(|entries| {
+            if let Some(entry) = entries.iter().find(|e| e.addr == addr) {
+                assert!(entry.writer.is_some(), "Update 后 writer 应该不为空");
+                found_updated = true;
+            }
+        });
+        assert!(found_updated);
+    }
+
+    #[test]
+    fn test_connection_forward_all() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let manager = ConnectionManager::new();
+
+        // 添加 3 个不同的连接
+        let addrs = vec![
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1)), 1000),
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(2, 2, 2, 2)), 2000),
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(3, 3, 3, 3)), 3000)
+        ];
+
+        for &addr in &addrs {
+            let handle = rt.block_on(async { tokio::spawn(async {}).abort_handle() });
+            manager.add(addr, handle, true);
+        }
+
+        // 验证 forward 是否能拿到全部 3 个
+        manager.forward(|entries| {
+            assert_eq!(entries.len(), 3, "应该获取到所有 3 个连接");
+
+            // 验证地址是否匹配
+            for addr in addrs {
+                assert!(entries.iter().any(|e| e.addr == addr));
+            }
         });
     }
 }
