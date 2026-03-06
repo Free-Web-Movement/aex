@@ -1,17 +1,17 @@
 use std::{
-    net::{IpAddr, SocketAddr},
-    sync::{Arc, atomic::AtomicU64},
-    time::{SystemTime, UNIX_EPOCH},
+    net::{ IpAddr, SocketAddr },
+    sync::{ Arc, atomic::AtomicU64 },
+    time::{ SystemTime, UNIX_EPOCH },
 };
 
 use dashmap::DashMap;
-use tokio::
-    sync::{Mutex, RwLock}
-;
+use tokio::sync::{ Mutex, RwLock };
 use tokio_util::sync::CancellationToken;
 
 use crate::connection::{
-    context::BoxWriter, status::ConnectionStatus, types::{BiDirectionalConnections, ConnectionEntry, NetworkScope}
+    context::BoxWriter,
+    status::ConnectionStatus,
+    types::{ BiDirectionalConnections, ConnectionEntry, NetworkScope },
 };
 
 pub struct ConnectionManager {
@@ -46,10 +46,7 @@ impl ConnectionManager {
         let key = (ip, scope);
 
         // 获取当前时间戳
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
 
         let child_token = self.cancel_token.child_token();
 
@@ -64,10 +61,7 @@ impl ConnectionManager {
         });
 
         // DashMap 写入逻辑
-        let bi_conn = self
-            .connections
-            .entry(key)
-            .or_insert_with(BiDirectionalConnections::new);
+        let bi_conn = self.connections.entry(key).or_insert_with(BiDirectionalConnections::new);
         if is_client {
             bi_conn.clients.insert(addr, entry);
         } else {
@@ -83,11 +77,7 @@ impl ConnectionManager {
         // 1. 获取 IP 桶的可变引用
         if let Some(mut bi_conn) = self.connections.get_mut(&key) {
             // 2. 根据方向定位到具体的 DashMap (clients 或 servers)
-            let target_map = if is_client {
-                &mut bi_conn.clients
-            } else {
-                &mut bi_conn.servers
-            };
+            let target_map = if is_client { &mut bi_conn.clients } else { &mut bi_conn.servers };
 
             // 3. ⚡ 使用 DashMap 的 entry API 定位并更新
             // 如果存在该地址的 Entry，我们创建一个包含了 writer 的新 Arc 实例
@@ -163,9 +153,10 @@ impl ConnectionManager {
     /// 内部辅助：当某个 IP 桶完全为空时，从全局 Map 中移除以节省内存
     pub fn check_and_cleanup_bucket(&self, key: (IpAddr, NetworkScope)) {
         // 使用 get_mut 或 entry 以确保逻辑连贯
-        if let Some(bi_conn) = self.connections.get(&key)
-            && bi_conn.clients.is_empty()
-            && bi_conn.servers.is_empty()
+        if
+            let Some(bi_conn) = self.connections.get(&key) &&
+            bi_conn.clients.is_empty() &&
+            bi_conn.servers.is_empty()
         {
             // 必须手动显式 drop 掉 bi_conn 引用，否则 remove 会造成死锁（Ref 锁住了分片）
             drop(bi_conn);
@@ -190,10 +181,7 @@ impl ConnectionManager {
 
     /// 遍历所有连接，根据传入的参数策略执行停用
     pub fn deactivate(&self, timeout_secs: u64, max_lifetime_secs: u64) {
-        let current = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
+        let current = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
         let mut empty_buckets = Vec::new();
 
         // DashMap 的 iter_mut 锁定分片进行原地修改
@@ -224,10 +212,7 @@ impl ConnectionManager {
     }
 
     pub fn status(&self) -> ConnectionStatus {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
 
         let mut status = ConnectionStatus {
             total_ips: self.connections.len(),
@@ -268,14 +253,8 @@ impl ConnectionManager {
                 conn_count += 1;
             };
 
-            bi_conn
-                .clients
-                .iter()
-                .for_each(|r| process_uptime(r.value()));
-            bi_conn
-                .servers
-                .iter()
-                .for_each(|r| process_uptime(r.value()));
+            bi_conn.clients.iter().for_each(|r| process_uptime(r.value()));
+            bi_conn.servers.iter().for_each(|r| process_uptime(r.value()));
         }
 
         if conn_count > 0 {
@@ -296,14 +275,8 @@ impl ConnectionManager {
         for mut bucket_ref in self.connections.iter_mut() {
             let (_, bi_conn) = bucket_ref.pair_mut();
 
-            bi_conn
-                .clients
-                .iter()
-                .for_each(|r| r.value().abort_handle.abort());
-            bi_conn
-                .servers
-                .iter()
-                .for_each(|r| r.value().abort_handle.abort());
+            bi_conn.clients.iter().for_each(|r| r.value().abort_handle.abort());
+            bi_conn.servers.iter().for_each(|r| r.value().abort_handle.abort());
 
             bi_conn.clients.clear();
             bi_conn.servers.clear();
@@ -322,10 +295,7 @@ impl ConnectionManager {
 
         if let Some(bi_conn) = self.connections.get(&(ip, scope)) {
             // 尝试在 clients 或 servers 中找到 entry
-            let entry = bi_conn
-                .clients
-                .get(&addr)
-                .or_else(|| bi_conn.servers.get(&addr));
+            let entry = bi_conn.clients.get(&addr).or_else(|| bi_conn.servers.get(&addr));
 
             if let Some(e) = entry {
                 e.cancel_token.cancel(); // 仅取消这一个
@@ -333,5 +303,33 @@ impl ConnectionManager {
             }
         }
         false
+    }
+
+    /// 根据 Node ID 获取所有相关的连接句柄
+    /// f 是一个闭包，允许你在获取到列表后立即执行操作
+    pub fn notify<F>(&self, node_id: &[u8], f: F) where F: FnOnce(Vec<Arc<ConnectionEntry>>) {
+        let mut targets = Vec::new();
+
+        // 遍历所有 IP 桶
+        for bucket_ref in self.connections.iter() {
+            let bi_conn = bucket_ref.value();
+
+            // 辅助函数：检查 Node ID 是否匹配
+            let mut collect_matching = |entry: &Arc<ConnectionEntry>| {
+                // 读取 RwLock 中的 node 信息
+                if let Some(node) = entry.node.blocking_read().as_ref() {
+                    if node.id == node_id {
+                        targets.push(Arc::clone(entry));
+                    }
+                }
+            };
+
+            // 检查该 IP 下的所有客户端和服务器连接
+            bi_conn.clients.iter().for_each(|r| collect_matching(r.value()));
+            bi_conn.servers.iter().for_each(|r| collect_matching(r.value()));
+        }
+
+        // 执行回调
+        f(targets);
     }
 }

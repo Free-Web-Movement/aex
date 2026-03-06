@@ -1,10 +1,14 @@
 #[cfg(test)]
 mod tests {
-    
-    use aex::connection::{
-        manager::ConnectionManager, types::{ BiDirectionalConnections, NetworkScope }
-    };
-    use std::net::{ IpAddr, Ipv4Addr, SocketAddr };
+    use aex::{connection::{
+        manager::ConnectionManager,
+        node::Node,
+        types::{ BiDirectionalConnections, NetworkScope },
+    }, time::SystemTime};
+    use chrono::DateTime;
+    use tokio::runtime::Runtime;
+    use std::{collections::HashSet, net::{ IpAddr, Ipv4Addr, SocketAddr }};
+    use tokio::task::AbortHandle;
 
     #[tokio::test]
     async fn test_new_manager() {
@@ -178,16 +182,8 @@ mod tests {
         let intranet_addr: SocketAddr = "10.0.0.1:80".parse().unwrap();
         let extranet_addr: SocketAddr = "1.1.1.1:80".parse().unwrap();
 
-        manager.add(
-            intranet_addr,
-            tokio::spawn(async {}).abort_handle(),
-            true
-        );
-        manager.add(
-            extranet_addr,
-            tokio::spawn(async {}).abort_handle(),
-            false
-        );
+        manager.add(intranet_addr, tokio::spawn(async {}).abort_handle(), true);
+        manager.add(extranet_addr, tokio::spawn(async {}).abort_handle(), false);
 
         let status = manager.status();
         assert!(status.intranet_conns > 0);
@@ -201,5 +197,91 @@ mod tests {
         let status = manager.status();
         assert_eq!(status.total_ips, 0);
         assert_eq!(status.average_uptime, 0); // 覆盖 conn_count == 0 的分支
+    }
+
+    #[test]
+    fn test_connection_notify_by_node_id() {
+        let rt = Runtime::new().unwrap();
+        let manager = ConnectionManager::new();
+
+        let addr: SocketAddr = "192.168.1.100:8080".parse().unwrap();
+        let node_id = vec![1, 2, 3, 4];
+
+        // 1. 模拟连接接入
+        // 在 runtime 上下文中生成一个句柄
+        let handle = rt.block_on(async { tokio::spawn(async {}).abort_handle() });
+        manager.add(addr, handle, true);
+
+        // 2. 模拟握手完成：填充 Node 信息
+        {
+            let ip = addr.ip();
+            let scope = NetworkScope::from_ip(&ip);
+            let bi_conn = manager.connections.get(&(ip, scope)).unwrap();
+            let entry = bi_conn.clients.get(&addr).unwrap();
+
+            // 写入 Node ID
+            let mut node_lock = rt.block_on(entry.node.write());
+            *node_lock = Some(Node {
+                id: node_id.clone(),
+                version: 1,
+                started_at: SystemTime::now_ts(),
+                port: 8080,
+                protocols: HashSet::new(),
+                ips: Vec::new(),
+            });
+        }
+
+        // 3. 执行 Notify 测试
+        let mut called = false;
+        manager.notify(&node_id, |entries| {
+            called = true;
+            assert_eq!(entries.len(), 1, "应该找到一个匹配的连接");
+            assert_eq!(entries[0].addr, addr);
+        });
+
+        assert!(called, "Notify 回调应该被执行");
+
+        // 4. 测试不存在的 ID
+        manager.notify(&vec![9, 9, 9], |entries| {
+            assert!(entries.is_empty(), "不匹配的 ID 应该返回空列表");
+        });
+    }
+
+    #[test]
+    fn test_notify_multiple_connections() {
+        let rt = Runtime::new().unwrap();
+        let manager = ConnectionManager::new();
+        let node_id = vec![42];
+
+        // 添加两个不同的地址，但绑定同一个 Node ID
+        let addrs = vec![
+            "1.1.1.1:1000".parse::<SocketAddr>().unwrap(),
+            "2.2.2.2:2000".parse::<SocketAddr>().unwrap()
+        ];
+
+        for &addr in &addrs {
+            let handle = rt.block_on(async { tokio::spawn(async {}).abort_handle() });
+
+            manager.add(addr, handle, true);
+
+            let ip = addr.ip();
+            let scope = NetworkScope::from_ip(&ip);
+            let bi_conn = manager.connections.get(&(ip, scope)).unwrap();
+            let entry = bi_conn.clients.get(&addr).unwrap();
+
+            let mut node_lock = rt.block_on(entry.node.write());
+            *node_lock = Some(Node {
+                id: node_id.clone(),
+                version: 1,
+                started_at: SystemTime::now_ts(),
+                port: 8080,
+                protocols: HashSet::new(),
+                ips: Vec::new(),
+            });
+        }
+
+        manager.notify(&node_id, |entries| {
+            assert_eq!(entries.len(), 2, "同一个 Node ID 应该能搜到多个连接");
+        });
     }
 }
