@@ -45,21 +45,21 @@ pub type AexWriter = dyn AsyncWrite + Send + Sync + Unpin;
 pub type BoxReader = Box<AexReader>;
 pub type BoxWriter = Box<AexWriter>;
 // --- [Context] ---
-pub struct Context<'a> {
+pub struct Context {
     pub addr: SocketAddr,
     pub accepted: DateTime<Utc>,
     // ⚡ 统一使用 dyn 包装，不再需要 R 和 W 泛型位
-    pub reader: &'a mut Option<BoxReader>,
-    pub writer: &'a mut Option<BoxWriter>,
+    pub reader: Option<BoxReader>,
+    pub writer: Option<BoxWriter>,
     pub global: Arc<GlobalContext>,
     pub local: Arc<TypeMap>,
 }
 
-impl<'a> Context<'a> {
+impl Context {
     // ⚡ 构造函数：接受外部已经包装好的 Option 引用
     pub fn new(
-        reader: &'a mut Option<BoxReader>,
-        writer: &'a mut Option<BoxWriter>,
+        reader: Option<BoxReader>,
+        writer: Option<BoxWriter>,
         global: Arc<GlobalContext>,
         addr: SocketAddr,
     ) -> Self {
@@ -77,7 +77,7 @@ impl<'a> Context<'a> {
     pub fn req(&mut self) -> Request<'_> {
         Request {
             // ⚡ 这里透传 &mut Option，Request 内部决定是 read 还是 take()
-            reader: self.reader,
+            reader: &mut self.reader,
             local: self.local.clone(),
         }
     }
@@ -85,7 +85,7 @@ impl<'a> Context<'a> {
     /// 获取 Response 视图
     pub fn res(&mut self) -> Response<'_> {
         Response {
-            writer: self.writer,
+            writer: &mut self.writer,
             local: self.local.clone(),
         }
     }

@@ -64,12 +64,12 @@ mod tests {
         // 模拟 I/O：使用 dummy 向量模拟 reader 和 writer
         let reader_data = Cursor::new(vec![0u8; 10]);
         let writer_data = Cursor::new(vec![0u8; 10]);
-        let mut reader: Option<Box<dyn AsyncBufRead + Send + Unpin + Sync>> =
+        let reader: Option<Box<dyn AsyncBufRead + Send + Unpin + Sync>> =
             Some(Box::new(BufReader::new(reader_data)));
 
-        let mut writer: Option<Box<dyn AsyncWrite + Send + Unpin + Sync>> = Some(Box::new(writer_data));
+        let writer: Option<Box<dyn AsyncWrite + Send + Unpin + Sync>> = Some(Box::new(writer_data));
 
-        let mut ctx = Context::new(&mut reader, &mut writer, global.clone(), addr);
+        let mut ctx = Context::new(reader, writer, global.clone(), addr);
 
         // 测试地址一致性
         assert_eq!(ctx.addr, addr);
@@ -115,12 +115,12 @@ mod tests {
 
         let reader_data = Cursor::new(vec![0u8; 10]);
         let writer_data = Cursor::new(vec![0u8; 10]);
-        let mut reader: Option<Box<dyn AsyncBufRead + Send + Unpin + Sync>> =
+        let reader: Option<Box<dyn AsyncBufRead + Send + Unpin + Sync>> =
             Some(Box::new(BufReader::new(reader_data)));
 
-        let mut writer: Option<Box<dyn AsyncWrite + Send + Unpin + Sync>> = Some(Box::new(writer_data));
+        let writer: Option<Box<dyn AsyncWrite + Send + Unpin + Sync>> = Some(Box::new(writer_data));
 
-        let ctx = Context::new(&mut reader, &mut writer, global.clone(), addr);
+        let ctx = Context::new(reader, writer, global.clone(), addr);
 
         ctx.local.set_value(99 as usize);
 
@@ -202,14 +202,12 @@ mod tests {
         let (reader, writer) = io::split(client);
         let remote_addr = "192.168.1.100:12345".parse().unwrap();
 
-        // let reader_data = Cursor::new(vec![0u8; 10]);
-        // let writer_data = Cursor::new(vec![0u8; 10]);
-        let mut reader: Option<Box<dyn AsyncBufRead + Send + Unpin + Sync>> =
+        let reader: Option<Box<dyn AsyncBufRead + Send + Unpin + Sync>> =
             Some(Box::new(BufReader::new(reader)));
 
-        let mut writer: Option<Box<dyn AsyncWrite + Send + Unpin + Sync>> = Some(Box::new(writer));
+        let writer: Option<Box<dyn AsyncWrite + Send + Unpin + Sync>> = Some(Box::new(writer));
 
-        let ctx = Context::new(&mut reader, &mut writer, Arc::clone(&Arc::new(global)), remote_addr);
+        let ctx = Context::new(reader, writer, Arc::clone(&Arc::new(global)), remote_addr);
 
         // let ctx = Context::new(reader, writer, Arc::clone(&Arc::new(global)), remote_addr);
 
@@ -282,20 +280,14 @@ mod tests {
     async fn test_context_type_map_extensions() {
         // 1. 准备 Context 环境
         // 使用空流模拟 reader 和 writer
-        let mut reader_opt: Option<Box<dyn AsyncBufRead + Send + Unpin  + Sync>> = 
+        let reader_opt: Option<Box<dyn AsyncBufRead + Send + Unpin + Sync>> =
             Some(Box::new(tokio::io::BufReader::new(empty())));
-        let mut writer_opt: Option<Box<dyn AsyncWrite + Send + Unpin + Sync>> = 
-            Some(Box::new(sink()));
-        
+        let writer_opt: Option<Box<dyn AsyncWrite + Send + Unpin + Sync>> = Some(Box::new(sink()));
+
         let global = Arc::new(GlobalContext::new("127.0.0.1:8080".parse().unwrap()));
         let addr = "127.0.0.1:1234".parse().unwrap();
 
-        let ctx = Context::new(
-            &mut reader_opt,
-            &mut writer_opt,
-            global,
-            addr,
-        );
+        let ctx = Context::new(reader_opt, writer_opt, global, addr);
 
         // 2. 测试基础类型存储 (String)
         let test_msg = "AexServerExtension".to_string();
@@ -329,7 +321,7 @@ mod tests {
         let shared_data = Arc::new(vec![1, 2, 3]);
 
         map.set_value(shared_data.clone());
-        
+
         let retrieved = map.get_value::<Arc<Vec<i32>>>().expect("Should exist");
         assert_eq!(*retrieved, vec![1, 2, 3]);
         assert_eq!(Arc::strong_count(&retrieved), 3); // 原有的 + 存入的 + 刚刚拿出来的

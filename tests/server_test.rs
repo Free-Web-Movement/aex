@@ -37,7 +37,7 @@ mod aex_tests {
             hr.insert(
                 "/",
                 Some("GET"),
-                Arc::new(|ctx: &mut Context<'_>| {
+                Arc::new(|ctx: &mut Context| {
                     Box::pin(async move {
                         let meta = &mut ctx.local.get_value::<HttpMetadata>().unwrap();
                         meta.status = StatusCode::Ok;

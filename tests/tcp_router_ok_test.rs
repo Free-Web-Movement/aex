@@ -99,10 +99,10 @@ mod router_tests {
 
         let (r, w) = mock_io().await;
 
-        let mut r_opt: Option<BoxReader> = Some(Box::new(tokio::io::BufReader::new(r)));
+        let r_opt: Option<BoxReader> = Some(Box::new(tokio::io::BufReader::new(r)));
 
-        let mut w_opt: Option<BoxWriter> = Some(Box::new(w));
-        let ctx = Context::new(&mut r_opt, &mut w_opt, arc_g.clone(), addr);
+        let w_opt: Option<BoxWriter> = Some(Box::new(w));
+        let ctx = Context::new(r_opt, w_opt, arc_g.clone(), addr);
         let ctx = Arc::new(Mutex::new(ctx));
         let ctx_guard = ctx.lock().await;
         // 路径 1: frame.validate() == false
@@ -250,10 +250,10 @@ mod router_tests {
 
             assert!(!frame.clone().is_flat());
 
-            let mut r_opt: Option<BoxReader> = Some(Box::new(tokio::io::BufReader::new(_r2)));
+            let r_opt: Option<BoxReader> = Some(Box::new(tokio::io::BufReader::new(_r2)));
 
-            let mut w_opt: Option<BoxWriter> = Some(Box::new(w2));
-            let ctx = Context::new(&mut r_opt, &mut w_opt, arc_g.clone(), addr);
+            let w_opt: Option<BoxWriter> = Some(Box::new(w2));
+            let ctx = Context::new(r_opt, w_opt, arc_g.clone(), addr);
             let ctx = Arc::new(Mutex::new(ctx));
 
             let res = router
@@ -302,10 +302,10 @@ mod router_tests {
 
         let (_r_real, w_real) = mock_io().await;
 
-        let mut r_none: Option<BoxReader> = None;
-        let mut w_some: Option<BoxWriter> = Some(Box::new(w_real));
+        let r_none: Option<BoxReader> = None;
+        let w_some: Option<BoxWriter> = Some(Box::new(w_real));
 
-        let ctx = Context::new(&mut r_none, &mut w_some, arc_g.clone(), addr);
+        let ctx = Context::new(r_none, w_some, arc_g.clone(), addr);
         let ctx = Arc::new(Mutex::new(ctx));
 
         let _res = router
@@ -364,10 +364,10 @@ mod router_tests {
         // let mut w_none: Option<BoxWriter> = None;
         // let mut ctx = Context::new(&mut r_some, &mut w_some, arc_g.clone(), addr);
 
-        let mut r_some: Option<BoxReader> = Some(Box::new(tokio::io::BufReader::new(r_real)));
+        let r_some: Option<BoxReader> = Some(Box::new(tokio::io::BufReader::new(r_real)));
 
-        let mut w_none: Option<BoxWriter> = None;
-        let ctx = Context::new(&mut r_some, &mut w_none, arc_g.clone(), addr);
+        let w_none: Option<BoxWriter> = None;
+        let ctx = Context::new(r_some, w_none, arc_g.clone(), addr);
         let ctx = Arc::new(Mutex::new(ctx));
 
         let _res = router

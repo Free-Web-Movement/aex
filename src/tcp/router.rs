@@ -2,7 +2,6 @@ use anyhow::Ok;
 use futures::future::BoxFuture;
 use std::any::Any;
 use std::collections::HashMap;
-use std::future::Future;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::io::AsyncReadExt;
@@ -14,7 +13,7 @@ use crate::connection::types::IDExtractor;
 use crate::tcp::types::{Codec, TCPCommand, TCPFrame};
 
 pub type Doer<F, C> = Box<
-    dyn Fn(Arc<Mutex<Context<'_>>>, F, C) -> BoxFuture<'static, anyhow::Result<bool>>
+    dyn Fn(Arc<Mutex<Context>>, F, C) -> BoxFuture<'static, anyhow::Result<bool>>
         + Send
         + Sync
         + 'static,
@@ -56,7 +55,7 @@ impl Router {
     /// 核心分发逻辑
     pub async fn handle_frame<F, C>(
         &self,
-        ctx: Arc<Mutex<Context<'_>>>, // 假设你的 Context 定义是 Context<R, W>
+        ctx: Arc<Mutex<Context>>, // 假设你的 Context 定义是 Context<R, W>
         frame: F,
         extractor: IDExtractor<C>,
     ) -> anyhow::Result<bool>
@@ -146,7 +145,7 @@ impl Router {
                 use std::result::Result::Ok;
                 match <F as Codec>::decode(&session_buf) {
                     Ok(frame) => {
-                        let ctx = Context::new(reader, writer, global.clone(), addr);
+                        let ctx = Context::new(reader.take(), writer.take(), global.clone(), addr);
                         let should_continue = self
                             .handle_frame::<F, C>(
                                 Arc::new(Mutex::new(ctx)),
@@ -168,41 +167,5 @@ impl Router {
             }
         }
         Ok(())
-    }
-}
-
-/// 将标准的 async fn 包装成符合 Router 要求的闭包
-pub fn doer<F, C, Fut>(
-    handler: fn(&mut Context<'_>, &mut F, &mut C) -> Fut,
-) -> impl Fn(Arc<Mutex<Context<'_>>>, F, C) -> BoxFuture<'static, anyhow::Result<bool>>
-where
-    F: Clone + Send + Sync + 'static,
-    C: Clone + Send + Sync + 'static,
-    Fut: Future<Output = anyhow::Result<bool>> + Send + 'static,
-{
-    move |ctx_arc, f, c| {
-        // 1. 同步解构
-        let (mut r_owned, mut w_owned, global, addr, local) = {
-            let mut guard = ctx_arc.blocking_lock();
-            (
-                guard.reader.take(),
-                guard.writer.take(),
-                guard.global.clone(),
-                guard.addr,
-                guard.local.clone(),
-            )
-        };
-
-        let mut f_owned = f.clone();
-        let mut c_owned = c.clone();
-
-        Box::pin(async move {
-            // 重建临时 Context
-            let mut temp_ctx = Context::new(&mut r_owned, &mut w_owned, global, addr);
-            temp_ctx.local = local;
-
-            //执行业务 Handler
-            handler(&mut temp_ctx, &mut f_owned, &mut c_owned).await
-        })
     }
 }

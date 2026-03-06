@@ -128,7 +128,7 @@ macro_rules! exe {
         use $crate::http::types::Executor;
 
         // 显式指定闭包的生命周期约束
-        let executor: Arc<Executor> = Arc::new(move |$ctx: &mut Context<'_>| {
+        let executor: Arc<Executor> = Arc::new(move |$ctx: &mut Context| {
             // 1. 同步执行 pre
             let $data = {
                 let $pre_ctx: &mut Context = &mut *$ctx;
@@ -155,7 +155,7 @@ macro_rules! exe {
         use $crate::http::types::Executor;
 
         let executor: Arc<Executor> =
-            Arc::new(move |$ctx: &mut Context<'_>| async move { $body }.boxed());
+            Arc::new(move |$ctx: &mut Context| async move { $body }.boxed());
         executor
         }
     };

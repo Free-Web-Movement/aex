@@ -149,9 +149,9 @@ impl Router {
         writer: BufWriter<OwnedWriteHalf>,
         peer_addr: SocketAddr,
     ) -> anyhow::Result<()> {
-        let mut reader: Option<BoxReader> = Some(Box::new(reader));
-        let mut writer: Option<BoxWriter> = Some(Box::new(writer));
-        let mut ctx = Context::new(&mut reader, &mut writer, global, peer_addr);
+        let reader: Option<BoxReader> = Some(Box::new(reader));
+        let writer: Option<BoxWriter> = Some(Box::new(writer));
+        let mut ctx = Context::new(reader, writer, global, peer_addr);
         ctx.req().parse_to_local().await?;
         // handle_request 返回 true 表示所有中间件和 Handler 正常通过
         // 返回 false 表示被拦截（如 validator 发现类型不匹配）
@@ -170,7 +170,7 @@ impl Router {
     // 执行路由
     // --------------------------------------
 
-    pub async fn on_request(&self, ctx: &mut Context<'_>) -> bool {
+    pub async fn on_request(&self, ctx: &mut Context) -> bool {
         // 1. 获取 Metadata
         let meta = &mut ctx.local.get_value::<HttpMetadata>().unwrap(); // 注意这里直接从 local 获取并可变借用
 

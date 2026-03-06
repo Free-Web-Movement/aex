@@ -226,7 +226,7 @@ impl WebSocket {
     }
 
     /// WebSocket 运行循环 (泛型化)
-    pub async fn run(ws: &WebSocket, ctx: &mut Context<'_>) -> anyhow::Result<()> {
+    pub async fn run(ws: &WebSocket, ctx: &mut Context) -> anyhow::Result<()> {
         loop {
             let (opcode, payload) = {
                 // let mut writer_lock = ctx.writer;
@@ -314,7 +314,7 @@ impl WebSocket {
         use futures::FutureExt;
         let ws = Arc::new(Mutex::new(ws));
 
-        Box::new(move |ctx: &mut Context<'_>| {
+        Box::new(move |ctx: &mut Context| {
             let ws = ws.clone();
             (async move {
                 let meta = ctx.local.get_value::<HttpMetadata>().unwrap();
