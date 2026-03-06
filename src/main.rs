@@ -44,17 +44,16 @@ async fn main() -> anyhow::Result<()> {
     let mut tcp_router = TcpRouter::new();
 
     // 注册 TCP 指令 1001
-    tcp_router.on::<RawCodec, RawCodec, _, _>(
+    tcp_router.on::<RawCodec, RawCodec>(
         1001,
-        |_ctx, _frame, cmd| {
-            let cmd = cmd.clone();
-            // let frame = frame.clone();
-            async move {
-                println!("[TCP] Received 1001, payload len: {}", cmd.0.len());
-                // 这里可以继续使用 reader/writer 进行长连接交互
+        Box::new(|_ctx, _frame: RawCodec, cmd: RawCodec| {
+            Box::pin(async move {
+                let _cmd = cmd.clone();
+                println!("Handling command...");
                 Ok(true)
-            }
-        },
+            })
+        }),
+        vec![],
     );
 
     // --- 3. UDP 路由配置 (使用 RawCodec) ---
@@ -63,7 +62,11 @@ async fn main() -> anyhow::Result<()> {
     // 注册 UDP 指令 2002
     udp_router.on::<RawCodec, RawCodec, _, _>(
         2002,
-        |_global: Arc<GlobalContext>, _frame: RawCodec, payload: RawCodec, peer, socket: Arc<UdpSocket>| async move {
+        |_global: Arc<GlobalContext>,
+         _frame: RawCodec,
+         payload: RawCodec,
+         peer,
+         socket: Arc<UdpSocket>| async move {
             println!("[UDP] Received 2002 from {}, data: {:?}", peer, payload);
             // UDP 回包示例
             let response = b"UDP ACK".to_vec();

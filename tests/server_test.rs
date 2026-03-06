@@ -62,7 +62,7 @@ mod aex_tests {
 
             // 3. 注册 TCP 路由 (ID 10)
             let mut tr = TcpRouter::new();
-            tr.on::<RawCodec, RawCodec, _, _>(10, |_, _, _: &mut _,| async move { Ok(true) });
+            tr.on::<RawCodec, RawCodec>(10, Box::new(|_, _, _,| Box::pin(async move { Ok(true) }).boxed()), vec![]);
 
             // 4. 注册 UDP 路由 (ID 20)
             let mut ur = UdpRouter::new();

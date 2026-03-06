@@ -97,6 +97,8 @@ pub trait Command: Codec {
 /// 🛠️ 纯二进制包装：既不带 ID 也不带冗余结构
 #[derive(Serialize, Deserialize, Encode, Decode, Debug, Clone)]
 pub struct RawCodec(pub Vec<u8>);
+
+
 impl Codec for RawCodec {}
 impl Frame for RawCodec {
     fn payload(&self) -> Option<Vec<u8>> {
@@ -115,3 +117,11 @@ impl Command for RawCodec {
         &self.0
     }
 }
+
+/// 定义 Frame 的约束别名
+pub trait TCPFrame: Frame + Send + Sync + Clone + 'static {}
+impl<T: Frame + Send + Sync + Clone + 'static> TCPFrame for T {}
+
+/// 定义 Command 的约束别名
+pub trait TCPCommand: Command + Send + Sync + Clone + 'static {}
+impl<T: Command + Send + Sync + Clone + 'static> TCPCommand for T {}

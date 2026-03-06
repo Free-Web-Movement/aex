@@ -3,13 +3,17 @@ mod router_tests {
     use std::{net::SocketAddr, sync::Arc};
 
     use aex::{
-        connection::{context::{BoxReader, BoxWriter, Context}, global::GlobalContext},
+        connection::{
+            context::{BoxReader, BoxWriter, Context},
+            global::GlobalContext,
+        },
         tcp::{
             router::Router,
             types::{Codec, Command, Frame, RawCodec},
         },
     };
     use bincode::{Decode, Encode};
+    use futures::FutureExt;
     use serde::{Deserialize, Serialize};
     use tokio::{
         net::tcp::{OwnedReadHalf, OwnedWriteHalf},
@@ -78,14 +82,24 @@ mod router_tests {
         let arc_g = Arc::new(global);
 
         // 注册一个正常的 handler
-        router.on::<RawCodec, RawCodec, _, _>(100, |_, _, _| async { Ok(true) });
+        // router.on::<RawCodec, RawCodec, _, _>(100, |_, _, _| async { Ok(true) });
+        router.on::<RawCodec, RawCodec>(
+            100,
+            Box::new(|_, _, _| Box::pin(async move { Ok(true) }).boxed()),
+            vec![],
+        );
+
         // 注册一个返回 false 的 handler
-        router.on::<RawCodec, RawCodec, _, _>(200, |_, _, _| async { Ok(false) });
+        // router.on::<RawCodec, RawCodec, _, _>(200, |_, _, _| async { Ok(false) });
+        router.on::<RawCodec, RawCodec>(
+            200,
+            Box::new(|_, _, _| Box::pin(async move { Ok(true) }).boxed()),
+            vec![],
+        );
 
         let (r, w) = mock_io().await;
 
-        let mut r_opt: Option<BoxReader> =
-            Some(Box::new(tokio::io::BufReader::new(r)));
+        let mut r_opt: Option<BoxReader> = Some(Box::new(tokio::io::BufReader::new(r)));
 
         let mut w_opt: Option<BoxWriter> = Some(Box::new(w));
         let ctx = Context::new(&mut r_opt, &mut w_opt, arc_g.clone(), addr);
@@ -236,8 +250,7 @@ mod router_tests {
 
             assert!(!frame.clone().is_flat());
 
-            let mut r_opt: Option<BoxReader> =
-                Some(Box::new(tokio::io::BufReader::new(_r2)));
+            let mut r_opt: Option<BoxReader> = Some(Box::new(tokio::io::BufReader::new(_r2)));
 
             let mut w_opt: Option<BoxWriter> = Some(Box::new(w2));
             let ctx = Context::new(&mut r_opt, &mut w_opt, arc_g.clone(), addr);
@@ -265,9 +278,16 @@ mod router_tests {
 
         let arc_g = Arc::new(global);
 
-        router.on::<TestFrame, TestCommand, _, _>(100, |_, _, _: &mut TestCommand| async move {
-            Ok(true)
-        });
+        // router.on::<TestFrame, TestCommand, _, _>(100, |_, _, _: &mut TestCommand| async move {
+        //     Ok(true)
+        // });
+
+        router.on::<TestFrame, TestCommand>(
+            100,
+            Box::new(|_, _, _| Box::pin(async move { Ok(true) }).boxed()),
+            vec![],
+        );
+
         // router.on::<RawCodec, RawCodec, _, _>(100, |_, _:&mut _,  _: &mut TestCommand, _, _| async { Ok(true) });
 
         let cmd = TestCommand {
@@ -310,9 +330,15 @@ mod router_tests {
 
         // 1. 注册一个有效的 Handler
         // router.on(100, |_, _: TestCommand, _, _| async { Ok(true) });
-        router.on::<TestFrame, TestCommand, _, _>(100, |_, _, _: &mut TestCommand| async move {
-            Ok(true)
-        });
+        // router.on::<TestFrame, TestCommand, _, _>(100, |_, _, _: &mut TestCommand| async move {
+        //     Ok(true)
+        // });
+
+        router.on::<TestFrame, TestCommand>(
+            100,
+            Box::new(|_, _, _| Box::pin(async move { Ok(true) }).boxed()),
+            vec![],
+        );
 
         // 2. 构造一个能通过所有前期校验的 Frame 和 Command
         let cmd = TestCommand {
@@ -338,8 +364,7 @@ mod router_tests {
         // let mut w_none: Option<BoxWriter> = None;
         // let mut ctx = Context::new(&mut r_some, &mut w_some, arc_g.clone(), addr);
 
-        let mut r_some: Option<BoxReader> =
-            Some(Box::new(tokio::io::BufReader::new(r_real)));
+        let mut r_some: Option<BoxReader> = Some(Box::new(tokio::io::BufReader::new(r_real)));
 
         let mut w_none: Option<BoxWriter> = None;
         let ctx = Context::new(&mut r_some, &mut w_none, arc_g.clone(), addr);

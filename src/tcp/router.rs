@@ -1,8 +1,9 @@
+use anyhow::Ok;
+use futures::future::BoxFuture;
 use std::any::Any;
 use std::collections::HashMap;
 use std::future::Future;
 use std::net::SocketAddr;
-use std::pin::Pin;
 use std::sync::Arc;
 use tokio::io::AsyncReadExt;
 use tokio::sync::Mutex;
@@ -10,22 +11,17 @@ use tokio::sync::Mutex;
 use crate::connection::context::{BoxReader, BoxWriter, Context};
 use crate::connection::global::GlobalContext;
 use crate::connection::types::IDExtractor;
-use crate::tcp::types::{Codec, Command, Frame};
+use crate::tcp::types::{Codec, TCPCommand, TCPFrame};
 
-// 假设这些在你之前的定义中
-// use crate::tcp::types::{Codec, Frame, Command, RawCodec, frame_config};
-
-/// ⚡ 修复后的 Handler 签名：使用 BoxFuture 确保异步闭包可用
-pub type CommandHandler<F, C> = dyn Fn(
-        Arc<Mutex<Context<'_>>>,
-        &mut F,
-        &mut C,
-    ) -> Pin<Box<dyn Future<Output = anyhow::Result<bool>> + Send>>
-    + Send
-    + Sync;
+pub type Doer<F, C> = Box<
+    dyn Fn(Arc<Mutex<Context<'_>>>, F, C) -> BoxFuture<'static, anyhow::Result<bool>>
+        + Send
+        + Sync
+        + 'static,
+>;
 
 pub struct Router {
-    pub handlers: HashMap<u32, Box<dyn Any + Send + Sync>>,
+    pub handlers: HashMap<u32, Vec<Box<dyn Any + Send + Sync>>>,
 }
 
 impl Router {
@@ -36,19 +32,25 @@ impl Router {
     }
 
     /// 修复语法：正确构建 Pin<Box<dyn Future>>
-    pub fn on<F, C, FFut, Fut>(&mut self, key: u32, f: FFut)
+    pub fn on<F, C>(&mut self, key: u32, f: Doer<F, C>, middlewares: Vec<Doer<F, C>>)
     where
-        F: Frame + Send + Sync + Clone + 'static,
-        C: Command + Send + Sync + 'static,
-        FFut: Fn(Arc<Mutex<Context<'_>>>, &mut F, &mut C) -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = anyhow::Result<bool>> + Send + 'static,
+        F: TCPFrame,
+        C: TCPCommand,
     {
-        // ⚡ 这里的 handler 类型是 Box<CommandHandler<C>>
-        let handler: Box<CommandHandler<F, C>> =
-            Box::new(move |ctx, frame, cmd| Box::pin(f(ctx, frame, cmd)));
+        // 1. 创建统一的线性链条
+        // 预分配容量：middlewares 数量 + 1 个 executor
+        let mut chain: Vec<Box<dyn Any + Send + Sync>> = Vec::with_capacity(middlewares.len() + 1);
 
-        // ⚡ 最小修改：直接存入这个 Box。
-        self.handlers.insert(key, Box::new(handler));
+        // 2. 先把所有中间件按顺序存入
+        for mw in middlewares {
+            chain.push(Box::new(mw));
+        }
+
+        // 3. 将最后的核心逻辑 f 存入
+        chain.push(Box::new(f));
+
+        // 4. 以 Any 类型持久化存储到 HashMap
+        self.handlers.insert(key, chain);
     }
 
     /// 核心分发逻辑
@@ -59,8 +61,8 @@ impl Router {
         extractor: IDExtractor<C>,
     ) -> anyhow::Result<bool>
     where
-        F: Frame + Send + Sync + Clone + 'static,
-        C: Command + Send + Sync + 'static,
+        F: TCPFrame,
+        C: TCPCommand,
     {
         if !frame.validate() {
             return Ok(false); // 校验失败，跳过此帧
@@ -69,6 +71,8 @@ impl Router {
             let key: u32;
             let c: Option<C>;
             if !frame.is_flat() {
+                use std::result::Result::Ok;
+
                 if let Ok(cmd) = <C as crate::tcp::types::Codec>::decode(&data) {
                     // ... 之前的 decode 成功逻辑 ...
                     key = (extractor)(&cmd);
@@ -87,25 +91,17 @@ impl Router {
                 }
 
                 if let Some(any_handler) = self.handlers.get(&key) {
-                    let handler = any_handler
-                        .downcast_ref::<Box<CommandHandler<F, C>>>()
-                        .ok_or_else(|| anyhow::anyhow!("Handler type mismatch for key: {}", key))?;
+                    for handler in any_handler {
+                        let handler =
+                            handler.downcast_ref::<Box<Doer<F, C>>>().ok_or_else(|| {
+                                anyhow::anyhow!("Handler type mismatch for key: {}", key)
+                            })?;
 
-                    // ⚡ 关键：使用 take() 拿走所有权，留下 None
-                    // 这样你就得到了 Box<dyn AsyncBufRead + Send + Unpin>
-                    // let r = reader
-                    //     .take()
-                    //     .ok_or_else(|| anyhow::anyhow!("Reader already taken"))?;
-                    // let w = writer
-                    //     .take()
-                    //     .ok_or_else(|| anyhow::anyhow!("Writer already taken"))?;
-
-                    // 现在 r 和 w 正好符合 Handler 的参数要求
-                    let result = handler(ctx, &mut frame.clone(), &mut c.unwrap()).await?;
-
-                    // 如果你希望在 Handler 执行完后继续在 loop 中使用这些流，
-                    // Handler 必须在返回值中把它们还回来（见下文建议）。
-                    return Ok(result);
+                        // 现在 r 和 w 正好符合 Handler 的参数要求
+                        if !handler(ctx.clone(), frame.clone(), c.clone().unwrap().clone()).await? {
+                            return Ok(false);
+                        }
+                    }
                 }
             }
         }
@@ -123,8 +119,8 @@ impl Router {
         extractor: IDExtractor<C>,
     ) -> anyhow::Result<()>
     where
-        F: Frame + Send + Sync + Clone + 'static,
-        C: Command + Send + Sync + 'static,
+        F: TCPFrame,
+        C: TCPCommand,
     {
         let mut session_buf: Vec<u8> = Vec::with_capacity(4096);
         let mut buf = vec![0u8; 1024];
@@ -147,6 +143,7 @@ impl Router {
             session_buf.extend_from_slice(&buf[..n]);
 
             while !session_buf.is_empty() {
+                use std::result::Result::Ok;
                 match <F as Codec>::decode(&session_buf) {
                     Ok(frame) => {
                         let ctx = Context::new(reader, writer, global.clone(), addr);
@@ -171,5 +168,41 @@ impl Router {
             }
         }
         Ok(())
+    }
+}
+
+/// 将标准的 async fn 包装成符合 Router 要求的闭包
+pub fn doer<F, C, Fut>(
+    handler: fn(&mut Context<'_>, &mut F, &mut C) -> Fut,
+) -> impl Fn(Arc<Mutex<Context<'_>>>, F, C) -> BoxFuture<'static, anyhow::Result<bool>>
+where
+    F: Clone + Send + Sync + 'static,
+    C: Clone + Send + Sync + 'static,
+    Fut: Future<Output = anyhow::Result<bool>> + Send + 'static,
+{
+    move |ctx_arc, f, c| {
+        // 1. 同步解构
+        let (mut r_owned, mut w_owned, global, addr, local) = {
+            let mut guard = ctx_arc.blocking_lock();
+            (
+                guard.reader.take(),
+                guard.writer.take(),
+                guard.global.clone(),
+                guard.addr,
+                guard.local.clone(),
+            )
+        };
+
+        let mut f_owned = f.clone();
+        let mut c_owned = c.clone();
+
+        Box::pin(async move {
+            // 重建临时 Context
+            let mut temp_ctx = Context::new(&mut r_owned, &mut w_owned, global, addr);
+            temp_ctx.local = local;
+
+            //执行业务 Handler
+            handler(&mut temp_ctx, &mut f_owned, &mut c_owned).await
+        })
     }
 }

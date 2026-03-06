@@ -13,7 +13,7 @@ use crate::connection::types::IDExtractor;
 use crate::http::protocol::method::HttpMethod;
 use crate::http::router::Router as HttpRouter;
 use crate::tcp::router::Router as TcpRouter;
-use crate::tcp::types::{Command, Frame};
+use crate::tcp::types::{TCPCommand, TCPFrame};
 use crate::udp::router::Router as UdpRouter;
 
 /// AexServer: 核心多协议服务器
@@ -55,8 +55,8 @@ impl AexServer {
     /// 🚀 统一启动入口
     pub async fn start<F, C>(&self, extractor: IDExtractor<C>) -> anyhow::Result<()>
     where
-        F: Frame + Send + Sync + Clone + 'static,
-        C: Command + Send + Sync + 'static,
+        F: TCPFrame,
+        C: TCPCommand,
     {
         let server = Arc::new(self.clone());
 
@@ -80,8 +80,8 @@ impl AexServer {
     /// 🛠️ TCP 核心分发循环
     pub async fn start_tcp<F, C>(&self, extractor: IDExtractor<C>) -> anyhow::Result<()>
     where
-        F: Frame + Send + Sync + Clone + 'static,
-        C: Command + Send + Sync + 'static,
+        F: TCPFrame,
+        C: TCPCommand,
     {
         let listener = TcpListener::bind(self.addr).await?;
         println!("[AEX] TCP listener started on {}", self.addr);
@@ -143,8 +143,8 @@ impl AexServer {
     /// 🛠️ UDP 核心分发循环
     pub async fn start_udp<F, C>(&self, extractor: IDExtractor<C>) -> anyhow::Result<()>
     where
-        F: Frame + Send + Sync + Clone + 'static,
-        C: Command + Send + Sync + 'static,
+        F: TCPFrame,
+        C: TCPCommand,
     {
         let router: Option<Arc<UdpRouter>> = self.globals.routers.get_value();
 
