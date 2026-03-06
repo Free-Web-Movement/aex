@@ -6,7 +6,7 @@ use std::{
     sync::Arc,
 };
 
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 
 use crate::{
     communicators::{event::EventEmitter, pipe::PipeManager, spreader::SpreadManager},
@@ -23,7 +23,7 @@ pub struct GlobalContext {
     pub spread: SpreadManager,
     pub event: EventEmitter,
     pub name: String,
-    pub paired_session_keys: Option<PairedSessionKey>,
+    pub paired_session_keys: Option<Arc<Mutex<PairedSessionKey>>>,
     /// 全局 TypeMap：允许灵活添加数据库连接池、全局配置等
     pub extensions: Arc<RwLock<TypeMap>>,
     pub routers: TypeMap,
