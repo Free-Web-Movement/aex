@@ -307,34 +307,51 @@ impl ConnectionManager {
 
     /// 根据 Node ID 获取所有相关的连接句柄
     /// f 是一个闭包，允许你在获取到列表后立即执行操作
-    pub fn notify<F>(&self, node_id: &[u8], f: F) where F: FnOnce(Vec<Arc<ConnectionEntry>>) {
-        let mut targets = Vec::new();
+    pub async fn notify<F, Fut>(&self, node_id: &[u8], f: F)
+        where F: FnOnce(Vec<Arc<ConnectionEntry>>) -> Fut, Fut: std::future::Future<Output = ()>
+    {
+        let mut all_entries = Vec::new();
 
-        // 遍历所有 IP 桶
+        // 1. 【同步阶段】快速收集所有 Arc 引用
+        // 这一步很快，且不涉及 .await，能迅速释放 DashMap 的分片锁
         for bucket_ref in self.connections.iter() {
             let bi_conn = bucket_ref.value();
 
-            // 辅助函数：检查 Node ID 是否匹配
-            let mut collect_matching = |entry: &Arc<ConnectionEntry>| {
-                // 读取 RwLock 中的 node 信息
-                if let Some(node) = entry.node.blocking_read().as_ref() {
-                    if node.id == node_id {
-                        targets.push(Arc::clone(entry));
-                    }
-                }
-            };
-
-            // 检查该 IP 下的所有客户端和服务器连接
-            bi_conn.clients.iter().for_each(|r| collect_matching(r.value()));
-            bi_conn.servers.iter().for_each(|r| collect_matching(r.value()));
+            for entry_ref in bi_conn.clients.iter() {
+                all_entries.push(Arc::clone(entry_ref.value()));
+            }
+            for entry_ref in bi_conn.servers.iter() {
+                all_entries.push(Arc::clone(entry_ref.value()));
+            }
         }
 
-        // 执行回调
-        f(targets);
+        // 2. 【异步阶段】过滤匹配的 Node ID
+        let mut matched = Vec::new();
+        for entry in all_entries {
+            let is_match = {
+                // 在这个小作用域内获取锁
+                let node_lock = entry.node.read().await;
+                if let Some(node) = node_lock.as_ref() {
+                    node.id == node_id
+                } else {
+                    false
+                }
+            }; // 👈 锁 (node_lock) 在这里被自动 Drop
+
+            // 此时 node_lock 已经不存在了，可以安全地移动 entry (它是 Arc，克隆它也行)
+            if is_match {
+                matched.push(entry);
+            }
+        }
+
+        // 3. 执行回调
+        f(matched).await
     }
 
     // 获取所有连接
-    pub fn forward<F>(&self, f: F) where F: FnOnce(Vec<Arc<ConnectionEntry>>) {
+    pub async fn forward<F, Fut>(&self, f: F)
+        where F: FnOnce(Vec<Arc<ConnectionEntry>>) -> Fut, Fut: std::future::Future<Output = ()>
+    {
         let mut targets = Vec::new();
 
         // 遍历所有 IP 桶
@@ -352,6 +369,6 @@ impl ConnectionManager {
         }
 
         // 执行回调
-        f(targets);
+        f(targets).await;
     }
 }

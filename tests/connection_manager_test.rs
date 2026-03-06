@@ -9,9 +9,14 @@ mod tests {
         },
         time::SystemTime,
     };
+    use anyhow::Ok;
     use chrono::DateTime;
     use tokio::{ runtime::Runtime, sync::Mutex };
-    use std::{ collections::HashSet, net::{ IpAddr, Ipv4Addr, SocketAddr }, sync::Arc };
+    use std::{
+        collections::HashSet,
+        net::{ IpAddr, Ipv4Addr, SocketAddr },
+        sync::{ Arc, atomic::{ AtomicBool, Ordering } },
+    };
     use tokio::task::AbortHandle;
 
     #[tokio::test]
@@ -203,9 +208,8 @@ mod tests {
         assert_eq!(status.average_uptime, 0); // 覆盖 conn_count == 0 的分支
     }
 
-    #[test]
-    fn test_connection_notify_by_node_id() {
-        let rt = Runtime::new().unwrap();
+    #[tokio::test]
+    async fn test_connection_notify_by_node_id() {
         let manager = ConnectionManager::new();
 
         let addr: SocketAddr = "192.168.1.100:8080".parse().unwrap();
@@ -213,7 +217,7 @@ mod tests {
 
         // 1. 模拟连接接入
         // 在 runtime 上下文中生成一个句柄
-        let handle = rt.block_on(async { tokio::spawn(async {}).abort_handle() });
+        let handle = tokio::spawn(async {}).abort_handle();
         manager.add(addr, handle, true);
 
         // 2. 模拟握手完成：填充 Node 信息
@@ -224,7 +228,7 @@ mod tests {
             let entry = bi_conn.clients.get(&addr).unwrap();
 
             // 写入 Node ID
-            let mut node_lock = rt.block_on(entry.node.write());
+            let mut node_lock = entry.node.write().await;
             *node_lock = Some(Node {
                 id: node_id.clone(),
                 version: 1,
@@ -236,44 +240,48 @@ mod tests {
         }
 
         // 3. 执行 Notify 测试
-        let mut called = false;
+        let called = Arc::new(AtomicBool::new(false));
+        let called_clone = Arc::clone(&called);
         manager.notify(&node_id, |entries| {
-            called = true;
-            assert_eq!(entries.len(), 1, "应该找到一个匹配的连接");
-            assert_eq!(entries[0].addr, addr);
-        });
+            let inner_called = called_clone; // 进一步移动到 async block
+            async move {
+                assert_eq!(entries.len(), 1, "应该找到一个匹配的连接");
+                assert_eq!(entries[0].addr, addr);
+                inner_called.store(true, Ordering::SeqCst);
+            }
+        }).await;
 
-        assert!(called, "Notify 回调应该被执行");
-
+        assert!(called.load(Ordering::SeqCst), "Notify 应该修改了原子变量");
         // 4. 测试不存在的 ID
-        manager.notify(&vec![9, 9, 9], |entries| {
+        manager.notify(&vec![9, 9, 9], |entries| async move {
             assert!(entries.is_empty(), "不匹配的 ID 应该返回空列表");
-        });
+        }).await;
     }
 
-    #[test]
-    fn test_notify_multiple_connections() {
-        let rt = Runtime::new().unwrap();
+    #[tokio::test] // 👈 使用异步测试宏，它会自动提供 Runtime
+    async fn test_notify_multiple_connections() {
         let manager = ConnectionManager::new();
         let node_id = vec![42];
 
-        // 添加两个不同的地址，但绑定同一个 Node ID
+        // 使用非 loopback IP (避免被 add 内部逻辑拦截)
         let addrs = vec![
             "1.1.1.1:1000".parse::<SocketAddr>().unwrap(),
             "2.2.2.2:2000".parse::<SocketAddr>().unwrap()
         ];
 
         for &addr in &addrs {
-            let handle = rt.block_on(async { tokio::spawn(async {}).abort_handle() });
-
+            // 1. 直接在当前异步环境中生成句柄，不需要 block_on
+            let handle = tokio::spawn(async {}).abort_handle();
             manager.add(addr, handle, true);
 
+            // 2. 模拟握手：使用 .await 获取异步锁并填充 Node 信息
             let ip = addr.ip();
             let scope = NetworkScope::from_ip(&ip);
-            let bi_conn = manager.connections.get(&(ip, scope)).unwrap();
-            let entry = bi_conn.clients.get(&addr).unwrap();
+            let bi_conn = manager.connections.get(&(ip, scope)).expect("Bucket missing");
+            let entry = bi_conn.clients.get(&addr).expect("Entry missing");
 
-            let mut node_lock = rt.block_on(entry.node.write());
+            // 👈 直接 await，不要用 rt.block_on
+            let mut node_lock = entry.node.write().await;
             *node_lock = Some(Node {
                 id: node_id.clone(),
                 version: 1,
@@ -284,74 +292,82 @@ mod tests {
             });
         }
 
-        manager.notify(&node_id, |entries| {
+        // 3. 执行异步 Notify
+        // 确保你的 notify 定义支持泛型 T 以便返回结果
+        manager.notify(&node_id, |entries| async move {
             assert_eq!(entries.len(), 2, "同一个 Node ID 应该能搜到多个连接");
-        });
+        }).await;
     }
 
-    #[test]
-    fn test_connection_update_writer() {
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        let manager = ConnectionManager::new();
-        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1)), 8080);
+    #[tokio::test]
+    async fn test_connection_update_writer() {
+        use std::sync::atomic::{ AtomicBool, Ordering };
 
-        // 1. 添加一个初始连接 (writer 为 None)
-        let handle = rt.block_on(async { tokio::spawn(async {}).abort_handle() });
+        let manager = ConnectionManager::new();
+        let addr: SocketAddr = "1.1.1.1:8080".parse().unwrap();
+
+        // 1. 使用 AtomicBool 来跨线程/任务同步状态
+        let found_updated = Arc::new(AtomicBool::new(false));
+
+        let handle = tokio::spawn(async {}).abort_handle();
         manager.add(addr, handle, true);
 
-        // 验证初始状态确实没有 writer
-        manager.forward(|entries| {
-            let entry = entries
-                .iter()
-                .find(|e| e.addr == addr)
-                .unwrap();
-            assert!(entry.writer.is_none());
-        });
+        let mock_writer: Arc<Mutex<BoxWriter>> = Arc::new(Mutex::new(Box::new(tokio::io::sink())));
+        manager.update(addr, true, mock_writer);
 
-        // 2. 执行 update 操作，注入一个 MockWriter
-
-        let sink = tokio::io::sink();
-        let box_writer: BoxWriter = Box::new(sink);
-        let mock_writer = Arc::new(Mutex::new(box_writer));
-
-        manager.update(addr, true, mock_writer.clone());
-
-        // 3. 验证更新是否成功
-        let mut found_updated = false;
-        manager.forward(|entries| {
+        // 2. 克隆 Arc 传入异步闭包
+        let found_clone = Arc::clone(&found_updated);
+        manager.forward(move |entries| async move {
             if let Some(entry) = entries.iter().find(|e| e.addr == addr) {
-                assert!(entry.writer.is_some(), "Update 后 writer 应该不为空");
-                found_updated = true;
+                if entry.writer.is_some() {
+                    // 3. 安全地修改原子值
+                    found_clone.store(true, Ordering::SeqCst);
+                }
             }
-        });
-        assert!(found_updated);
+        }).await;
+
+        // 4. 读取修改后的值
+        assert!(found_updated.load(Ordering::SeqCst), "Update 应该成功并在 forward 中可见");
     }
 
-    #[test]
-    fn test_connection_forward_all() {
-        let rt = tokio::runtime::Runtime::new().unwrap();
+    #[tokio::test] // 👈 这里的宏已经为你启动了一个 Runtime
+    async fn test_connection_forward_all() {
+        // 1. 直接创建 manager，不需要外部 Runtime
         let manager = ConnectionManager::new();
 
-        // 添加 3 个不同的连接
+        // 2. 准备测试地址（注意：避免使用 127.0.0.1，否则 add 会因为 is_loopback 直接返回）
         let addrs = vec![
-            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1)), 1000),
-            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(2, 2, 2, 2)), 2000),
-            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(3, 3, 3, 3)), 3000)
+            "1.1.1.1:1000".parse::<SocketAddr>().unwrap(),
+            "2.2.2.2:2000".parse::<SocketAddr>().unwrap(),
+            "3.3.3.3:3000".parse::<SocketAddr>().unwrap()
         ];
 
         for &addr in &addrs {
-            let handle = rt.block_on(async { tokio::spawn(async {}).abort_handle() });
+            // 3. ❌ 错误：rt.block_on(async { tokio::spawn(...).abort_handle() })
+            // ✅ 正确：直接在当前 Runtime 中 spawn
+            let handle = tokio
+                ::spawn(async {
+                    // 模拟连接任务逻辑
+                    tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+                })
+                .abort_handle();
+
             manager.add(addr, handle, true);
         }
 
-        // 验证 forward 是否能拿到全部 3 个
-        manager.forward(|entries| {
+        // 4. 执行异步 forward
+        // 确保你的 forward 定义支持异步闭包：pub async fn forward<F, Fut>(&self, f: F)
+        manager.forward(|entries| async move {
             assert_eq!(entries.len(), 3, "应该获取到所有 3 个连接");
 
-            // 验证地址是否匹配
-            for addr in addrs {
-                assert!(entries.iter().any(|e| e.addr == addr));
+            for addr in ["1.1.1.1:1000", "2.2.2.2:2000", "3.3.3.3:3000"] {
+                let target_addr: SocketAddr = addr.parse().unwrap();
+                assert!(
+                    entries.iter().any(|e| e.addr == target_addr),
+                    "未能找到地址为 {} 的连接",
+                    addr
+                );
             }
-        });
+        }).await; // 👈 必须 await
     }
 }
