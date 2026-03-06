@@ -35,13 +35,22 @@ impl TypeMapExt for TypeMap {
         self.insert(TypeId::of::<T>(), Box::new(val));
     }
 }
+
+// --- 基础 Trait 组合 (不带 Box) ---
+// 虽然 Rust 稳定版不能直接定义 trait Alias，但我们可以定义这些别名用于 dyn
+pub type AexReader = dyn AsyncBufRead + Send + Sync + Unpin;
+pub type AexWriter = dyn AsyncWrite + Send + Sync + Unpin;
+
+// --- 包装后的类型 (带 Box) ---
+pub type BoxReader = Box<AexReader>;
+pub type BoxWriter = Box<AexWriter>;
 // --- [Context] ---
 pub struct Context<'a> {
     pub addr: SocketAddr,
     pub accepted: DateTime<Utc>,
     // ⚡ 统一使用 dyn 包装，不再需要 R 和 W 泛型位
-    pub reader: &'a mut Option<Box<dyn AsyncBufRead + Send + Unpin>>,
-    pub writer: &'a mut Option<Box<dyn AsyncWrite + Send + Unpin>>,
+    pub reader: &'a mut Option<BoxReader>,
+    pub writer: &'a mut Option<BoxWriter>,
     pub global: Arc<GlobalContext>,
     pub local: Arc<TypeMap>,
 }
@@ -49,8 +58,8 @@ pub struct Context<'a> {
 impl<'a> Context<'a> {
     // ⚡ 构造函数：接受外部已经包装好的 Option 引用
     pub fn new(
-        reader: &'a mut Option<Box<dyn AsyncBufRead + Send + Unpin>>,
-        writer: &'a mut Option<Box<dyn AsyncWrite + Send + Unpin>>,
+        reader: &'a mut Option<BoxReader>,
+        writer: &'a mut Option<BoxWriter>,
         global: Arc<GlobalContext>,
         addr: SocketAddr,
     ) -> Self {

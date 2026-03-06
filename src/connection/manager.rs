@@ -5,14 +5,13 @@ use std::{
 };
 
 use dashmap::DashMap;
-use tokio::{
-    io::AsyncWrite, net::tcp::OwnedWriteHalf, sync::{Mutex, RwLock}
-};
+use tokio::
+    sync::{Mutex, RwLock}
+;
 use tokio_util::sync::CancellationToken;
 
 use crate::connection::{
-    status::ConnectionStatus,
-    types::{BiDirectionalConnections, ConnectionEntry, NetworkScope},
+    context::BoxWriter, status::ConnectionStatus, types::{BiDirectionalConnections, ConnectionEntry, NetworkScope}
 };
 
 pub struct ConnectionManager {
@@ -76,7 +75,7 @@ impl ConnectionManager {
         }
     }
 
-    pub fn update(&self, addr: SocketAddr, is_client: bool, writer: Arc<Mutex<Box<dyn AsyncWrite + Send + Unpin>>>) {
+    pub fn update(&self, addr: SocketAddr, is_client: bool, writer: Arc<Mutex<BoxWriter>>) {
         let ip = addr.ip();
         let scope = NetworkScope::from_ip(&ip);
         let key = (ip, scope);

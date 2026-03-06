@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
     use aex::{
-        connection::context::{TypeMap, TypeMapExt},
+        connection::context::{BoxWriter, TypeMap, TypeMapExt},
         http::{
             meta::HttpMetadata,
             protocol::{
@@ -13,7 +13,6 @@ mod tests {
         },
     };
     use std::{collections::HashMap, sync::Arc};
-    use tokio::io::AsyncWrite;
 
     #[tokio::test]
     async fn test_send_full_response_manual() {
@@ -22,7 +21,7 @@ mod tests {
 
         // 1. ⚡ 修改：使用 Cursor 包装 Vec，并让 Box 拥有 Cursor 的所有权
         // 这样就满足了 'static 的要求，因为 Box 现在拥有数据，而不是借用数据
-        let mut writer: Option<Box<dyn AsyncWrite + Send + Unpin>> =
+        let mut writer: Option<BoxWriter> =
             Some(Box::new(Cursor::new(Vec::new())));
 
         let local = Arc::new(TypeMap::new());
@@ -85,7 +84,7 @@ mod tests {
 
         // 1. 准备底层数据
         // 我们需要 Cursor 来拥有 Vec，从而满足 Box 的 'static 要求
-        let mut writer_opt: Option<Box<dyn AsyncWrite + Send + Unpin>> =
+        let mut writer_opt: Option<BoxWriter> =
             Some(Box::new(Cursor::new(Vec::new())));
         let local = Arc::new(TypeMap::new());
 

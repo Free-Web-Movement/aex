@@ -1,7 +1,7 @@
+use crate::connection::context::BoxWriter;
 use crate::connection::node::Node;
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
-use tokio::io::AsyncWrite;
 use std::fmt;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -44,7 +44,7 @@ pub struct ConnectionEntry {
     /// 这个数据在握手成功后填入，并在连接生命周期内保持不变
     pub node: Arc<RwLock<Option<Node>>>,
     pub addr: SocketAddr,
-    pub writer: Option<Arc<Mutex<Box<dyn AsyncWrite + Send + Unpin>>>>,
+    pub writer: Option<Arc<Mutex<BoxWriter>>>,
     pub abort_handle: tokio::task::AbortHandle,
     pub cancel_token: CancellationToken,
     pub connected_at: u64,
@@ -68,7 +68,7 @@ impl fmt::Debug for ConnectionEntry {
 
 impl ConnectionEntry {
 
-    pub fn new_empty_node(addr: SocketAddr, writer: Option<Arc<Mutex<Box<dyn AsyncWrite + Send + Unpin>>>>, handle: tokio::task::AbortHandle, cancel_token: CancellationToken) -> Self {
+    pub fn new_empty_node(addr: SocketAddr, writer: Option<Arc<Mutex<BoxWriter>>>, handle: tokio::task::AbortHandle, cancel_token: CancellationToken) -> Self {
         let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
         Self {
             node: Arc::new(RwLock::new(None)),

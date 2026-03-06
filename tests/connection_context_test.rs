@@ -64,10 +64,10 @@ mod tests {
         // 模拟 I/O：使用 dummy 向量模拟 reader 和 writer
         let reader_data = Cursor::new(vec![0u8; 10]);
         let writer_data = Cursor::new(vec![0u8; 10]);
-        let mut reader: Option<Box<dyn AsyncBufRead + Send + Unpin>> =
+        let mut reader: Option<Box<dyn AsyncBufRead + Send + Unpin + Sync>> =
             Some(Box::new(BufReader::new(reader_data)));
 
-        let mut writer: Option<Box<dyn AsyncWrite + Send + Unpin>> = Some(Box::new(writer_data));
+        let mut writer: Option<Box<dyn AsyncWrite + Send + Unpin + Sync>> = Some(Box::new(writer_data));
 
         let mut ctx = Context::new(&mut reader, &mut writer, global.clone(), addr);
 
@@ -115,10 +115,10 @@ mod tests {
 
         let reader_data = Cursor::new(vec![0u8; 10]);
         let writer_data = Cursor::new(vec![0u8; 10]);
-        let mut reader: Option<Box<dyn AsyncBufRead + Send + Unpin>> =
+        let mut reader: Option<Box<dyn AsyncBufRead + Send + Unpin + Sync>> =
             Some(Box::new(BufReader::new(reader_data)));
 
-        let mut writer: Option<Box<dyn AsyncWrite + Send + Unpin>> = Some(Box::new(writer_data));
+        let mut writer: Option<Box<dyn AsyncWrite + Send + Unpin + Sync>> = Some(Box::new(writer_data));
 
         let ctx = Context::new(&mut reader, &mut writer, global.clone(), addr);
 
@@ -204,10 +204,10 @@ mod tests {
 
         // let reader_data = Cursor::new(vec![0u8; 10]);
         // let writer_data = Cursor::new(vec![0u8; 10]);
-        let mut reader: Option<Box<dyn AsyncBufRead + Send + Unpin>> =
+        let mut reader: Option<Box<dyn AsyncBufRead + Send + Unpin + Sync>> =
             Some(Box::new(BufReader::new(reader)));
 
-        let mut writer: Option<Box<dyn AsyncWrite + Send + Unpin>> = Some(Box::new(writer));
+        let mut writer: Option<Box<dyn AsyncWrite + Send + Unpin + Sync>> = Some(Box::new(writer));
 
         let ctx = Context::new(&mut reader, &mut writer, Arc::clone(&Arc::new(global)), remote_addr);
 
@@ -282,9 +282,9 @@ mod tests {
     async fn test_context_type_map_extensions() {
         // 1. 准备 Context 环境
         // 使用空流模拟 reader 和 writer
-        let mut reader_opt: Option<Box<dyn AsyncBufRead + Send + Unpin>> = 
+        let mut reader_opt: Option<Box<dyn AsyncBufRead + Send + Unpin  + Sync>> = 
             Some(Box::new(tokio::io::BufReader::new(empty())));
-        let mut writer_opt: Option<Box<dyn AsyncWrite + Send + Unpin>> = 
+        let mut writer_opt: Option<Box<dyn AsyncWrite + Send + Unpin + Sync>> = 
             Some(Box::new(sink()));
         
         let global = Arc::new(GlobalContext::new("127.0.0.1:8080".parse().unwrap()));

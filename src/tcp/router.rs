@@ -4,10 +4,10 @@ use std::future::Future;
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::Arc;
-use tokio::io::{AsyncBufRead, AsyncReadExt, AsyncWrite};
+use tokio::io::AsyncReadExt;
 use tokio::sync::Mutex;
 
-use crate::connection::context::Context;
+use crate::connection::context::{BoxReader, BoxWriter, Context};
 use crate::connection::global::GlobalContext;
 use crate::connection::types::IDExtractor;
 use crate::tcp::types::{Codec, Command, Frame};
@@ -16,7 +16,11 @@ use crate::tcp::types::{Codec, Command, Frame};
 // use crate::tcp::types::{Codec, Frame, Command, RawCodec, frame_config};
 
 /// ⚡ 修复后的 Handler 签名：使用 BoxFuture 确保异步闭包可用
-pub type CommandHandler<F, C> = dyn Fn(Arc<Mutex<Context<'_>>>, &mut F, &mut C) -> Pin<Box<dyn Future<Output = anyhow::Result<bool>> + Send>>
+pub type CommandHandler<F, C> = dyn Fn(
+        Arc<Mutex<Context<'_>>>,
+        &mut F,
+        &mut C,
+    ) -> Pin<Box<dyn Future<Output = anyhow::Result<bool>> + Send>>
     + Send
     + Sync;
 
@@ -114,8 +118,8 @@ impl Router {
         addr: SocketAddr,
         global: Arc<GlobalContext>,
         // ⚡ 直接传入 Option 的 mutable 引用，这样 handle_frame 才能 take 走并放回
-        reader: &mut Option<Box<dyn AsyncBufRead + Unpin + Send>>,
-        writer: &mut Option<Box<dyn AsyncWrite + Unpin + Send>>,
+        reader: &mut Option<BoxReader>,
+        writer: &mut Option<BoxWriter>,
         extractor: IDExtractor<C>,
     ) -> anyhow::Result<()>
     where
@@ -145,16 +149,13 @@ impl Router {
             while !session_buf.is_empty() {
                 match <F as Codec>::decode(&session_buf) {
                     Ok(frame) => {
-                        // ⚡ 修复点 2：直接透传外部传入的 reader/writer (它们已经是 Option)
-                        // handle_frame 内部会使用 reader.take()
-                        // let mut reader: Option<Box<dyn AsyncBufRead + Send + Unpin>> =
-                        //     Some(Box::new(reader));
-                        // let mut writer: Option<Box<dyn AsyncWrite + Send + Unpin>> =
-                        //     Some(Box::new(writer));
-
                         let ctx = Context::new(reader, writer, global.clone(), addr);
                         let should_continue = self
-                            .handle_frame::<F, C>(Arc::new(Mutex::new(ctx)), frame, extractor.clone())
+                            .handle_frame::<F, C>(
+                                Arc::new(Mutex::new(ctx)),
+                                frame,
+                                extractor.clone(),
+                            )
                             .await?;
 
                         session_buf.clear();

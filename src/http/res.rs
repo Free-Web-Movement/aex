@@ -1,8 +1,8 @@
 use std::{collections::HashMap, sync::Arc};
-use tokio::io::{AsyncWrite, AsyncWriteExt};
+use tokio::io::AsyncWriteExt;
 
 use crate::{
-    connection::context::{ TypeMap, TypeMapExt},
+    connection::context::{BoxWriter, TypeMap, TypeMapExt},
     http::{
         meta::HttpMetadata,
         protocol::{header::HeaderKey, status::StatusCode, version::HttpVersion},
@@ -10,12 +10,11 @@ use crate::{
 };
 
 pub struct Response<'a> {
-    pub writer: &'a mut Option<Box<dyn AsyncWrite + Send + Unpin>>,
+    pub writer: &'a mut Option<BoxWriter>,
     pub local: Arc<TypeMap>,
 }
 
-impl<'a> Response<'a>
-{
+impl<'a> Response<'a> {
     pub async fn send(
         &mut self,
         headers: &HashMap<HeaderKey, String>,

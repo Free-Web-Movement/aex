@@ -1,13 +1,10 @@
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use anyhow::{Context, bail};
-use tokio::{
-    io::{AsyncBufRead, AsyncBufReadExt},
-    time::timeout,
-};
+use tokio::{io::AsyncBufReadExt, time::timeout};
 
 use crate::{
-    connection::context::{TypeMap, TypeMapExt},
+    connection::context::{BoxReader, TypeMap, TypeMapExt},
     http::{
         meta::HttpMetadata,
         middlewares::websocket::WebSocket,
@@ -26,7 +23,7 @@ pub const MAX_CAPACITY: i32 = 1024;
 pub const TIME_LIMIT: i32 = 500;
 
 pub struct Request<'a> {
-    pub reader: &'a mut Option<Box<dyn AsyncBufRead + Send + Unpin>>,
+    pub reader: &'a mut Option<BoxReader>,
     pub local: Arc<TypeMap>,
 }
 
@@ -204,10 +201,7 @@ impl<'a> Request<'a> {
     /// @param reader: 实现异步读的流（如 TcpStream 的 ReadHalf）
     /// @param local: 用于存储解析结果的 TypeMap
     /// @param peer_addr: 远程节点的物理地址
-    pub fn new(
-        reader: &'a mut Option<Box<dyn AsyncBufRead + Send + Unpin>>,
-        local: Arc<TypeMap>,
-    ) -> Self {
+    pub fn new(reader: &'a mut Option<BoxReader>, local: Arc<TypeMap>) -> Self {
         Self { reader, local }
     }
 }

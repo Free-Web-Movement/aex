@@ -1,13 +1,13 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tokio::io::{AsyncBufRead, AsyncWrite, BufReader, BufWriter};
+use tokio::io::{BufReader, BufWriter};
 use tokio::net::TcpListener;
 use tokio::net::UdpSocket;
 
 use crate::communicators::event::{Event, EventCallback};
 use crate::communicators::pipe::PipeCallback;
 use crate::communicators::spreader::SpreadCallback;
-use crate::connection::context::TypeMapExt;
+use crate::connection::context::{BoxReader, BoxWriter, TypeMapExt};
 use crate::connection::global::GlobalContext;
 use crate::connection::types::IDExtractor;
 use crate::http::protocol::method::HttpMethod;
@@ -119,9 +119,9 @@ impl AexServer {
                     let buf_reader = BufReader::new(reader);
                     let buf_writer = BufWriter::new(writer);
 
-                    let mut r_opt: Option<Box<dyn AsyncBufRead + Unpin + Send>> =
+                    let mut r_opt: Option<BoxReader> =
                         Some(Box::new(buf_reader));
-                    let mut w_opt: Option<Box<dyn AsyncWrite + Unpin + Send>> =
+                    let mut w_opt: Option<BoxWriter> =
                         Some(Box::new(buf_writer));
                     return tr
                         .clone()

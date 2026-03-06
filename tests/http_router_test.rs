@@ -21,53 +21,10 @@ mod tests {
         },
         route,
         server::{AexServer, HTTPServer},
-        tcp::types::{Codec, Command, Frame, RawCodec},
+        tcp::types::{Command, RawCodec},
     };
-    use bincode::{Decode, Encode};
     use futures::FutureExt;
     use tokio::time::sleep;
-
-    #[derive(serde::Serialize, serde::Deserialize, Encode, Decode, Clone, Debug)]
-    pub struct MockProtocol(Vec<u8>);
-
-    impl Frame for MockProtocol {
-        fn validate(&self) -> bool {
-            !self.0.is_empty()
-        }
-        fn command(&self) -> Option<&Vec<u8>> {
-            Some(&self.0)
-        }
-        fn payload(&self) -> Option<Vec<u8>> {
-            Some(self.0.clone())
-        }
-    }
-
-    impl Command for MockProtocol {
-        fn id(&self) -> u32 {
-            self.0.first().cloned().unwrap_or(0) as u32
-        }
-        
-        fn data(&self) -> &Vec<u8> {
-            &self.0
-        }
-        
-    }
-
-    impl Codec for MockProtocol {
-        fn decode(src: &[u8]) -> anyhow::Result<Self> {
-            // 模拟异常：如果字节太长或特定字节则报错，验证服务器健壮性
-            if src.len() > 1024 {
-                return Err(anyhow::anyhow!("OOM Protected"));
-            }
-            if src == &[0xff, 0xff, 0, 0] {
-                return Err(anyhow::anyhow!("Simulated Decode Error"));
-            }
-            Ok(Self(src.to_vec()))
-        }
-        fn encode(&self) -> Vec<u8> {
-            self.0.clone()
-        }
-    }
 
     #[test]
     fn test_header_key_standard_match() {

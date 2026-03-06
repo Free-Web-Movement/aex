@@ -3,17 +3,15 @@ mod router_tests {
     use std::{net::SocketAddr, sync::Arc};
 
     use aex::{
-        connection::{context::Context, global::GlobalContext},
+        connection::{context::{BoxReader, BoxWriter, Context}, global::GlobalContext},
         tcp::{
             router::Router,
             types::{Codec, Command, Frame, RawCodec},
         },
     };
     use bincode::{Decode, Encode};
-    use futures::io::BufReader;
     use serde::{Deserialize, Serialize};
     use tokio::{
-        io::{AsyncBufRead, AsyncRead, AsyncWrite},
         net::tcp::{OwnedReadHalf, OwnedWriteHalf},
         sync::Mutex,
     };
@@ -86,10 +84,10 @@ mod router_tests {
 
         let (r, w) = mock_io().await;
 
-        let mut r_opt: Option<Box<dyn AsyncBufRead + Send + Unpin>> =
+        let mut r_opt: Option<BoxReader> =
             Some(Box::new(tokio::io::BufReader::new(r)));
 
-        let mut w_opt: Option<Box<dyn AsyncWrite + Send + Unpin>> = Some(Box::new(w));
+        let mut w_opt: Option<BoxWriter> = Some(Box::new(w));
         let ctx = Context::new(&mut r_opt, &mut w_opt, arc_g.clone(), addr);
         let ctx = Arc::new(Mutex::new(ctx));
         let ctx_guard = ctx.lock().await;
@@ -238,10 +236,10 @@ mod router_tests {
 
             assert!(!frame.clone().is_flat());
 
-            let mut r_opt: Option<Box<dyn AsyncBufRead + Send + Unpin>> =
+            let mut r_opt: Option<BoxReader> =
                 Some(Box::new(tokio::io::BufReader::new(_r2)));
 
-            let mut w_opt: Option<Box<dyn AsyncWrite + Send + Unpin>> = Some(Box::new(w2));
+            let mut w_opt: Option<BoxWriter> = Some(Box::new(w2));
             let ctx = Context::new(&mut r_opt, &mut w_opt, arc_g.clone(), addr);
             let ctx = Arc::new(Mutex::new(ctx));
 
@@ -284,8 +282,8 @@ mod router_tests {
 
         let (_r_real, w_real) = mock_io().await;
 
-        let mut r_none: Option<Box<dyn AsyncBufRead + Send + Unpin>> = None;
-        let mut w_some: Option<Box<dyn AsyncWrite + Send + Unpin>> = Some(Box::new(w_real));
+        let mut r_none: Option<BoxReader> = None;
+        let mut w_some: Option<BoxWriter> = Some(Box::new(w_real));
 
         let ctx = Context::new(&mut r_none, &mut w_some, arc_g.clone(), addr);
         let ctx = Arc::new(Mutex::new(ctx));
@@ -336,14 +334,14 @@ mod router_tests {
         // 逻辑会通过：frame.validate() -> frame.handle() -> decode -> cmd.validate() -> handlers.get()
         // 然后在 reader.take() 成功后，执行 writer.take() 时触发错误
 
-        // let mut r_some: Option<Box<dyn AsyncBufRead + Send + Unpin>> = Some(Box::new(r_real));
-        // let mut w_none: Option<Box<dyn AsyncWrite + Send + Unpin>> = None;
+        // let mut r_some: Option<BoxReader> = Some(Box::new(r_real));
+        // let mut w_none: Option<BoxWriter> = None;
         // let mut ctx = Context::new(&mut r_some, &mut w_some, arc_g.clone(), addr);
 
-        let mut r_some: Option<Box<dyn AsyncBufRead + Send + Unpin>> =
+        let mut r_some: Option<BoxReader> =
             Some(Box::new(tokio::io::BufReader::new(r_real)));
 
-        let mut w_none: Option<Box<dyn AsyncWrite + Send + Unpin>> = None;
+        let mut w_none: Option<BoxWriter> = None;
         let ctx = Context::new(&mut r_some, &mut w_none, arc_g.clone(), addr);
         let ctx = Arc::new(Mutex::new(ctx));
 

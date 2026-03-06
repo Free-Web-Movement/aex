@@ -1,13 +1,13 @@
 use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 
 use tokio::{
-    io::{AsyncBufRead, AsyncReadExt, AsyncWrite, BufReader, BufWriter},
+    io::{AsyncReadExt, BufReader, BufWriter},
     net::tcp::{OwnedReadHalf, OwnedWriteHalf},
 };
 
 use crate::{
     connection::{
-        context::{Context, TypeMapExt},
+        context::{BoxReader, BoxWriter, Context, TypeMapExt},
         global::GlobalContext,
     },
     http::{
@@ -149,8 +149,8 @@ impl Router {
         writer: BufWriter<OwnedWriteHalf>,
         peer_addr: SocketAddr,
     ) -> anyhow::Result<()> {
-        let mut reader: Option<Box<dyn AsyncBufRead + Send + Unpin>> = Some(Box::new(reader));
-        let mut writer: Option<Box<dyn AsyncWrite + Send + Unpin>> = Some(Box::new(writer));
+        let mut reader: Option<BoxReader> = Some(Box::new(reader));
+        let mut writer: Option<BoxWriter> = Some(Box::new(writer));
         let mut ctx = Context::new(&mut reader, &mut writer, global, peer_addr);
         ctx.req().parse_to_local().await?;
         // handle_request 返回 true 表示所有中间件和 Handler 正常通过
@@ -224,7 +224,7 @@ impl Router {
                 } else {
                     return false;
                 }
-            } 
+            }
 
             // 6. 关键步骤：更新 meta 并同步回 ctx.local
             meta.params = Some(params);
