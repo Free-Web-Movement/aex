@@ -31,15 +31,6 @@ pub trait Codec: Serialize + for<'de> Deserialize<'de> + Encode + Decode<()> + S
     }
 }
 
-// pub type StreamExecutor = Box<
-//     dyn Fn(
-//             OwnedReadHalf,
-//             OwnedWriteHalf,
-//         ) -> Pin<Box<dyn Future<Output = anyhow::Result<bool>> + Send>>
-//         + Send
-//         + Sync,
-// >;
-
 pub trait Frame: Codec {
     // 生成校验数据
     fn payload(&self) -> Option<Vec<u8>>;

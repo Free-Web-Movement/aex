@@ -1,49 +1,99 @@
 use crate::{
-    connection::context::{Context, TypeMapExt},
+    connection::context::{ Context, TypeMapExt },
     http::{
         meta::HttpMetadata,
-        protocol::{header::HeaderKey, method::HttpMethod},
-        types::{BinaryHandler, Executor, TextHandler},
+        protocol::{ header::HeaderKey, method::HttpMethod },
+        types::{ Executor },
+        websocket::{ WSCodec, WSFrame, WebSocketHandler },
     },
+    // 假设这些是你定义的路径
 };
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
-use sha1::{Digest, Sha1};
-use std::{collections::HashMap, sync::Arc};
-use tokio::{
-    io::{AsyncBufRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
-    sync::Mutex,
-};
+use sha1::{ Digest, Sha1 };
+use std::{ collections::HashMap, sync::Arc, pin::Pin, task::{ Poll, Context as TaskContext } };
+use tokio::{ io::{ AsyncRead, AsyncWrite, AsyncWriteExt, ReadBuf } };
+use tokio_util::codec::Framed;
+use futures::{ SinkExt, StreamExt, FutureExt };
+
+use futures::future::BoxFuture;
+
+/// 用于组合 Context 中的 reader 和 writer
+struct CombinedStream {
+    reader: Box<dyn tokio::io::AsyncRead + Send + Unpin>,
+    writer: Box<dyn tokio::io::AsyncWrite + Send + Unpin>,
+}
+
+impl AsyncRead for CombinedStream {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut TaskContext<'_>,
+        buf: &mut ReadBuf<'_>
+    ) -> Poll<std::io::Result<()>> {
+        Pin::new(&mut self.reader).poll_read(cx, buf)
+    }
+}
+
+impl AsyncWrite for CombinedStream {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut TaskContext<'_>,
+        buf: &[u8]
+    ) -> Poll<std::io::Result<usize>> {
+        Pin::new(&mut self.writer).poll_write(cx, buf)
+    }
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut TaskContext<'_>) -> Poll<std::io::Result<()>> {
+        Pin::new(&mut self.writer).poll_flush(cx)
+    }
+    fn poll_shutdown(
+        mut self: Pin<&mut Self>,
+        cx: &mut TaskContext<'_>
+    ) -> Poll<std::io::Result<()>> {
+        Pin::new(&mut self.writer).poll_shutdown(cx)
+    }
+}
 
 pub struct WebSocket {
-    pub on_text: Option<TextHandler>,
-    pub on_binary: Option<BinaryHandler>,
+    pub on_frame: Option<WebSocketHandler>,
 }
 
 impl WebSocket {
+    pub fn new() -> Self {
+        Self { on_frame: None }
+    }
+
+    /// 设置通用处理器
+    pub fn set_handler<F>(mut self, handler: F) -> Self
+        where
+            F: Fn(&WebSocket, &mut Context, WSFrame) -> BoxFuture<'static, bool> +
+                Send +
+                Sync +
+                'static
+    {
+        self.on_frame = Some(Arc::new(handler));
+        self
+    }
+
     /// 判断请求是否是 WebSocket 握手
     pub fn check(method: HttpMethod, headers: &HashMap<HeaderKey, String>) -> bool {
         if method != HttpMethod::GET {
             return false;
         }
-
         let upgrade = headers
             .get(&HeaderKey::Upgrade)
             .map(|v| v.eq_ignore_ascii_case("websocket"))
             .unwrap_or(false);
-
         let connection = headers
             .get(&HeaderKey::Connection)
             .map(|v| v.to_ascii_lowercase().contains("upgrade"))
             .unwrap_or(false);
-
         upgrade && connection
     }
 
-    /// 完成 WebSocket 握手 (泛型化)
-    pub async fn handshake<'a>(
-        writer: &'a mut (dyn AsyncWrite + Send + Unpin),
-        headers: &HashMap<HeaderKey, String>,
+    /// 完成 WebSocket 握手
+    pub async fn handshake(
+        writer: &mut (dyn AsyncWrite + Send + Unpin),
+        headers: &HashMap<HeaderKey, String>
     ) -> anyhow::Result<()> {
         let key = headers
             .get(&HeaderKey::SecWebSocketKey)
@@ -54,298 +104,121 @@ impl WebSocket {
         sha.update(b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11");
         let accept_key = STANDARD.encode(sha.finalize());
 
-        let response = format!(
-            "HTTP/1.1 101 Switching Protocols\r\n\
+        let response =
+            format!("HTTP/1.1 101 Switching Protocols\r\n\
             Upgrade: websocket\r\n\
             Connection: Upgrade\r\n\
-            Sec-WebSocket-Accept: {}\r\n\r\n",
-            accept_key
-        );
+            Sec-WebSocket-Accept: {}\r\n\r\n", accept_key);
 
         writer.write_all(response.as_bytes()).await?;
         writer.flush().await?;
         Ok(())
     }
 
-    /// 发送文本消息 (泛型化)
-    pub async fn send_text<'a>(
-        writer: &'a mut (dyn AsyncWrite + Send + Unpin),
-        msg: &str,
-    ) -> anyhow::Result<()> {
-        Self::send_frame(writer, 0x1, msg.as_bytes()).await
-    }
-
-    /// 发送二进制消息 (泛型化)
-    pub async fn send_binary<'a>(
-        writer: &'a mut (dyn AsyncWrite + Send + Unpin),
-        payload: &[u8],
-    ) -> anyhow::Result<()> {
-        Self::send_frame(writer, 0x2, payload).await
-    }
-
-    /// 发送 ping (泛型化)
-    pub async fn send_ping<'a>(
-        writer: &'a mut (dyn AsyncWrite + Send + Unpin),
-    ) -> anyhow::Result<()> {
-        Self::send_frame(writer, 0x9, &[]).await
-    }
-
-    /// 发送 pong (泛型化)
-    pub async fn send_pong<'a>(
-        writer: &'a mut (dyn AsyncWrite + Send + Unpin),
-    ) -> anyhow::Result<()> {
-        Self::send_frame(writer, 0xa, &[]).await
-    }
-
-    /// 关闭连接 (泛型化)
-    pub async fn close<'a>(
-        writer: &'a mut (dyn AsyncWrite + Send + Unpin),
-        code: u16,
-        reason: Option<&str>,
-    ) -> anyhow::Result<()> {
-        let reason_bytes = reason.unwrap_or("").as_bytes();
-        let mut payload = Vec::with_capacity(2 + reason_bytes.len());
-        payload.extend_from_slice(&code.to_be_bytes());
-        payload.extend_from_slice(reason_bytes);
-
-        Self::send_frame(writer, 0x8, &payload).await?;
-        writer.flush().await?;
-        Ok(())
-    }
-
-    /// 读取一个完整消息 (泛型化)
-    pub async fn read_full<'a>(
-        reader: &'a mut (dyn AsyncBufRead + Send + Unpin),
-        writer: &'a mut (dyn AsyncWrite + Send + Unpin),
-    ) -> anyhow::Result<(u8, Vec<u8>)> {
-        loop {
-            let mut header = [0u8; 2];
-            reader.read_exact(&mut header).await?;
-
-            if (header[0] & 0x70) != 0 {
-                Self::close(writer, 1002, Some("RSV bits must be 0")).await?;
-                anyhow::bail!("protocol error: reserved bits set");
-            }
-
-            let fin = (header[0] & 0x80) != 0;
-            let opcode = header[0] & 0x0f;
-            let masked = (header[1] & 0x80) != 0;
-            let mut len = (header[1] & 0x7f) as usize;
-
-            if !fin && opcode != 0x0 && opcode < 0x8 {
-                // 如果不是控制帧且 fin=0，说明是分片的起始帧
-                Self::close(writer, 1002, Some("fragmentation not supported")).await?;
-                anyhow::bail!("fragmented frame not supported");
-            }
-
-            if opcode == 0x0 {
-                // 连续帧（Continuation Frame）在没有起始帧的情况下是非法的
-                Self::close(writer, 1002, Some("unexpected continuation frame")).await?;
-                anyhow::bail!("protocol error: continuation frame without start");
-            }
-
-            if !masked {
-                Self::close(writer, 1002, Some("unmasked frame")).await?;
-                anyhow::bail!("protocol error");
-            }
-
-            if opcode >= 0x8 && len > 125 {
-                Self::close(writer, 1002, Some("invalid control frame")).await?;
-                anyhow::bail!("invalid control frame");
-            }
-
-            if len == 126 {
-                let mut b = [0u8; 2];
-                reader.read_exact(&mut b).await?;
-                len = u16::from_be_bytes(b) as usize;
-            } else if len == 127 {
-                let mut b = [0u8; 8];
-                reader.read_exact(&mut b).await?;
-                len = u64::from_be_bytes(b) as usize;
-            }
-
-            let mut mask = [0u8; 4];
-            reader.read_exact(&mut mask).await?;
-
-            let mut payload = vec![0u8; len];
-            reader.read_exact(&mut payload).await?;
-
-            for i in 0..len {
-                payload[i] ^= mask[i % 4];
-            }
-
-            match opcode {
-                0x9 => {
-                    Self::send_pong(writer).await?;
-                    continue;
-                }
-                0xa => continue,
-                0x8 => {
-                    let (code, reason) = match Self::parse_close_payload(&payload) {
-                        Ok(v) => v,
-                        Err(_) => {
-                            Self::close(writer, 1002, Some("protocol error")).await?;
-                            anyhow::bail!("invalid close frame");
-                        }
-                    };
-                    Self::close(writer, code, reason).await?;
-                    anyhow::bail!("connection closed");
-                }
-                0x1 | 0x2 => return Ok((opcode, payload)),
-                _ => {
-                    Self::close(writer, 1002, Some("unknown opcode")).await?;
-                    anyhow::bail!("unknown opcode");
-                }
-            }
-        }
-    }
-
-    /// 内部封装：发送任意 opcode 帧 (泛型化)
-    pub async fn send_frame<'a>(
-        writer: &'a mut (dyn AsyncWrite + Send + Unpin),
-        opcode: u8,
-        payload: &[u8],
-    ) -> anyhow::Result<()> {
-        let mut frame = Vec::with_capacity(2 + payload.len());
-        frame.push(0x80 | (opcode & 0x0f));
-
-        if payload.len() < 126 {
-            frame.push(payload.len() as u8);
-        } else if payload.len() <= 65535 {
-            frame.push(126);
-            frame.extend_from_slice(&(payload.len() as u16).to_be_bytes());
-        } else {
-            frame.push(127);
-            frame.extend_from_slice(&(payload.len() as u64).to_be_bytes());
-        }
-
-        frame.extend_from_slice(payload);
-        writer.write(&frame).await?;
-        writer.flush().await?;
-        Ok(())
-    }
-
-    /// WebSocket 运行循环 (泛型化)
+    /// WebSocket 核心运行循环
     pub async fn run(ws: &WebSocket, ctx: &mut Context) -> anyhow::Result<()> {
-        loop {
-            let (opcode, payload) = {
-                // let mut writer_lock = ctx.writer;
-                let w = ctx
-                    .writer
-                    .as_deref_mut()
-                    .unwrap();
-                let r = ctx
-                    .reader
-                    .as_deref_mut()
-                    .unwrap();
+        let reader = ctx.reader.take().ok_or_else(|| anyhow::anyhow!("Reader missing"))?;
+        let writer = ctx.writer.take().ok_or_else(|| anyhow::anyhow!("Writer missing"))?;
 
-                match Self::read_full(r, w).await {
-                    Ok(v) => v,
-                    Err(e) => return Err(e),
+        let io = CombinedStream { reader, writer };
+        let mut framed = Framed::new(io, WSCodec);
+
+        while let Some(result) = framed.next().await {
+            let frame = match result {
+                Ok(f) => f,
+                Err(e) => {
+                    return Err(anyhow::anyhow!("Protocol error: {}", e));
                 }
             };
 
-            match opcode {
-                0x1 => {
-                    if let Some(handler) = &ws.on_text {
-                        let handler = handler.clone();
-                        let text = match String::from_utf8(payload) {
-                            Ok(s) => s,
-                            Err(_) => {
-                                // let mut writer_lock = ctx.writer.lock().await;
-                                let w = ctx.writer.as_deref_mut().unwrap();
-                                // RFC 规定：Text 帧格式错误应返回 1007
-                                let _ = Self::close(w, 1007, Some("invalid utf8")).await;
-                                break;
-                            }
-                        };
-
-                        if !handler(ws, ctx, text).await {
-                            // let mut writer_lock = ctx.writer.lock().await;
-                            let w = ctx.writer.as_deref_mut().unwrap();
-                            let _ = Self::close(w, 1000, Some("handler rejected")).await;
-                            break;
-                        }
-                    }
+            // 检查是否有通用处理器
+            if let Some(handler) = &ws.on_frame {
+                // 调用处理器。如果返回 false，表示业务层要求关闭连接
+                if !handler(ws, ctx, frame.clone()).await {
+                    let _ = framed.send(WSFrame::Close(1000, Some("Handler exit".into()))).await;
+                    break;
                 }
-                0x2 => {
-                    if let Some(handler) = &ws.on_binary {
-                        let handler = handler.clone();
-                        if !handler(ws, ctx, payload).await {
-                            let w = ctx.writer.as_deref_mut().unwrap();
+            }
 
-                            let _ = Self::close(w, 1000, Some("handler rejected")).await;
-                            break;
-                        }
-                    }
+            // 默认行为处理 (如果 Handler 没拦截或者没设置，可以在这里做兜底)
+            match frame {
+                WSFrame::Ping(p) => {
+                    framed.send(WSFrame::Pong(p)).await?;
                 }
-                _ => unreachable!(),
+                WSFrame::Close(code, reason) => {
+                    let _ = framed.send(WSFrame::Close(code, reason)).await;
+                    break;
+                }
+                _ => {} // Text/Binary 在没有设置 Handler 时默认忽略
             }
         }
         Ok(())
     }
 
-    pub fn parse_close_payload(payload: &[u8]) -> anyhow::Result<(u16, Option<&str>)> {
-        match payload.len() {
-            0 => Ok((1000, None)),
-            1 => anyhow::bail!("invalid close payload length"),
-            _ => {
-                let code = u16::from_be_bytes([payload[0], payload[1]]);
-                match code {
-                    // 剔除 1005, 1006, 1015 等非法显式代码
-                    1000 | 1001 | 1002 | 1003 | 1007 | 1008 | 1009 | 1010 | 1011 => {}
-                    3000..=4999 => {}
-                    _ => anyhow::bail!("invalid close code"), // 1005 现在会走到这里
-                }
-                let reason = if payload.len() > 2 {
-                    let s = std::str::from_utf8(&payload[2..])
-                        .map_err(|_| anyhow::anyhow!("invalid utf8 close reason"))?;
-                    Some(s)
-                } else {
-                    None
-                };
-                Ok((code, reason))
-            }
-        }
-    }
-
-    /// 生成 WebSocket 中间件 (泛型化支持)
+    /// 生成 WebSocket 中件间
     pub fn to_middleware(ws: WebSocket) -> Box<Executor> {
-        use futures::FutureExt;
-        let ws = Arc::new(Mutex::new(ws));
+        let ws = Arc::new(ws);
 
         Box::new(move |ctx: &mut Context| {
             let ws = ws.clone();
-            (async move {
-                let meta = ctx.local.get_value::<HttpMetadata>().unwrap();
-                if meta.method != HttpMethod::GET {
-                    return true;
-                }
+            (
+                async move {
+                    let meta = match ctx.local.get_value::<HttpMetadata>() {
+                        Some(m) => m,
+                        None => {
+                            return true;
+                        }
+                    };
 
-                if !WebSocket::check(meta.method, &meta.headers) {
-                    return true;
-                }
-
-                let ws_guard = ws.lock().await;
-
-                // 构建 WebSocket 并握手
-                {
-                    // let mut writer_lock = ctx.writer.lock().await;
-                    let w = ctx.writer.as_deref_mut().unwrap();
-                    if let Err(e) = Self::handshake(w, &meta.headers).await {
-                        eprintln!("WebSocket handshake failed: {:?}", e);
-                        return false;
+                    if !Self::check(meta.method, &meta.headers) {
+                        return true;
                     }
-                }
 
-                // 启动 WebSocket 循环
-                if let Err(e) = Self::run(&ws_guard, ctx).await {
-                    eprintln!("WebSocket run error: {:?}", e);
-                }
+                    // 进行握手
+                    {
+                        let w = ctx.writer.as_deref_mut().unwrap();
+                        if let Err(e) = Self::handshake(w, &meta.headers).await {
+                            eprintln!("WS Handshake Error: {:?}", e);
+                            return false;
+                        }
+                    }
 
-                false
-            })
-            .boxed()
+                    // 启动循环 (内部会接管 reader/writer)
+                    if let Err(e) = Self::run(&ws, ctx).await {
+                        eprintln!("WS Connection Ended: {:?}", e);
+                    }
+
+                    false // 拦截，不继续执行后续 HTTP 中间件
+                }
+            ).boxed()
         })
+    }
+
+    /// 严格按照 RFC 6455 解析 Close 帧负载，返回借用的 &str 以优化性能
+    pub fn parse_close_payload(payload: &[u8]) -> anyhow::Result<(u16, Option<&str>)> {
+        let len = payload.len();
+
+        // 1. 空负载：协议规定视为 1005 (No Status Rcvd)
+        if len == 0 {
+            return Ok((1005, None));
+        }
+
+        // 2. 异常长度：如果有载荷但不足 2 字节，属于协议错误
+        if len < 2 {
+            anyhow::bail!("Incomplete close status code");
+        }
+
+        // 3. 提取状态码 (Big-Endian)
+        let code = u16::from_be_bytes([payload[0], payload[1]]);
+
+        // 4. 解析原因 (必须是有效的 UTF-8)
+        let reason = if len > 2 {
+            let s = std::str::from_utf8(&payload[2..])?;
+            Some(s)
+        } else {
+            None
+        };
+
+        Ok((code, reason))
     }
 }

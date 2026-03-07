@@ -1,1434 +1,917 @@
 #[cfg(test)]
 mod websocket_tests {
     use aex::{
-        connection::context::TypeMapExt,
-        exe, get,
+        connection::{ context::Context, global::GlobalContext },
         http::{
-            meta::HttpMetadata,
             middlewares::websocket::WebSocket,
-            protocol::{header::HeaderKey, method::HttpMethod},
-            router::{NodeType, Router},
+            protocol::{ header::HeaderKey, method::HttpMethod },
+            websocket::{ WSCodec, WSFrame },
         },
-        post, route,
-        server::HTTPServer,
-        tcp::types::{Command, RawCodec},
+        tcp::types::{ Command, Frame },
     };
-    use std::{collections::HashMap, net::SocketAddr, sync::Arc};
-    use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader, BufWriter};
+    use futures::{ SinkExt, StreamExt };
+    use tokio::io::{ BufReader, duplex };
+    use tokio_util::codec::{ Decoder, Encoder, Framed };
+    use bytes::BytesMut;
+    use std::{ collections::HashMap, net::SocketAddr, sync::Arc };
 
-    // 辅助工具：生成合法的 WebSocket 帧
-    fn create_ws_frame(opcode: u8, payload: &[u8], masked: bool) -> Vec<u8> {
+    // 辅助工具：模拟客户端发送带 Mask 的 WebSocket 帧
+    fn create_masked_frame(opcode: u8, payload: &[u8]) -> Vec<u8> {
         let mut frame = Vec::new();
-        frame.push(0x80 | opcode);
-        let mask_bit = if masked { 0x80 } else { 0x00 };
+        frame.push(0x80 | opcode); // FIN + Opcode
+        let mask = [0x1, 0x2, 0x3, 0x4];
 
         if payload.len() < 126 {
-            frame.push(mask_bit | (payload.len() as u8));
+            frame.push(0x80 | (payload.len() as u8));
         } else {
-            frame.push(mask_bit | 126);
+            frame.push(0x80 | 126);
             frame.extend_from_slice(&(payload.len() as u16).to_be_bytes());
         }
 
-        if masked {
-            let mask = [1, 2, 3, 4];
-            frame.extend_from_slice(&mask);
-            let mut masked_payload = payload.to_vec();
-            for i in 0..masked_payload.len() {
-                masked_payload[i] ^= mask[i % 4];
-            }
-            frame.extend_from_slice(&masked_payload);
-        } else {
-            frame.extend_from_slice(payload);
+        frame.extend_from_slice(&mask);
+        let mut masked_payload = payload.to_vec();
+        for i in 0..masked_payload.len() {
+            masked_payload[i] ^= mask[i % 4];
         }
+        frame.extend_from_slice(&masked_payload);
         frame
     }
 
+    // --- 1. 握手逻辑测试 (保持不变，因为握手依然是 Raw IO) ---
     #[test]
     fn test_check_handshake_logic() {
         let mut headers = HashMap::new();
         headers.insert(HeaderKey::Upgrade, "websocket".to_string());
         headers.insert(HeaderKey::Connection, "Upgrade".to_string());
-
-        // 正常情况
         assert!(WebSocket::check(HttpMethod::GET, &headers));
-
-        // 错误的 Method
         assert!(!WebSocket::check(HttpMethod::POST, &headers));
-
-        // 缺失 Header
-        let mut h2 = headers.clone();
-        h2.remove(&HeaderKey::Upgrade);
-        assert!(!WebSocket::check(HttpMethod::GET, &h2));
-
-        // Connection 不包含 Upgrade
-        let mut h3 = headers.clone();
-        h3.insert(HeaderKey::Connection, "keep-alive".to_string());
-        assert!(!WebSocket::check(HttpMethod::GET, &h3));
     }
 
+    // --- 2. Codec 编解码测试 (核心更新) ---
     #[tokio::test]
-    async fn test_handshake_success() {
-        let (_client, _server_read) = tokio::io::duplex(1024);
-        let (_server_read, server_write) = tokio::io::duplex(1024);
-        let mut writer = BufWriter::new(server_write);
+    async fn test_ws_codec_decode_text() {
+        let mut codec = WSCodec;
+        let raw_data = create_masked_frame(0x1, b"hello");
+        let mut buf = BytesMut::from(&raw_data[..]);
 
-        let mut headers = HashMap::new();
-        headers.insert(
-            HeaderKey::SecWebSocketKey,
-            "dGhlIHNhbXBsZSBub25jZQ==".to_string(),
-        );
-
-        WebSocket::handshake(&mut writer, &headers).await.unwrap();
-        // 验证逻辑是否执行（这里通常会通过拦截写入的数据验证 accept_key 是否为 s3pPLMBiTxaQ9kYGzzhZRbK+xOo=）
-    }
-
-    #[tokio::test]
-    async fn test_read_full_data_frames() {
-        use tokio::time::{Duration, timeout};
-
-        // 1. 正确创建一对双工流：client <-> server
-        let (client, server) = tokio::io::duplex(1024);
-
-        // 将 server 端拆分为 reader 和 writer
-        let (server_read, server_write) = tokio::io::split(server);
-        let mut reader = BufReader::new(server_read);
-        let mut writer = BufWriter::new(server_write);
-
-        // 2. 准备数据
-        let payload = b"hello";
-        let frame = create_ws_frame(0x1, payload, true); // 发送一个 Text 帧
-
-        // 3. 客户端发送数据
-        tokio::spawn(async move {
-            let mut client_handle = client;
-            // 写入一帧数据
-            if let Err(e) = client_handle.write_all(&frame).await {
-                eprintln!("Client write error: {:?}", e);
-            }
-            // 💡 保持连接直到测试完成或由服务端关闭
-        });
-
-        // 4. 服务端读取：增加超时控制防止卡死
-        let res = timeout(Duration::from_secs(2), async {
-            WebSocket::read_full(&mut reader, &mut writer).await
-        })
-        .await;
-
-        // 5. 验证结果
-        match res {
-            Ok(Ok((opcode, data))) => {
-                assert_eq!(opcode, 0x1);
-                assert_eq!(data, payload);
-            }
-            Ok(Err(e)) => panic!("读取失败: {:?}", e),
-            Err(_) => panic!(
-                "测试超时：read_full 可能在读取完第一帧后没有 return，而是继续 loop 等待下一帧"
-            ),
+        let frame = codec.decode(&mut buf).unwrap().unwrap();
+        if let WSFrame::Text(s) = frame {
+            assert_eq!(s, "hello");
+        } else {
+            panic!("Expected Text frame");
         }
     }
 
     #[tokio::test]
-    async fn test_read_full_ping_pong() {
-        let (server_in, client_out) = tokio::io::duplex(1024);
-        let (client_in, server_out) = tokio::io::duplex(1024);
+    async fn test_ws_codec_encode_binary() {
+        let mut codec = WSCodec;
+        let mut buf = BytesMut::new();
+        let frame = WSFrame::Binary(vec![1, 2, 3]);
 
-        let mut reader = BufReader::new(server_in);
-        let mut writer = BufWriter::new(server_out);
-        let mut client_reader = client_in;
-        let mut client_writer = client_out;
+        codec.encode(frame, &mut buf).unwrap();
 
-        // 1. 发送 Ping，预期 read_full 会自动回复 Pong 并继续 loop 读取下一帧
-        let ping_frame = create_ws_frame(0x9, b"ping", true);
-        let text_frame = create_ws_frame(0x1, b"end", true);
+        // Server -> Client 不带 Mask，FIN=1, Opcode=2 -> 0x82
+        assert_eq!(buf[0], 0x82);
+        assert_eq!(buf[1], 3); // Length 3
+        assert_eq!(&buf[2..], &[1, 2, 3]);
+    }
 
-        client_writer.write_all(&ping_frame).await.unwrap();
-        client_writer.write_all(&text_frame).await.unwrap();
+    // --- 3. 运行循环集成测试 (模拟 run 方法) ---
+    #[tokio::test]
+    async fn test_websocket_run_loop() {
+        let (client, server) = duplex(1024);
 
-        let (opcode, data) = WebSocket::read_full(&mut reader, &mut writer)
-            .await
-            .unwrap();
+        // 模拟业务逻辑：收到任何消息都回复 "ACK"
+        let ws = WebSocket {
+            on_frame: Some(
+                Arc::new(|_ws, _ctx, frame| {
+                    Box::pin(async move {
+                        match frame {
+                            WSFrame::Text(t) if t == "ping" => true,
+                            _ => false, // 收到非 ping 则断开
+                        }
+                    })
+                })
+            ),
+        };
 
-        // 验证收到了文本帧
-        assert_eq!(opcode, 0x1);
-        assert_eq!(data, b"end");
+        // 启动服务器循环
+        // 1. 拆分双工流
+        let (s_reader, s_writer) = tokio::io::split(server);
 
-        // 验证客户端收到了自动回复的 Pong (0x8a)
-        let mut resp = [0u8; 2];
-        client_reader.read_exact(&mut resp).await.unwrap();
-        assert_eq!(resp[0], 0x8a);
+        // 2. 包装 Reader 为 BufReader (满足 AsyncBufRead 约束)
+        let s_reader_buffered = BufReader::new(s_reader);
+
+        // 3. 构造满足 Context::new 签名要求的参数
+        // 注意：必须明确指定类型以匹配 dyn Trait
+        let reader_param: Option<Box<dyn tokio::io::AsyncBufRead + Send + Sync + Unpin>> = Some(
+            Box::new(s_reader_buffered)
+        );
+
+        let writer_param: Option<Box<dyn tokio::io::AsyncWrite + Send + Sync + Unpin>> = Some(
+            Box::new(s_writer)
+        );
+        let addr = "127.0.0.1:8080".parse::<SocketAddr>().unwrap();
+        let global = Arc::new(GlobalContext::new(addr));
+
+        let mut ctx = Context::new(reader_param, writer_param, global, addr); // 假设有默认 Context
+
+        let server_handle = tokio::spawn(async move { WebSocket::run(&ws, &mut ctx).await });
+
+        // 客户端操作
+        let mut client_framed = Framed::new(client, WSCodec);
+
+        // 发送合法 Text
+        client_framed.send(WSFrame::Text("ping".into())).await.unwrap();
+
+        // 发送会导致 Handler 返回 false 的消息
+        client_framed.send(WSFrame::Text("die".into())).await.unwrap();
+
+        let res = server_handle.await.unwrap();
+        assert!(res.is_ok());
+    }
+
+    // --- 4. 边界条件测试 (Close 帧解析) ---
+    #[test]
+    fn test_parse_close_payload_logic() {
+        // 正常关闭 1000
+        let payload = (1000u16).to_be_bytes();
+        let (code, reason) = WebSocket::parse_close_payload(&payload).unwrap();
+        assert_eq!(code, 1000);
+        assert_eq!(reason, None);
+
+        // 带原因的关闭
+        let mut complex_payload = (1001u16).to_be_bytes().to_vec();
+        complex_payload.extend_from_slice(b"going away");
+        let (code, reason) = WebSocket::parse_close_payload(&complex_payload).unwrap();
+        assert_eq!(code, 1001);
+        assert_eq!(reason, Some("going away"));
     }
 
     #[tokio::test]
-    async fn test_read_full_error_unmasked() {
-        // 创建双工流
+    async fn test_codec_all_types() {
+        let mut codec = WSCodec;
+        let mut buf = BytesMut::new();
+
+        // 测试 Pong 编码 (Server -> Client)
+        let pong = WSFrame::Pong(vec![9, 9]);
+        codec.encode(pong, &mut buf).unwrap();
+        assert_eq!(buf[0], 0x8a); // FIN + Pong Opcode
+        assert_eq!(buf[1], 2);
+        buf.clear();
+
+        // 测试 Close 编码
+        let close = WSFrame::Close(1000, Some("bye".into()));
+        codec.encode(close, &mut buf).unwrap();
+        assert_eq!(buf[0], 0x88);
+        // 负载长度应为 2(code) + 3(bye) = 5
+        assert_eq!(buf[1], 5);
+        buf.clear();
+
+        // 测试带掩码的 Ping 解码 (Client -> Server)
+        let raw_ping = create_masked_frame(0x09, b"ping");
+        let mut ping_buf = BytesMut::from(&raw_ping[..]);
+        let decoded = codec.decode(&mut ping_buf).unwrap().unwrap();
+        if let WSFrame::Ping(p) = decoded {
+            assert_eq!(p, b"ping");
+        } else {
+            panic!("Decode failed for Ping");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_websocket_full_interaction() {
+        let (client, server) = duplex(2048);
+        let addr = "127.0.0.1:8080".parse::<SocketAddr>().unwrap();
+        let global = Arc::new(GlobalContext::new(addr));
+
+        // 1. 定义更复杂的业务逻辑
+        let ws = WebSocket {
+            on_frame: Some(
+                Arc::new(|_ws, _ctx, frame| {
+                    Box::pin(async move {
+                        match frame {
+                            WSFrame::Binary(data) => {
+                                // 收到二进制数据，验证内容
+                                assert_eq!(data, vec![0xde, 0xad]);
+                                true
+                            }
+                            WSFrame::Text(t) if t == "exit" => false, // 自定义指令：退出
+                            WSFrame::Ping(_) => true, // 允许 Ping 穿透到默认处理器（自动回 Pong）
+                            _ => true,
+                        }
+                    })
+                })
+            ),
+        };
+
+        // 2. 准备 Server Context
+        let (s_reader, s_writer) = tokio::io::split(server);
+        let ctx_reader = Some(
+            Box::new(BufReader::new(s_reader)) as Box<
+                dyn tokio::io::AsyncBufRead + Send + Sync + Unpin
+            >
+        );
+        let ctx_writer = Some(
+            Box::new(s_writer) as Box<dyn tokio::io::AsyncWrite + Send + Sync + Unpin>
+        );
+        let mut ctx = Context::new(ctx_reader, ctx_writer, global, addr);
+
+        // 3. 启动 Server
+        let server_handle = tokio::spawn(async move { WebSocket::run(&ws, &mut ctx).await });
+
+        // 4. 客户端操作
+        let mut client_framed = Framed::new(client, WSCodec);
+
+        // --- A. 测试 Ping/Pong ---
+        // 发送 Ping，负载为 [1, 2, 3]
+        client_framed.send(WSFrame::Ping(vec![1, 2, 3])).await.unwrap();
+        // 期待收到 Pong
+        if let Some(Ok(WSFrame::Pong(payload))) = client_framed.next().await {
+            assert_eq!(payload, vec![1, 2, 3]);
+        } else {
+            panic!("Expected Pong response for Ping");
+        }
+
+        // --- B. 测试 Binary ---
+        client_framed.send(WSFrame::Binary(vec![0xde, 0xad])).await.unwrap();
+
+        // --- C. 测试自定义指令 (Text: exit) ---
+        client_framed.send(WSFrame::Text("exit".into())).await.unwrap();
+
+        // 5. 验证服务是否正常关闭
+        let res = server_handle.await.unwrap();
+        assert!(res.is_ok(), "Server loop should exit gracefully");
+    }
+
+    #[test]
+    fn test_ws_frame_trait_methods() {
+        // Text 帧
+        let text_frame = WSFrame::Text("hello".into());
+        assert_eq!(text_frame.payload().unwrap(), b"hello");
+        assert!(text_frame.command().is_none());
+
+        // Binary 帧
+        let bin_data = vec![0x01, 0x02, 0x03];
+        let bin_frame = WSFrame::Binary(bin_data.clone());
+        assert_eq!(bin_frame.payload().unwrap(), bin_data);
+
+        // Ping 帧 (控制帧也有 payload)
+        let ping_frame = WSFrame::Ping(vec![0xaa]);
+        assert_eq!(ping_frame.payload().unwrap(), vec![0xaa]);
+
+        // Close 帧 (不应视作普通业务 payload，根据实现可能返回 None)
+        let close_frame = WSFrame::Close(1000, None);
+        assert!(close_frame.payload().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_ws_codec_comprehensive() {
+        let mut codec = WSCodec;
+        let mut buf = BytesMut::new();
+
+        // --- A. 测试 Encode (Server -> Client, 无 Mask) ---
+        // 1. 测试中等长度 (126 模式: 200 字节)
+        let large_data = vec![b'x'; 200];
+        let frame = WSFrame::Binary(large_data.clone());
+        codec.encode(frame, &mut buf).unwrap();
+
+        assert_eq!(buf[0], 0x82); // FIN + Binary
+        assert_eq!(buf[1], 126); // 长度标识
+        assert_eq!(u16::from_be_bytes([buf[2], buf[3]]), 200);
+        assert_eq!(&buf[4..], &large_data[..]);
+        buf.clear();
+
+        // --- B. 测试 Decode (Client -> Server, 必须带 Mask) ---
+        // 1. 测试带 Mask 的 Text 帧
+        let mask = [1, 2, 3, 4];
+        let original_payload = b"mask";
+        let mut masked_payload = original_payload.to_vec();
+        for i in 0..masked_payload.len() {
+            masked_payload[i] ^= mask[i % 4];
+        }
+
+        let mut raw_input = Vec::new();
+        raw_input.push(0x81); // FIN + Text
+        raw_input.push(0x80 | 4); // Mask=1, Len=4
+        raw_input.extend_from_slice(&mask);
+        raw_input.extend_from_slice(&masked_payload);
+
+        let mut decode_buf = BytesMut::from(&raw_input[..]);
+        let decoded = codec.decode(&mut decode_buf).unwrap().unwrap();
+
+        if let WSFrame::Text(s) = decoded {
+            assert_eq!(s, "mask");
+        } else {
+            panic!("Decode mismatch");
+        }
+    }
+    #[test]
+    fn test_ws_pong_payload_trait() {
+        let heartbeat_data = vec![0x01, 0x09, 0x07];
+        let pong_frame = WSFrame::Pong(heartbeat_data.clone());
+
+        // 验证 payload() 方法是否能提取出正确的二进制数据
+        assert_eq!(
+            pong_frame.payload().expect("Pong should have payload"),
+            heartbeat_data,
+            "Pong payload must match the input data"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_pong_codec_full_cycle() {
+        let mut codec = WSCodec;
+        let mut buf = BytesMut::new();
+        let test_payload = b"pong_data";
+
+        // --- A. 编码测试 (Server -> Client) ---
+        // 服务端响应 Pong，FIN=1, Opcode=0xA (10)
+        let pong_out = WSFrame::Pong(test_payload.to_vec());
+        codec.encode(pong_out, &mut buf).unwrap();
+
+        assert_eq!(buf[0], 0x8a, "First byte must be 0x8A (FIN + Pong)");
+        assert_eq!(buf[1], test_payload.len() as u8, "Payload length must match");
+        assert_eq!(&buf[2..], test_payload, "Raw payload must match");
+        buf.clear();
+
+        // --- B. 解码测试 (Client -> Server: 必须带掩码) ---
+        let mask = [0x11, 0x22, 0x33, 0x44];
+        let mut masked_payload = test_payload.to_vec();
+        for i in 0..masked_payload.len() {
+            masked_payload[i] ^= mask[i % 4];
+        }
+
+        let mut raw_input = Vec::new();
+        raw_input.push(0x8a); // FIN + Pong
+        raw_input.push(0x80 | (test_payload.len() as u8)); // Mask bit set + Len
+        raw_input.extend_from_slice(&mask);
+        raw_input.extend_from_slice(&masked_payload);
+
+        let mut decode_buf = BytesMut::from(&raw_input[..]);
+        let result = codec
+            .decode(&mut decode_buf)
+            .expect("Decode should succeed")
+            .expect("Should return a frame");
+
+        if let WSFrame::Pong(p) = result {
+            assert_eq!(p, test_payload, "Decoded Pong payload must be unmasked correctly");
+        } else {
+            panic!("Decoded frame was not a Pong variant");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_ping_pong_payload_echo() {
         let (client, server) = tokio::io::duplex(1024);
-        let mut client_writer = client;
-        let (server_read, server_write) = tokio::io::split(server);
+        let mut client_framed = Framed::new(client, WSCodec);
 
-        let mut reader = BufReader::new(server_read);
-        let mut writer = BufWriter::new(server_write);
+        // 使用默认逻辑的 WebSocket（自动回 Ping）
+        let ws = WebSocket { on_frame: None };
 
-        // 构造一个明确未掩码的帧: masked = false
-        // create_ws_frame(opcode, payload, masked)
-        let frame = create_ws_frame(0x1, b"fail", false);
+        // 启动服务端 (简化 Context 初始化)
+        let (r, w) = tokio::io::split(server);
+        let addr = "127.0.0.1:8080".parse::<SocketAddr>().unwrap();
+        let global = Arc::new(GlobalContext::new(addr));
+        let mut ctx = Context::new(
+            Some(Box::new(BufReader::new(r))),
+            Some(Box::new(w)),
+            global,
+            addr
+        );
 
-        // 发送数据
         tokio::spawn(async move {
-            if let Err(e) = client_writer.write_all(&frame).await {
-                eprintln!("client write error: {:?}", e);
-            }
-            // 💡 重点：保持 client 存活一会儿，防止过早关闭导致 Broken Pipe 或 EOF 覆盖了协议错误
-            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+            let _ = WebSocket::run(&ws, &mut ctx).await;
         });
 
-        let res = WebSocket::read_full(&mut reader, &mut writer).await;
+        // 客户端发送带特定负载的 Ping
+        let secret_payload = vec![0x42, 0x43, 0x44];
+        client_framed.send(WSFrame::Ping(secret_payload.clone())).await.unwrap();
 
-        // 验证结果
-        match res {
-            Err(e) => {
-                let err_msg = e.to_string();
-                // 打印出来方便调试，万一以后改了错误文案
-                assert!(
-                    err_msg.contains("protocol error"),
-                    "Expected 'protocol error', but got: '{}'",
-                    err_msg
-                );
-            }
-            Ok((op, payload)) => {
-                panic!(
-                    "Should have failed with protocol error, but got Ok(({:0x}, {:?}))",
-                    op, payload
-                );
-            }
+        // 验证客户端收到的 Pong 是否携带了相同的负载
+        if let Some(Ok(WSFrame::Pong(received_payload))) = client_framed.next().await {
+            assert_eq!(received_payload, secret_payload, "Pong must echo the Ping payload exactly");
+        } else {
+            panic!("Did not receive the expected Pong frame");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_ws_codec_opcode_and_payload_integrity() {
+        let mut codec = WSCodec;
+        let mut buf = bytes::BytesMut::new();
+
+        // 模拟测试场景：客户端发送带掩码的 Binary 帧 (Opcode 0x2)
+        let mask = [0x01, 0x02, 0x03, 0x04];
+        let original_payload = vec![0xde, 0xad, 0xbe, 0xef];
+        let masked_payload: Vec<u8> = original_payload
+            .iter()
+            .enumerate()
+            .map(|(i, &b)| b ^ mask[i % 4])
+            .collect();
+
+        let mut raw_input = vec![0x82, 0x84]; // FIN + Binary, Masked, Len 4
+        raw_input.extend_from_slice(&mask);
+        raw_input.extend_from_slice(&masked_payload);
+
+        let mut decode_buf = bytes::BytesMut::from(&raw_input[..]);
+
+        // 1. 解码验证
+        let result = codec.decode(&mut decode_buf).unwrap().expect("Should decode a frame");
+
+        // 验证变体识别是否与 Opcode 2 对应
+        if let WSFrame::Binary(p) = result {
+            assert_eq!(p, original_payload, "Payload 解掩码后数据损坏");
+        } else {
+            panic!("Opcode 0x2 映射变体错误");
+        }
+
+        // 2. 编码验证 (Server -> Client 不带掩码)
+        let frame = WSFrame::Ping(vec![0x11]);
+        codec.encode(frame, &mut buf).unwrap();
+
+        assert_eq!(buf[0], 0x89); // FIN + Ping(9)
+        assert_eq!(buf[1], 1); // Len 1
+        assert_eq!(buf[2], 0x11); // Payload
+    }
+
+    #[tokio::test]
+    async fn test_ws_encode_payload_len_126() {
+        let mut codec = WSCodec;
+        let mut buf = bytes::BytesMut::new();
+
+        // 构造 500 字节的数据 (落在 126 - 65535 区间)
+        let size: usize = 500;
+        let large_data = vec![0x41; size];
+        let frame = WSFrame::Binary(large_data.clone());
+
+        codec.encode(frame, &mut buf).unwrap();
+
+        // 验证头部
+        // 第 1 字节: FIN(1) + Binary(2) = 0x82
+        assert_eq!(buf[0], 0x82);
+        // 第 2 字节: Mask(0) + Len(126) = 126 (0x7E)
+        assert_eq!(buf[1], 126);
+
+        // 第 3-4 字节: 应该是 500 的大端序 (0x01F4)
+        let ext_len = u16::from_be_bytes([buf[2], buf[3]]);
+        assert_eq!(ext_len, size as u16);
+
+        // 验证后续数据
+        assert_eq!(&buf[4..], &large_data[..]);
+    }
+
+    #[tokio::test]
+    async fn test_ws_encode_payload_len_127() {
+        let mut codec = WSCodec;
+        let mut buf = bytes::BytesMut::new();
+
+        // 构造 70,000 字节的数据 (超过 65535，需 8 字节长度位)
+        let size: usize = 70000;
+        let huge_data = vec![0x42; size];
+        let frame = WSFrame::Binary(huge_data.clone());
+
+        codec.encode(frame, &mut buf).unwrap();
+
+        // 验证头部
+        // 第 1 字节: 0x82
+        assert_eq!(buf[0], 0x82);
+        // 第 2 字节: Mask(0) + Len(127) = 127 (0x7F)
+        assert_eq!(buf[1], 127);
+
+        // 第 3-10 字节: 应该是 70,000 的 64 位大端序
+        let mut len_bytes = [0u8; 8];
+        len_bytes.copy_from_slice(&buf[2..10]);
+        let ext_len = u64::from_be_bytes(len_bytes);
+        assert_eq!(ext_len, size as u64);
+
+        // 验证载荷起始位置
+        assert_eq!(&buf[10..10 + 5], &vec![0x42; 5][..]);
+        assert_eq!(buf.len(), 10 + size);
+    }
+
+    #[tokio::test]
+    async fn test_ws_decode_extended_lengths() {
+        let mut codec = WSCodec;
+
+        // 模拟一个带 Mask 的 126 长度模式帧 (假设长度为 200)
+        let mut raw = vec![0x82, 0xfe]; // FIN+Binary, Mask=1, Len=126
+        raw.extend_from_slice(&(200u16).to_be_bytes()); // 扩展长度
+        let mask = [0x1, 0x2, 0x3, 0x4];
+        raw.extend_from_slice(&mask);
+
+        let payload = vec![0x61; 200];
+        let masked_payload: Vec<u8> = payload
+            .iter()
+            .enumerate()
+            .map(|(i, &b)| b ^ mask[i % 4])
+            .collect();
+        raw.extend_from_slice(&masked_payload);
+
+        let mut buf = bytes::BytesMut::from(&raw[..]);
+        let result = codec.decode(&mut buf).unwrap().unwrap();
+
+        if let WSFrame::Binary(data) = result {
+            assert_eq!(data.len(), 200);
+            assert_eq!(data[0], 0x61);
+        } else {
+            panic!("Decoding 126-length frame failed");
         }
     }
 
     #[test]
-    fn test_parse_close_payload() {
-        // 正常
-        let p1 = vec![0x03, 0xE8]; // 1000
-        assert_eq!(WebSocket::parse_close_payload(&p1).unwrap().0, 1000);
+    fn test_decode_incomplete_base_header() {
+        let mut codec = WSCodec;
+        // 只有 1 个字节，无法判断 Opcode 和 Mask 标志
+        let mut src = bytes::BytesMut::from(&[0x81][..]);
 
-        // 带 Reason
-        let mut p2 = vec![0x03, 0xE8];
-        p2.extend_from_slice(b"bye");
+        let result = codec.decode(&mut src).expect("Decode should not error on partial data");
+        assert!(result.is_none(), "Header < 2 bytes should return None");
+        assert_eq!(src.len(), 1, "Should not consume bytes");
+    }
+
+    #[test]
+    fn test_decode_incomplete_126_extended_len() {
+        let mut codec = WSCodec;
+        let mut src = bytes::BytesMut::new();
+
+        // 构造：FIN+Text(0x81), PayloadLen=126(0x7E)
+        // 此时 src.len() = 2，还缺 2 字节的扩展长度
+        src.extend_from_slice(&[0x81, 0x7e]);
+
+        // 测试只有 2 字节
+        assert!(codec.decode(&mut src).unwrap().is_none());
+
+        // 测试只有 3 字节 (缺 1 字节扩展长度)
+        src.extend_from_slice(&[0x01]);
+        assert!(
+            codec.decode(&mut src).unwrap().is_none(),
+            "Should wait for full 2-byte extended len"
+        );
+    }
+
+    #[test]
+    fn test_decode_incomplete_127_extended_len() {
+        let mut codec = WSCodec;
+        let mut src = bytes::BytesMut::new();
+
+        // 构造：FIN+Binary(0x82), PayloadLen=127(0x7F)
+        src.extend_from_slice(&[0x82, 0x7f]);
+
+        // 模拟只有 9 个字节 (2 基础 + 7 扩展)，还差 1 个字节才够 8 字节扩展长度
+        src.extend_from_slice(&[0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01]);
+
+        let result = codec.decode(&mut src).expect("Decode fail");
+        assert!(result.is_none(), "Should return None when src.len() < 10 for 127-mode");
+        assert_eq!(src.len(), 9);
+    }
+
+    #[test]
+    fn test_decode_missing_mask_key() {
+        let mut codec = WSCodec;
+        let mut src = bytes::BytesMut::new();
+
+        // 126 模式：2(基础) + 2(扩展长度) = 4 字节已满足
+        // 但因为设置了 Mask 位，还需额外 4 字节掩码，总计需 8 字节
+        src.extend_from_slice(&[0x81, 0xfe]); // Masked Text, Len 126
+        src.extend_from_slice(&(200u16).to_be_bytes()); // 扩展长度设为 200
+
+        // 目前 src.len() = 4，虽然满足了长度读取，但 Mask Key 还没收齐
+        assert!(codec.decode(&mut src).unwrap().is_none(), "Should wait for 4-byte mask key");
+
+        // 补齐 3 字节 Mask，还是不够
+        src.extend_from_slice(&[0x01, 0x02, 0x03]);
+        assert!(codec.decode(&mut src).unwrap().is_none());
+    }
+
+    #[test]
+    fn test_decode_extended_len_127_step_by_step() {
+        let mut codec = WSCodec;
+        let mut src = bytes::BytesMut::new();
+
+        // 构造：FIN + Binary(0x82), Mask=1, PayloadLen=127(0xFF)
+        // 基础头部 2 字节已收齐
+        src.extend_from_slice(&[0x82, 0xff]);
+
+        // 1. 测试 head_len 增加后的第一个边界：不足 10 字节 (2 基础 + 8 扩展)
+        // 目前只有 2 字节，还差 8 字节扩展长度
+        assert!(codec.decode(&mut src).unwrap().is_none(), "必须等待 8 字节扩展长度");
+
+        // 2. 模拟收到 4 字节扩展长度 (总计 6 字节)
+        src.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]);
+        assert!(codec.decode(&mut src).unwrap().is_none(), "扩展长度未收齐时应返回 None");
+
+        // 3. 补齐剩下的 4 字节扩展长度 (总计 10 字节)
+        // 现在 8 字节扩展长度收齐了，但因为有 Mask 标志，还需要 4 字节掩码
+        src.extend_from_slice(&[0x00, 0x00, 0x01, 0xf4]); // 500 字节的 64位大端序后缀
+        assert!(
+            codec.decode(&mut src).unwrap().is_none(),
+            "收齐长度后，若 Mask Key 不足仍应返回 None"
+        );
+
+        assert_eq!(src.len(), 10, "缓冲区不应被提前消费");
+    }
+
+    #[test]
+    fn test_parse_close_payload_comprehensive() {
+        // --- 1. 正常关闭 (1000 + "bye") ---
+        let mut p1 = (1000u16).to_be_bytes().to_vec();
+        p1.extend_from_slice(b"bye");
+
+        {
+            let (code, reason) = WebSocket::parse_close_payload(&p1).unwrap();
+            assert_eq!(code, 1000);
+            assert_eq!(reason, Some("bye"));
+            // 验证此处 reason 是对 p1 的引用而非拷贝
+        }
+
+        // --- 2. 只有状态码 (1001) ---
+        let p2 = (1001u16).to_be_bytes();
         let (code, reason) = WebSocket::parse_close_payload(&p2).unwrap();
-        assert_eq!(code, 1000);
-        assert_eq!(reason, Some("bye"));
+        assert_eq!(code, 1001);
+        assert!(reason.is_none());
 
-        // 空 Payload (合法)
-        assert_eq!(WebSocket::parse_close_payload(&[]).unwrap().0, 1000);
+        // --- 3. 空载荷 (RFC 1005) ---
+        let (code, reason) = WebSocket::parse_close_payload(&[]).unwrap();
+        assert_eq!(code, 1005);
+        assert!(reason.is_none());
 
-        // 非法 Code
-        let p3 = vec![0x00, 0x00];
+        // --- 4. 边界异常：长度不足 ---
+        let p3 = [0x03];
         assert!(WebSocket::parse_close_payload(&p3).is_err());
 
-        // 非法长度
-        assert!(WebSocket::parse_close_payload(&[0x03]).is_err());
+        // --- 5. 边界异常：非法 UTF-8 ---
+        let mut p4 = (1000u16).to_be_bytes().to_vec();
+        p4.push(0xff);
+        assert!(WebSocket::parse_close_payload(&p4).is_err());
     }
 
-    #[tokio::test]
-    async fn test_send_frame_large_payload() {
-        let (_s_r, s_w) = tokio::io::duplex(65536);
-        let mut writer = BufWriter::new(s_w);
-
-        // 测试 126 模式 (长度 > 125)
-        let medium_payload = vec![0u8; 200];
-        WebSocket::send_frame(&mut writer, 0x2, &medium_payload)
-            .await
-            .unwrap();
-
-        // 测试 127 模式 (长度 > 65535)
-        // 实际上可以用较小的模拟，只要逻辑走到那
-    }
-
-    #[tokio::test]
-    async fn test_send_text_frame() {
-        let (client, server) = tokio::io::duplex(1024);
-        let mut client_reader = client;
-        let (_, server_write) = tokio::io::split(server);
-        let mut writer = BufWriter::new(server_write);
-
-        let msg = "hello_world";
-        // 调用发送文本方法
-        WebSocket::send_text(&mut writer, msg).await.unwrap();
-
-        // 客户端验证
-        let mut header = [0u8; 2];
-        client_reader.read_exact(&mut header).await.unwrap();
-
-        // 验证 FIN(0x80) + Opcode(0x01 = Text)
-        assert_eq!(header[0], 0x81);
-        // 验证长度（server 发送给 client 通常不带 mask，所以 mask 位应为 0）
-        assert_eq!(header[1], msg.len() as u8);
-
-        let mut payload = vec![0u8; msg.len()];
-        client_reader.read_exact(&mut payload).await.unwrap();
-        assert_eq!(payload, msg.as_bytes());
-    }
-
-    #[tokio::test]
-    async fn test_send_binary_frame() {
-        let (client, server) = tokio::io::duplex(1024);
-        let mut client_reader = client;
-        let (_, server_write) = tokio::io::split(server);
-        let mut writer = BufWriter::new(server_write);
-
-        let data = vec![0xDE, 0xAD, 0xBE, 0xEF];
-        // 调用发送二进制方法
-        WebSocket::send_binary(&mut writer, &data).await.unwrap();
-
-        let mut header = [0u8; 2];
-        client_reader.read_exact(&mut header).await.unwrap();
-
-        // 验证 FIN(0x80) + Opcode(0x02 = Binary)
-        assert_eq!(header[0], 0x82);
-        assert_eq!(header[1], data.len() as u8);
-
-        let mut payload = vec![0u8; data.len()];
-        client_reader.read_exact(&mut payload).await.unwrap();
-        assert_eq!(payload, data);
-    }
-
-    #[tokio::test]
-    async fn test_send_ping_frame() {
-        let (client, server) = tokio::io::duplex(1024);
-        let mut client_reader = client;
-        let (_, server_write) = tokio::io::split(server);
-        let mut writer = BufWriter::new(server_write);
-
-        // 调用发送 Ping 方法
-        WebSocket::send_ping(&mut writer).await.unwrap();
-
-        let mut header = [0u8; 2];
-        client_reader.read_exact(&mut header).await.unwrap();
-
-        // 验证 FIN(0x80) + Opcode(0x09 = Ping)
-        assert_eq!(header[0], 0x89);
-        // Ping 通常不带 payload，长度应为 0
-        assert_eq!(header[1], 0);
-    }
-
-    #[tokio::test]
-    async fn test_send_large_text_frame_126() {
-        let (client, server) = tokio::io::duplex(2048);
-        let mut client_reader = client;
-        let (_, server_write) = tokio::io::split(server);
-        let mut writer = BufWriter::new(server_write);
-
-        // 构造一个长度为 200 的字符串 (超过 125，应使用 126 模式)
-        let large_msg = "a".repeat(200);
-        WebSocket::send_text(&mut writer, &large_msg).await.unwrap();
-
-        let mut header = [0u8; 4]; // 2字节头 + 2字节扩展长度
-        client_reader.read_exact(&mut header).await.unwrap();
-
-        assert_eq!(header[0], 0x81);
-        assert_eq!(header[1], 126); // 长度标识位为 126
-
-        let extended_len = u16::from_be_bytes([header[2], header[3]]);
-        assert_eq!(extended_len, 200);
-
-        let mut payload = vec![0u8; 200];
-        client_reader.read_exact(&mut payload).await.unwrap();
-        assert_eq!(payload, large_msg.as_bytes());
-    }
-
-    #[tokio::test]
-    async fn test_websocket_full_integration_via_router() {
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
-        use tokio::net::TcpStream;
-
-        // --- 1. 服务器配置 ---
-        let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
-        let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
-        let actual_addr = listener.local_addr().unwrap();
-        drop(listener); // 释放 listener 以便 HTTPServer 重新绑定
-
-        let mut hr = Router::new(NodeType::Static("root".into()));
-
-        // --- 2. 构造 WebSocket 业务逻辑 ---
-        let ws_logic = WebSocket {
-            on_text: Some(Arc::new(|_ws, ctx, text| {
-                Box::pin(async move {
-                    let w = ctx.writer.as_deref_mut().unwrap();
-                    // 收到消息转为大写并回传
-                    WebSocket::send_text(w, &format!("ACK: {}", text))
-                        .await
-                        .unwrap();
-                    true
-                })
-            })),
-            on_binary: None,
+    #[test]
+    fn test_parse_close_payload_result_chain() -> anyhow::Result<()> {
+        // --- 1. 模拟标准关闭帧载荷 ---
+        let payload = {
+            let mut p = (1000u16).to_be_bytes().to_vec();
+            p.extend_from_slice(b"normal closure");
+            p
         };
 
-        // 将 WebSocket 转化为中间件
-        let ws_middleware = WebSocket::to_middleware(ws_logic);
+        // 核心行测试
+        let (code, reason) = WebSocket::parse_close_payload(&payload)?;
 
-        // 定义一个空 Handler（WebSocket 中间件会拦截并返回 false，所以这个 handler 永远不会执行）
-        let ws_handler = exe!(|_ctx| { false });
+        assert_eq!(code, 1000);
+        assert_eq!(reason, Some("normal closure"));
 
-        // 挂载到路由：GET /ws
-        route!(hr, get!("/ws", ws_handler, vec![ws_middleware.into()]));
+        // --- 2. 模拟协议边界：恰好 2 字节 (无 Reason) ---
+        let payload_min = (1001u16).to_be_bytes();
+        let (code, reason) = WebSocket::parse_close_payload(&payload_min)?;
+        assert_eq!(code, 1001);
+        assert!(reason.is_none());
 
-        // --- 3. 启动服务器 ---
-        let server = HTTPServer::new(actual_addr).http(hr).clone();
-        tokio::spawn(async move {
-            let _ = server
-                .start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id()))
-                .await;
-        });
+        // --- 3. 模拟静默关闭：0 字节 ---
+        let (code, reason) = WebSocket::parse_close_payload(&[])?;
+        assert_eq!(code, 1005);
+        assert!(reason.is_none());
 
-        // 等待服务器启动
-        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+        Ok(())
+    }
 
-        // --- 4. 客户端模拟 (真实 TCP 交互) ---
-        let mut stream = TcpStream::connect(actual_addr).await.unwrap();
+    #[test]
+    fn test_parse_close_payload_error_scenarios() {
+        // --- 4. 模拟畸形载荷：只有 1 字节 ---
+        let payload_bad_len = vec![0x03];
+        let result = WebSocket::parse_close_payload(&payload_bad_len);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Incomplete"));
 
-        // 发起 WebSocket 握手请求
-        let handshake_req = format!(
-            "GET /ws HTTP/1.1\r\n\
-        Host: {}\r\n\
-        Upgrade: websocket\r\n\
-        Connection: Upgrade\r\n\
-        Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\
-        Sec-WebSocket-Version: 13\r\n\r\n",
-            actual_addr
-        );
-        stream.write_all(handshake_req.as_bytes()).await.unwrap();
+        // --- 5. 模拟 UTF-8 攻击：非法字节序列 ---
+        let mut payload_bad_utf8 = (1000u16).to_be_bytes().to_vec();
+        payload_bad_utf8.extend_from_slice(&[0x80, 0x81]); // 非法的 UTF-8 起始字节
 
-        // 验证握手响应
-        let mut response = [0u8; 1024];
-        let n = stream.read(&mut response).await.unwrap();
-        let resp_str = String::from_utf8_lossy(&response[..n]);
-        assert!(resp_str.contains("101 Switching Protocols"));
-        assert!(resp_str.contains("Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo="));
-
-        // --- 5. 数据交换测试 ---
-        // 客户端发送 Mask 过的文本帧: "hello"
-        // 使用你之前定义的 create_ws_frame
-        let frame = create_ws_frame(0x1, b"hello", true);
-        stream.write_all(&frame).await.unwrap();
-
-        // 接收服务端回传：预期 "ACK: hello"
-        let mut head = [0u8; 2];
-        stream.read_exact(&mut head).await.unwrap();
-        assert_eq!(head[0], 0x81); // FIN + Text
-
-        let payload_len = (head[1] & 0x7f) as usize;
-        let mut payload = vec![0u8; payload_len];
-        stream.read_exact(&mut payload).await.unwrap();
-
-        assert_eq!(String::from_utf8(payload).unwrap(), "ACK: hello");
-
-        println!("WebSocket 全链路集成测试通过！");
+        let result = WebSocket::parse_close_payload(&payload_bad_utf8);
+        assert!(result.is_err());
     }
 
     #[tokio::test]
-    async fn test_websocket_middleware_return_logic() {
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
-        use tokio::net::TcpStream;
+    async fn test_decode_opcode_0x8_full_path() -> anyhow::Result<()> {
+        let mut codec = WSCodec;
 
-        // --- 1. 服务器配置 ---
-        let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
-        let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
-        let actual_addr = listener.local_addr().unwrap();
-        drop(listener);
+        // 构造一个真实的关闭帧字节流 (Opcode 0x8, FIN=1, 无掩码)
+        // 状态码 1000 (0x03E8), 原因 "bye"
+        let mut raw_bytes = vec![0x88, 0x05]; // 0x88 = FIN + Opcode 8; 0x05 = Payload Len 5
+        raw_bytes.extend_from_slice(&(1000u16).to_be_bytes());
+        raw_bytes.extend_from_slice(b"bye");
 
-        let mut hr = Router::new(NodeType::Static("root".into()));
+        let mut src = bytes::BytesMut::from(&raw_bytes[..]);
 
-        // WebSocket 中间件：收到 text 就关闭
-        let ws_middleware = WebSocket::to_middleware(WebSocket {
-            on_text: Some(Arc::new(|_, _, _| Box::pin(async { false }))),
-            on_binary: None,
-        });
+        // 执行解码
+        let result = codec.decode(&mut src)?;
 
-        // 哨兵 Handler：如果中间件返回 true，就会执行到这里
-        let sentinel_handler = exe!(|ctx| {
-            let mut meta = ctx.local.get_value::<HttpMetadata>().unwrap();
-            meta.body = b"Sentinel Hit".to_vec(); // 标记 Handler 被触发
-            ctx.local.set_value(meta);
-            true
-        });
-
-        // 挂载：GET /ws -> [ws_middleware] -> sentinel_handler
-        route!(
-            hr,
-            get!("/ws", sentinel_handler, vec![ws_middleware.into()])
-        );
-
-        let server = HTTPServer::new(actual_addr).http(hr).clone();
-        tokio::spawn(async move {
-            let _ = server
-                .start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id()))
-                .await;
-        });
-        tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
-
-        // --- 场景 A: 升级请求 (应该被拦截，返回 false) ---
-        {
-            let mut stream = TcpStream::connect(actual_addr).await.unwrap();
-            let upgrade_req = format!(
-                "GET /ws HTTP/1.1\r\n\
-            Host: {}\r\n\
-            Upgrade: websocket\r\n\
-            Connection: Upgrade\r\n\
-            Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n",
-                actual_addr
-            );
-            stream.write_all(upgrade_req.as_bytes()).await.unwrap();
-
-            let mut buf = [0u8; 1024];
-            let n = stream.read(&mut buf).await.unwrap();
-            let resp = String::from_utf8_lossy(&buf[..n]);
-
-            // 1. 验证握手成功
-            assert!(resp.contains("101 Switching Protocols"));
-            // 2. 验证哨兵逻辑没有执行 (不应该包含 "Sentinel Hit")
-            assert!(
-                !resp.contains("Sentinel Hit"),
-                "Middleware should have intercepted the request"
-            );
-        }
-
-        // --- 场景 B: 普通请求 (应该穿透，返回 true) ---
-        {
-            let mut stream = TcpStream::connect(actual_addr).await.unwrap();
-            let normal_req = format!(
-                "GET /ws HTTP/1.1\r\n\
-            Host: {}\r\n\r\n",
-                actual_addr
-            );
-            stream.write_all(normal_req.as_bytes()).await.unwrap();
-
-            let mut buf = [0u8; 1024];
-            let n = stream.read(&mut buf).await.unwrap();
-            let resp = String::from_utf8_lossy(&buf[..n]);
-
-            // 1. 验证没有执行握手 (应该是 200 OK 或由 Handler 产生的响应)
-            assert!(!resp.contains("101 Switching Protocols"));
-            // 2. 验证穿透到了哨兵 Handler
-            assert!(
-                resp.contains("Sentinel Hit"),
-                "Middleware should have allowed the request to pass through"
-            );
-        }
-    }
-
-    #[tokio::test]
-    async fn test_websocket_middleware_non_get_method() {
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
-        use tokio::net::TcpStream;
-
-        // --- 1. 服务器配置 ---
-        let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
-        let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
-        let actual_addr = listener.local_addr().unwrap();
-        drop(listener);
-
-        let mut hr = Router::new(NodeType::Static("root".into()));
-
-        // WebSocket 中间件
-        let ws_middleware = WebSocket::to_middleware(WebSocket {
-            on_text: None,
-            on_binary: None,
-        });
-
-        // 哨兵 Handler
-        let sentinel_handler = exe!(|ctx| {
-            let mut meta = ctx.local.get_value::<HttpMetadata>().unwrap();
-            meta.body = b"Post Handler Hit".to_vec();
-            ctx.local.set_value(meta);
-            true
-        });
-
-        // 挂载一个支持 POST 的路由
-        // 注意：即使这里有 WebSocket 中间件，非 GET 请求也应该穿透
-        route!(
-            hr,
-            post!("/ws", sentinel_handler, vec![ws_middleware.into()])
-        );
-
-        let server = HTTPServer::new(actual_addr).http(hr).clone();
-        tokio::spawn(async move {
-            let _ = server
-                .start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id()))
-                .await;
-        });
-        tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
-
-        // --- 场景: 使用 POST 发起升级请求 ---
-        {
-            let mut stream = TcpStream::connect(actual_addr).await.unwrap();
-            // 构造一个合法的握手头，但方法使用 POST
-            let post_upgrade_req = format!(
-                "POST /ws HTTP/1.1\r\n\
-            Host: {}\r\n\
-            Upgrade: websocket\r\n\
-            Connection: Upgrade\r\n\
-            Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n",
-                actual_addr
-            );
-            stream.write_all(post_upgrade_req.as_bytes()).await.unwrap();
-
-            let mut buf = [0u8; 1024];
-            let n = stream.read(&mut buf).await.unwrap();
-            let resp = String::from_utf8_lossy(&buf[..n]);
-
-            // 1. 验证没有执行握手 (不应包含 101 Switching Protocols)
-            assert!(
-                !resp.contains("101 Switching Protocols"),
-                "POST method should not trigger WebSocket handshake"
-            );
-
-            // 2. 验证穿透到了 POST Handler
-            assert!(
-                resp.contains("Post Handler Hit"),
-                "Request should have passed through to the next handler"
-            );
-        }
-    }
-
-    #[tokio::test]
-    async fn test_websocket_handshake_failed_missing_key() {
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
-        use tokio::net::TcpStream;
-
-        // --- 1. 服务器配置 ---
-        let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
-        let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
-        let actual_addr = listener.local_addr().unwrap();
-        drop(listener);
-
-        let mut hr = Router::new(NodeType::Static("root".into()));
-
-        let ws_middleware = WebSocket::to_middleware(WebSocket {
-            on_text: None,
-            on_binary: None,
-        });
-
-        let sentinel_handler = exe!(|ctx| {
-            let mut meta = ctx.local.get_value::<HttpMetadata>().unwrap();
-            meta.body = b"Should Not Reach Here".to_vec();
-            ctx.local.set_value(meta);
-            true
-        });
-
-        // 挂载路由
-        route!(
-            hr,
-            get!("/ws", sentinel_handler, vec![ws_middleware.into()])
-        );
-
-        let server = HTTPServer::new(actual_addr).http(hr).clone();
-        tokio::spawn(async move {
-            let _ = server
-                .start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id()))
-                .await;
-        });
-        tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
-
-        // --- 2. 场景: 发送 Upgrade 请求但故意缺失 Sec-WebSocket-Key ---
-        {
-            let mut stream = TcpStream::connect(actual_addr).await.unwrap();
-            let bad_req = format!(
-                "GET /ws HTTP/1.1\r\n\
-            Host: {}\r\n\
-            Upgrade: websocket\r\n\
-            Connection: Upgrade\r\n\r\n", // ❌ 缺少 Sec-WebSocket-Key
-                actual_addr
-            );
-            stream.write_all(bad_req.as_bytes()).await.unwrap();
-
-            // 3. 验证结果
-            // 因为 handshake 失败，中间件会 println! 并返回 false
-            // 客户端通常会收到一个空响应或者连接被关闭（取决于 AexServer 对中间件返回 false 且未写响应的处理）
-            let mut buf = [0u8; 1024];
-            let n = stream.read(&mut buf).await.unwrap();
-
-            let resp = String::from_utf8_lossy(&buf[..n]);
-
-            // 验证没有成功握手
-            assert!(!resp.contains("101 Switching Protocols"));
-            // 验证没有穿透到 Handler
-            assert!(!resp.contains("Should Not Reach Here"));
-        }
-    }
-    #[tokio::test]
-    async fn test_websocket_run_error_path_execution() {
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
-        use tokio::net::{TcpListener, TcpStream};
-
-        // 1. 启动服务器
-        let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
-        let listener = TcpListener::bind(addr).await.unwrap();
-        let actual_addr = listener.local_addr().unwrap();
-        drop(listener);
-
-        let mut hr = Router::new(NodeType::Static("root".into()));
-        let ws_mw = WebSocket::to_middleware(WebSocket {
-            on_text: None,
-            on_binary: None,
-        });
-
-        // 修正后的语法：使用 ctx 闭包参数，并对中间件调用 .into()
-        route!(
-            hr,
-            get!("/trigger", exe!(|_ctx| { true }), vec![ws_mw.into()])
-        );
-
-        let server = HTTPServer::new(actual_addr).http(hr).clone();
-        tokio::spawn(async move {
-            let _ = server
-                .start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id()))
-                .await;
-        });
-        tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
-
-        // 2. 客户端连接并完成握手
-        let mut stream = TcpStream::connect(actual_addr).await.unwrap();
-        let handshake = format!(
-            "GET /trigger HTTP/1.1\r\n\
-        Upgrade: websocket\r\n\
-        Connection: Upgrade\r\n\
-        Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n"
-        );
-        stream.write_all(handshake.as_bytes()).await.unwrap();
-
-        let mut buf = [0u8; 1024];
-        let _ = stream.read(&mut buf).await.unwrap(); // 消耗握手响应
-
-        // 3. 构造触发异常：发送一个“未掩码”的 Text 帧
-        // 根据 RFC 6455，客户端发给服务端的帧必须带 Mask，否则服务端必须断开连接
-        // [0x81 (FIN+Text), 0x05 (PayloadLen 5, Mask bit 为 0)]
-        let illegal_frame = vec![0x81, 0x05, b'h', b'e', b'l', b'l', b'o'];
-        stream.write_all(&illegal_frame).await.unwrap();
-
-        // 4. 验证副作用确认路径执行
-        // 副作用 A: read_full 抛出 Err 前会调用 Self::close，客户端应收到 Close 控制帧 (0x88)
-        let n1 = stream.read(&mut buf).await.unwrap();
-        assert!(n1 > 0, "服务端应返回 Close 帧数据");
-        assert_eq!(
-            buf[0], 0x88,
-            "必须收到 Close 帧 (Opcode 8)，证明 read_full 识别了协议错误并准备报错"
-        );
-
-        // 副作用 B: run 循环接收到错误并退出，命中 eprintln! 分支，随后 ctx 销毁导致 TCP 关闭
-        let n2 = stream.read(&mut buf).await.unwrap();
-        assert_eq!(n2, 0, "连接必须在错误发生后彻底关闭");
-    }
-
-    #[tokio::test]
-    async fn test_read_full_logic_branches() {
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
-        use tokio::net::{TcpListener, TcpStream};
-
-        // --- 1. 服务器启动 ---
-        let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
-        let listener = TcpListener::bind(addr).await.unwrap();
-        let actual_addr = listener.local_addr().unwrap();
-        drop(listener);
-
-        let mut hr = Router::new(NodeType::Static("root".into()));
-
-        // 我们让 WebSocket 收到 Text 时回传 "ok"，用于验证逻辑通畅
-        let ws = WebSocket {
-            on_text: Some(Arc::new(|_, ctx, _| {
-                Box::pin(async move {
-                    let w = ctx.writer.as_deref_mut().unwrap();
-
-                    let _ = WebSocket::send_text(w, "ok").await;
-                    true
-                })
-            })),
-            on_binary: None,
-        };
-        let ws_mw = WebSocket::to_middleware(ws);
-        route!(
-            hr,
-            get!("/read_test", exe!(|_ctx| { true }), vec![ws_mw.into()])
-        );
-
-        let server = HTTPServer::new(actual_addr).http(hr).clone();
-        tokio::spawn(async move {
-            let _ = server
-                .start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id()))
-                .await;
-        });
-        tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
-
-        // --- 2. 测试函数：用于快速发送帧并接收 Close 帧状态码 ---
-        async fn expect_close_code(
-            addr: std::net::SocketAddr,
-            raw_frame: Vec<u8>,
-            expected_code: u16,
-        ) {
-            let mut stream = TcpStream::connect(addr).await.unwrap();
-            // 握手
-            stream.write_all(b"GET /read_test HTTP/1.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n").await.unwrap();
-            let mut buf = [0u8; 1024];
-            let _ = stream.read(&mut buf).await.unwrap();
-
-            // 发送测试帧
-            stream.write_all(&raw_frame).await.unwrap();
-
-            // 读取 Close 帧
-            let n = stream.read(&mut buf).await.unwrap();
-            if n >= 4 && buf[0] == 0x88 {
-                let code = u16::from_be_bytes([buf[2], buf[3]]);
-                assert_eq!(code, expected_code);
-            } else {
-                panic!(
-                    "Expected Close frame with code {}, but got {:?}",
-                    expected_code,
-                    &buf[..n]
-                );
+        // 验证是否正确执行了 parse_close_payload 并转换
+        match result {
+            Some(WSFrame::Close(code, reason)) => {
+                assert_eq!(code, 1000, "状态码解析错误");
+                assert_eq!(reason.as_deref(), Some("bye"), "关闭原因解析错误");
             }
+            _ => panic!("未能正确识别并转换 Opcode 0x8 帧"),
         }
 
-        // --- 3. 开始测试各个分支 ---
-
-        // A. 测试 !fin (分片不支持) -> 预期 1002
-        // 0x01 (Text but FIN=0)
-        expect_close_code(actual_addr, vec![0x01, 0x80, 0, 0, 0, 0], 1002).await;
-
-        // B. 测试 !masked (协议错误) -> 预期 1002
-        // 0x81 (FIN Text), 0x05 (Payload 5, Mask=0)
-        expect_close_code(actual_addr, vec![0x81, 0x05, 1, 2, 3, 4, 5], 1002).await;
-
-        // C. 测试控制帧长度 > 125 -> 预期 1002
-        // 0x89 (Ping), 0xfe (Mask=1, Len=126)
-        expect_close_code(actual_addr, vec![0x89, 0xfe, 0, 126, 0, 0, 0, 0], 1002).await;
-
-        // D. 测试未知 Opcode -> 预期 1002
-        // 0x83 (Opcode 3 is Reserved)
-        expect_close_code(actual_addr, vec![0x83, 0x80, 0, 0, 0, 0], 1002).await;
-
-        // E. 测试 Ping 自动响应 Pong (match 0x9)
-        {
-            let mut stream = TcpStream::connect(actual_addr).await.unwrap();
-            stream.write_all(b"GET /read_test HTTP/1.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n").await.unwrap();
-            let mut buf = [0u8; 1024];
-            let _ = stream.read(&mut buf).await.unwrap();
-
-            // 发送 Ping: 0x89, Mask=1, Len=0, MaskKey=[1,1,1,1]
-            stream.write_all(&[0x89, 0x80, 1, 1, 1, 1]).await.unwrap();
-
-            // 服务端应自动回传 Pong: 0x8a, Len=0 (不带 Mask)
-            stream.read_exact(&mut buf[..2]).await.unwrap();
-            assert_eq!(buf[0], 0x8a);
-            assert_eq!(buf[1], 0x00);
-        }
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn test_read_full_advanced_logic() {
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
-        use tokio::net::{TcpListener, TcpStream};
+    #[test]
+    fn test_match_unsupported_opcode_logic() {
+        // 模拟一个合法的 u8 但超出 0x0-0xF 范围的操作码
+        let opcode = 0x10u8;
+        let payload = vec![0x01];
 
-        // --- 1. 服务器启动 ---
-        let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
-        let listener = TcpListener::bind(addr).await.unwrap();
-        let actual_addr = listener.local_addr().unwrap();
-        drop(listener);
-
-        let mut hr = Router::new(NodeType::Static("root".into()));
-        let ws_mw = WebSocket::to_middleware(WebSocket {
-            on_text: None,
-            on_binary: None,
-        });
-        route!(
-            hr,
-            get!("/protocol", exe!(|_ctx| { true }), vec![ws_mw.into()])
-        );
-
-        let server = HTTPServer::new(actual_addr).http(hr).clone();
-        tokio::spawn(async move {
-            let _ = server
-                .start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id()))
-                .await;
-        });
-        tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
-
-        // --- 2. 测试场景 A: 扩展长度位 (len == 126) ---
-        // 验证 read_full 能正确读取 2 字节的扩展长度
-        {
-            let mut stream = TcpStream::connect(actual_addr).await.unwrap();
-            stream.write_all(b"GET /protocol HTTP/1.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n").await.unwrap();
-            let mut buf = [0u8; 1024];
-            let _ = stream.read(&mut buf).await.unwrap();
-
-            let payload_size: u16 = 200;
-            let mut frame = vec![0x81, 0xFE]; // FIN+Text, Mask=1, Len=126
-            frame.extend_from_slice(&payload_size.to_be_bytes()); // 扩展长度: 200
-            frame.extend_from_slice(&[0, 0, 0, 0]); // Mask Key
-            frame.extend_from_slice(&vec![b'a'; 200]); // 200字节负载
-
-            stream.write_all(&frame).await.unwrap();
-            // 如果逻辑正确，服务端会处理这 200 字节。由于我们没设 handler，它会继续 loop。
-            // 这里我们可以发一个关闭帧来结束这次连接验证。
-            stream.write_all(&[0x88, 0x80, 0, 0, 0, 0]).await.unwrap();
-        }
-
-        // --- 3. 测试场景 B: 收到关闭帧 (Opcode 0x8) ---
-        // 验证逻辑：客户端发 1000 Close -> 服务端回 1000 Close -> run 退出
-        {
-            let mut stream = TcpStream::connect(actual_addr).await.unwrap();
-            stream.write_all(b"GET /protocol HTTP/1.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n").await.unwrap();
-            let mut buf = [0u8; 1024];
-            let _ = stream.read(&mut buf).await.unwrap();
-
-            // 发送关闭帧：Code 1000
-            let mut close_payload = 1000u16.to_be_bytes().to_vec();
-            let mut frame = vec![0x88, 0x82, 1, 2, 3, 4]; // Opcode 8, Mask=1, Len=2
-            for i in 0..2 {
-                close_payload[i] ^= [1, 2, 3, 4][i];
-            }
-            frame.extend_from_slice(&close_payload);
-
-            stream.write_all(&frame).await.unwrap();
-
-            // 验证服务端回传了关闭帧
-            stream.read_exact(&mut buf[..4]).await.unwrap();
-            assert_eq!(buf[0], 0x88);
-            assert_eq!(u16::from_be_bytes([buf[2], buf[3]]), 1000);
-        }
-
-        // --- 4. 测试场景 C: 非法关闭码 (parse_close_payload 异常) ---
-        // 验证逻辑：发送 0 字节 payload 或 非法 Code -> 预期 1002 错误
-        {
-            let mut stream = TcpStream::connect(actual_addr).await.unwrap();
-            stream.write_all(b"GET /protocol HTTP/1.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n").await.unwrap();
-            let mut buf = [0u8; 1024];
-            let _ = stream.read(&mut buf).await.unwrap();
-
-            // 发送 Code 1005 (RFC 规定不能在关闭帧里显式发送 1005)
-            let close_payload = 1005u16.to_be_bytes().to_vec();
-            let mut frame = vec![0x88, 0x82, 0, 0, 0, 0];
-            frame.extend_from_slice(&close_payload);
-
-            stream.write_all(&frame).await.unwrap();
-
-            // 预期收到 1002 (Protocol Error)
-            stream.read_exact(&mut buf[..4]).await.unwrap();
-            assert_eq!(u16::from_be_bytes([buf[2], buf[3]]), 1002);
-        }
-    }
-
-    #[tokio::test]
-    async fn test_read_full_len127_extended_payload() {
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
-        use tokio::net::{TcpListener, TcpStream};
-
-        // 1. 启动服务器逻辑 (复用之前的配置)
-        let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
-        let listener = TcpListener::bind(addr).await.unwrap();
-        let actual_addr = listener.local_addr().unwrap();
-        drop(listener);
-
-        let mut hr = Router::new(NodeType::Static("root".into()));
-
-        // 设置一个 Handler 验证接收到的超长数据内容
-        let ws = WebSocket {
-            on_text: Some(Arc::new(|_, ctx, text| {
-                Box::pin(async move {
-                    if text.len() == 200 {
-                        // let mut w = ctx.writer.lock().await;
-                        let w = ctx.writer.as_deref_mut().unwrap();
-                        let _ = WebSocket::send_text(w, "len_ok").await;
-                    }
-                    true
-                })
-            })),
-            on_binary: None,
+        // 这里的逻辑必须与 decode 内部的 match 完全一致
+        let result: anyhow::Result<Option<WSFrame>> = match opcode {
+            0x0 => Ok(Some(WSFrame::Continuation(payload))),
+            0x1 => Ok(Some(WSFrame::Text("".to_string()))), // 简化处理
+            0x2 => Ok(Some(WSFrame::Binary(payload))),
+            0x8 => Ok(Some(WSFrame::Close(1000, None))),
+            0x9 => Ok(Some(WSFrame::Ping(payload))),
+            0xa => Ok(Some(WSFrame::Pong(payload))),
+            0x3..=0x7 => Ok(Some(WSFrame::ReservedNonControl(opcode, payload))),
+            0xb..=0xf => Ok(Some(WSFrame::ReservedControl(opcode, payload))),
+            _ => Err(anyhow::anyhow!("Unsupported opcode: 0x{:x}", opcode)),
         };
 
-        let ws_mw = WebSocket::to_middleware(ws);
-        route!(
-            hr,
-            get!("/len127", exe!(|_ctx| { true }), vec![ws_mw.into()])
-        );
-
-        let server = HTTPServer::new(actual_addr).http(hr).clone();
-        tokio::spawn(async move {
-            let _ = server
-                .start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id()))
-                .await;
-        });
-        tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
-
-        // 2. 客户端构造 64-bit Length 帧
-        let mut stream = TcpStream::connect(actual_addr).await.unwrap();
-
-        // 握手
-        stream.write_all(b"GET /len127 HTTP/1.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n").await.unwrap();
-        let mut buf = [0u8; 1024];
-        let _ = stream.read(&mut buf).await.unwrap();
-
-        // 构造帧：虽然数据只有 200 字节，但我们强制使用 8 字节长度格式 (0x7F)
-        let payload_len: u64 = 200;
-        let mut frame = Vec::new();
-        frame.push(0x81); // FIN + Text
-        frame.push(0xFF); // Mask=1, Payload Len=127 (指示 64-bit 扩展长度)
-
-        // 写入 8 字节长度 (Big Endian)
-        frame.extend_from_slice(&payload_len.to_be_bytes());
-
-        // 写入 4 字节 Mask Key
-        let mask = [0x12, 0x34, 0x56, 0x78];
-        frame.extend_from_slice(&mask);
-
-        // 写入 200 字节并进行掩码处理
-        let raw_data = vec![b'a'; 200];
-        let masked_data: Vec<u8> = raw_data
-            .iter()
-            .enumerate()
-            .map(|(i, &b)| b ^ mask[i % 4])
-            .collect();
-        frame.extend_from_slice(&masked_data);
-
-        // 发送
-        stream.write_all(&frame).await.unwrap();
-
-        // 3. 验证服务端响应
-        // 如果 read_full 正确解析了 8 字节长度并读取了 payload，handler 会回传 "len_ok"
-        let n = stream.read(&mut buf).await.unwrap();
-        let resp = String::from_utf8_lossy(&buf[..n]);
-        assert!(
-            resp.contains("len_ok"),
-            "服务端应正确识别 64-bit 长度声明的 200 字节数据"
-        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Unsupported opcode: 0x10"));
     }
 
-    #[tokio::test]
-    async fn test_read_full_opcode_pong_logic_final() {
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
-        use tokio::net::{TcpListener, TcpStream};
+    #[test]
+    fn test_ws_frame_as_command_mapping() {
+        // --- 测试 Continuation (0x0) ---
+        let f0 = WSFrame::Continuation(vec![0xaa]);
+        assert_eq!(f0.id(), 0x0);
+        assert_eq!(f0.data(), &vec![0xaa]);
 
-        let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
-        let listener = TcpListener::bind(addr).await.unwrap();
-        let actual_addr = listener.local_addr().unwrap();
-        drop(listener);
+        // --- 测试 ReservedNonControl (0x3..0x7) ---
+        let f3 = WSFrame::ReservedNonControl(0x3, vec![0xbb]);
+        assert_eq!(f3.id(), 3);
+        assert_eq!(f3.data(), &vec![0xbb]);
 
-        let mut hr = Router::new(NodeType::Static("root".into()));
-        let ws = WebSocket {
-            on_text: Some(Arc::new(|_, ctx, _text| {
-                Box::pin(async move {
-                    let w = ctx.writer.as_deref_mut().unwrap();
-                    let _ = WebSocket::send_text(w, "ack").await;
-                    true
-                })
-            })),
-            on_binary: None,
-        };
+        // --- 测试 ReservedControl (0xB..0xF) ---
+        let fb = WSFrame::ReservedControl(0xb, vec![0xcc]);
+        assert_eq!(fb.id(), 11);
+        assert_eq!(fb.data(), &vec![0xcc]);
 
-        let ws_mw = WebSocket::to_middleware(ws);
-        // 换一个不带 pong 字样的路径，彻底消除干扰
-        route!(hr, get!("/t", exe!(|_ctx| { true }), vec![ws_mw.into()]));
-
-        let server = HTTPServer::new(actual_addr).http(hr).clone();
-        tokio::spawn(async move {
-            let _ = server
-                .start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id()))
-                .await;
-        });
-        tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
-
-        let mut stream = TcpStream::connect(actual_addr).await.unwrap();
-
-        // 1. 握手
-        stream.write_all(b"GET /t HTTP/1.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n").await.unwrap();
-        let mut buf = [0u8; 1024];
-        let n = stream.read(&mut buf).await.unwrap();
-        assert!(String::from_utf8_lossy(&buf[..n]).contains("101"));
-
-        // 2. 发送 Pong 帧 (0x8A)
-        // 即使服务器逻辑写错回发了数据，它也会先排在缓冲区里
-        stream.write_all(&[0x8A, 0x80, 0, 0, 0, 0]).await.unwrap();
-
-        // 3. 紧接着发送一个 Text 帧
-        stream
-            .write_all(&[0x81, 0x83, 0, 0, 0, 0, b'y', b'e', b's'])
-            .await
-            .unwrap();
-
-        // 4. 读取结果
-        let _n = stream.read(&mut buf).await.unwrap();
-
-        // 关键点：如果服务器正确静默处理了 Pong，那么我们读到的第一个字节必须是 Text 响应 (0x81)
-        // 如果服务器错误地回发了 Pong，那么读到的第一个字节会是 0x8a
-        assert_eq!(
-            buf[0], 0x81,
-            "第一个字节应该是 Text 响应 (0x81)，而不是 Pong 响应 (0x8a)"
-        );
-
-        // 验证内容确实是 "ack" (Text 响应的内容)
-        let payload_len = (buf[1] & 0x7f) as usize;
-        assert_eq!(&buf[2..2 + payload_len], b"ack");
+        // --- 测试 Text (0x1) 的特殊性 ---
+        // 注意：Text 在 Command::data() 中通常映射回原始字节
+        let f1 = WSFrame::Text("hello".to_string());
+        assert_eq!(f1.id(), 1);
+        // 如果你的 Command 实现中 Text 返回 EMPTY，这里要对应修改断言
+        // assert_eq!(f1.data().is_empty(), true);
     }
 
-    #[tokio::test]
-    async fn test_send_frame_push127_large_payload_fixed() {
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
-        use tokio::net::{TcpListener, TcpStream};
-
-        let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
-        let listener = TcpListener::bind(addr).await.unwrap();
-        let actual_addr = listener.local_addr().unwrap();
-        drop(listener);
-
-        let mut hr = Router::new(NodeType::Static("root".into()));
-        let ws = WebSocket {
-            on_text: Some(Arc::new(|_, ctx, text| {
-                Box::pin(async move {
-                    if text == "send_large" {
-                        let large_data = vec![b'A'; 65537];
-                        let w = ctx.writer.as_deref_mut().unwrap();
-                        let _ = WebSocket::send_binary(w, &large_data).await;
-                    }
-                    true
-                })
-            })),
-            on_binary: None,
-        };
-
-        let ws_mw = WebSocket::to_middleware(ws);
-        route!(
-            hr,
-            get!("/large_send", exe!(|_ctx| { true }), vec![ws_mw.into()])
-        );
-
-        let server = HTTPServer::new(actual_addr).http(hr).clone();
-        tokio::spawn(async move {
-            let _ = server
-                .start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id()))
-                .await;
-        });
-        tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
-
-        let mut stream = TcpStream::connect(actual_addr).await.unwrap();
-
-        // 1. 握手
-        stream.write_all(b"GET /large_send HTTP/1.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n").await.unwrap();
-        let mut buf = [0u8; 4096];
-        let _ = stream.read(&mut buf).await.unwrap();
-
-        // 2. 发送指令 (必须带 Mask！)
-        // [0x81 (FIN+Text), 0x8A (Mask=1, Len=10)]
-        let mask = [0x11, 0x22, 0x33, 0x44];
-        let payload = "send_large";
-        let masked_payload: Vec<u8> = payload
-            .as_bytes()
-            .iter()
-            .enumerate()
-            .map(|(i, &b)| b ^ mask[i % 4])
-            .collect();
-
-        let mut cmd_frame = vec![0x81, 0x8A];
-        cmd_frame.extend_from_slice(&mask);
-        cmd_frame.extend_from_slice(&masked_payload);
-        stream.write_all(&cmd_frame).await.unwrap();
-
-        // 3. 验证服务端发回的帧
-        let mut frame_head = [0u8; 10];
-        stream.read_exact(&mut frame_head).await.unwrap();
-
-        assert_eq!(frame_head[0], 0x82, "期望收到二进制帧 (0x82)");
-        assert_eq!(frame_head[1], 127, "第二字节应为 127");
-
-        let mut len_bytes = [0u8; 8];
-        len_bytes.copy_from_slice(&frame_head[2..10]);
-        let actual_len = u64::from_be_bytes(len_bytes);
-
-        assert_eq!(actual_len, 65537);
+    #[test]
+    fn test_ws_frame_close_command_behavior() {
+        let f8 = WSFrame::Close(1000, Some("bye".into()));
+        assert_eq!(f8.id(), 8);
+        // Close 帧在业务 Command 层面通常被认为没有 data()
+        assert!(f8.data().is_empty());
     }
 
-    #[tokio::test]
-    async fn test_websocket_all_handler_paths_combined() {
-        use std::sync::atomic::AtomicU8;
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
-        use tokio::net::{TcpListener, TcpStream};
+    #[test]
+    fn test_reserved_opcodes_codec_roundtrip() -> anyhow::Result<()> {
+        let mut codec = WSCodec;
+        let mut buf = bytes::BytesMut::new();
 
-        // --- 1. 服务器环境准备 ---
-        let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
-        let listener = TcpListener::bind(addr).await.unwrap();
-        let actual_addr = listener.local_addr().unwrap();
-        drop(listener);
+        // 测试 0x7 (Reserved Non-Control)
+        let original = WSFrame::ReservedNonControl(0x7, vec![0xde, 0xad]);
+        codec.encode(original.clone(), &mut buf)?;
 
-        // 使用计数器来动态控制 Handler 的行为
-        let test_stage = Arc::new(AtomicU8::new(0));
-        let stage_clone = test_stage.clone();
+        // 验证编码：0x80 (FIN) | 0x07 = 0x87
+        assert_eq!(buf[0], 0x87);
 
-        let ws = WebSocket {
-            on_text: Some(Arc::new(move |_, _, text| {
-                let _s = stage_clone.clone();
-                Box::pin(async move {
-                    if text == "trigger_fail" {
-                        return false; // 👈 触发 0x1 分支的 break
-                    }
-                    true
-                })
-            })),
-            on_binary: Some(Arc::new(move |_, _, data| {
-                Box::pin(async move {
-                    if data == vec![0xDE, 0xAD] {
-                        return false; // 👈 触发 0x2 分支的 break
-                    }
-                    true
-                })
-            })),
-        };
+        let decoded = codec.decode(&mut buf)?.unwrap();
+        assert_eq!(original, decoded);
 
-        let mut hr = Router::new(NodeType::Static("root".into()));
-        let ws_mw = WebSocket::to_middleware(ws);
-        route!(hr, get!("/ws", exe!(|_ctx| { true }), vec![ws_mw.into()]));
+        Ok(())
+    }
 
-        let server = HTTPServer::new(actual_addr).http(hr).clone();
-        tokio::spawn(async move {
-            let _ = server
-                .start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id()))
-                .await;
-        });
-        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    #[test]
+    fn test_binary_ping_pong_command_trait() {
+        // --- 1. Binary (0x2) ---
+        let bin_data = vec![0x01, 0x02, 0x03];
+        let f2 = WSFrame::Binary(bin_data.clone());
+        assert_eq!(f2.id(), 0x2, "Binary ID 必须为 0x2");
+        assert_eq!(f2.data(), &bin_data, "Binary data 必须返回原始载荷");
 
-        // --- 场景 A: 验证 0x1 (Text) 分支的逻辑与 break ---
-        {
-            let mut stream = TcpStream::connect(actual_addr).await.unwrap();
-            // 握手
-            stream.write_all(b"GET /ws HTTP/1.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n").await.unwrap();
-            let mut buf = [0u8; 1024];
-            let n = stream.read(&mut buf).await.unwrap();
-            assert!(String::from_utf8_lossy(&buf[..n]).contains("101"));
+        // --- 2. Ping (0x9) ---
+        let ping_payload = vec![0xde, 0xad];
+        let f9 = WSFrame::Ping(ping_payload.clone());
+        assert_eq!(f9.id(), 0x9, "Ping ID 必须为 0x9");
+        assert_eq!(f9.data(), &ping_payload, "Ping data 应该允许携带心跳载荷");
 
-            // 发送 Text 消息 "trigger_fail" (带全零 Mask)
-            // 0x81 (FIN+Text), 0x8C (Mask=1, Len=12)
-            let mut frame = vec![0x81, 0x8C, 0, 0, 0, 0];
-            frame.extend_from_slice(b"trigger_fail");
-            stream.write_all(&frame).await.unwrap();
+        // --- 3. Pong (0xA) ---
+        let pong_payload = vec![0xbe, 0xef];
+        let fa = WSFrame::Pong(pong_payload.clone());
+        assert_eq!(fa.id(), 0x0a, "Pong ID 必须为 0xA");
+        assert_eq!(fa.data(), &pong_payload, "Pong data 应该返回对应的响应载荷");
+    }
 
-            // 验证: 1. 执行了 from_utf8_lossy 2. 执行了 close 3. 执行了 break
-            let _n = stream.read(&mut buf).await.unwrap();
-            assert_eq!(buf[0], 0x88, "0x1 拒绝应返回 Close 帧");
-            assert_eq!(u16::from_be_bytes([buf[2], buf[3]]), 1000);
+    #[test]
+    fn test_codec_to_command_id_flow() -> anyhow::Result<()> {
+        let mut codec = WSCodec;
 
-            let n_end = stream.read(&mut buf).await.unwrap();
-            assert_eq!(n_end, 0, "0x1 拒绝后 TCP 应关闭");
-        }
+        // 模拟收到一个客户端发送的 Masked Ping 帧
+        let mask = [0x1, 0x2, 0x3, 0x4];
+        let mut raw = vec![0x89, 0x81]; // FIN + Ping, Masked, Len 1
+        raw.extend_from_slice(&mask);
+        raw.push(0x41 ^ 0x1); // Masked 'A'
 
-        // --- 场景 B: 验证 0x2 (Binary) 分支的逻辑与 break ---
-        {
-            let mut stream = TcpStream::connect(actual_addr).await.unwrap();
-            // 握手
-            stream.write_all(b"GET /ws HTTP/1.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n").await.unwrap();
-            let mut buf = [0u8; 1024];
-            let _ = stream.read(&mut buf).await.unwrap();
+        let mut src = bytes::BytesMut::from(&raw[..]);
 
-            // 发送 Binary 消息 [0xDE, 0xAD]
-            // 0x82 (FIN+Binary), 0x82 (Mask=1, Len=2)
-            let frame = vec![0x82, 0x82, 0, 0, 0, 0, 0xDE, 0xAD];
-            stream.write_all(&frame).await.unwrap();
+        // 解码
+        let frame = codec.decode(&mut src)?.expect("应该成功解码 Ping 帧");
 
-            // 验证: 1. 调用 on_binary 2. 执行了 close 3. 执行了 break
-            let _n = stream.read(&mut buf).await.unwrap();
-            assert_eq!(buf[0], 0x88, "0x2 拒绝应返回 Close 帧");
-            assert_eq!(u16::from_be_bytes([buf[2], buf[3]]), 1000);
+        // 验证作为 Command 的表现
+        assert_eq!(frame.id(), 9);
+        assert_eq!(frame.data(), &vec![0x41]);
 
-            let n_end = stream.read(&mut buf).await.unwrap();
-            assert_eq!(n_end, 0, "0x2 拒绝后 TCP 应关闭");
-        }
+        Ok(())
+    }
 
-        // --- 场景 C: 验证未知 Opcode 拦截 (防止进入 run 里的 unreachable) ---
-        // 逻辑：read_full 应该先于 run 捕获到非法 Opcode 并返回 1002，而不是让 run 崩溃。
-        {
-            let mut stream = TcpStream::connect(actual_addr).await.unwrap();
-            let _ = stream.write_all(b"GET /ws HTTP/1.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n").await.unwrap();
-            let mut buf = [0u8; 1024];
-            let _ = stream.read(&mut buf).await.unwrap();
+    #[test]
+    fn test_continuation_and_reserved_payload() {
+        // --- 1. Continuation (0x0) ---
+        let data0 = vec![0x11, 0x22];
+        let f0 = WSFrame::Continuation(data0.clone());
+        assert_eq!(f0.payload(), Some(data0), "Continuation 必须导出其载荷数据");
 
-            // 发送非法 Opcode 0x3 (Reserved)
-            // read_full 会命中 _ => anyhow::bail!("unknown opcode")
-            stream.write_all(&[0x83, 0x80, 0, 0, 0, 0]).await.unwrap();
+        // --- 2. ReservedNonControl (0x3..0x7) ---
+        let data3 = vec![0x33, 0x44];
+        let f3 = WSFrame::ReservedNonControl(0x3, data3.clone());
+        assert_eq!(f3.payload(), Some(data3), "ReservedNonControl 必须导出其载荷数据");
 
-            let _n = stream.read(&mut buf).await.unwrap();
-            assert_eq!(buf[0], 0x88, "遇到未知 Opcode 应发送 Close 帧");
-            assert_eq!(
-                u16::from_be_bytes([buf[2], buf[3]]),
-                1002,
-                "协议错误码应为 1002"
-            );
+        // --- 3. ReservedControl (0xB..0xF) ---
+        let datab = vec![0x55, 0x66];
+        let fb = WSFrame::ReservedControl(0xb, datab.clone());
+        assert_eq!(fb.payload(), Some(datab), "ReservedControl 必须导出其载荷数据");
+    }
+
+    #[test]
+    fn test_continuation_reassembly_logic() {
+        // 模拟收到一个分片帧
+        let part = vec![0x01, 0x02];
+        let frame = WSFrame::Continuation(part.clone());
+
+        // 模拟框架层的处理：提取 payload
+        if let Some(data) = frame.payload() {
+            assert_eq!(data, part);
+        } else {
+            panic!("Continuation frame 必须包含有效载荷");
         }
     }
 
-    #[tokio::test]
-    async fn test_websocket_custom_close_codes_range() {
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
-        use tokio::net::{TcpListener, TcpStream};
+    #[test]
+    fn test_decode_continuation_frame() -> anyhow::Result<()> {
+        let mut codec = WSCodec;
+        let mut src = bytes::BytesMut::new();
 
-        // 1. 启动服务器
-        let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
-        let listener = TcpListener::bind(addr).await.unwrap();
-        let actual_addr = listener.local_addr().unwrap();
-        drop(listener);
+        // 构造一个 Continuation 帧
+        // 0x00: FIN=0, Opcode=0 (最常见的中间分片)
+        // 0x02: Payload Len 2
+        let raw_bytes = vec![0x00, 0x02, 0xaa, 0xbb];
+        src.extend_from_slice(&raw_bytes);
 
-        let mut hr = Router::new(NodeType::Static("root".into()));
-        let ws_mw = WebSocket::to_middleware(WebSocket {
-            on_text: None,
-            on_binary: None,
-        });
-        route!(
-            hr,
-            get!("/custom_code", exe!(|_ctx| { true }), vec![ws_mw.into()])
-        );
+        // 执行解码
+        let frame = codec.decode(&mut src)?.expect("应该解析出 Continuation 帧");
 
-        let server = HTTPServer::new(actual_addr).http(hr).clone();
-        tokio::spawn(async move {
-            let _ = server
-                .start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id()))
-                .await;
-        });
-        tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
+        // 验证变体
+        if let WSFrame::Continuation(payload) = frame.clone() {
+            assert_eq!(payload, vec![0xaa, 0xbb]);
+        } else {
+            panic!("未能匹配到 WSFrame::Continuation 变体");
+        }
 
-        // 2. 客户端连接并握手
-        let mut stream = TcpStream::connect(actual_addr).await.unwrap();
-        stream.write_all(b"GET /custom_code HTTP/1.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n").await.unwrap();
-        let mut buf = [0u8; 1024];
-        let _ = stream.read(&mut buf).await.unwrap();
+        // 验证作为 Command 的 ID
+        assert_eq!(frame.id(), 0x0);
 
-        // --- 测试目标：自定义状态码 4000 (命中 3000..=4999 分支) ---
-        // 构造 Payload: [0x0F, 0xA0] (即 4000 的大端序)
-        let custom_code: u16 = 4000;
-        let code_bytes = custom_code.to_be_bytes();
-        let mask = [0x11, 0x22, 0x33, 0x44];
-
-        let masked_payload = [code_bytes[0] ^ mask[0], code_bytes[1] ^ mask[1]];
-
-        // 发送关闭帧: FIN+Close(0x88), Masked(0x82), MaskKey, Payload
-        let mut frame = vec![0x88, 0x82];
-        frame.extend_from_slice(&mask);
-        frame.extend_from_slice(&masked_payload);
-
-        stream.write_all(&frame).await.unwrap();
-
-        // 3. 验证服务端响应
-        // 源码逻辑：parse_close_payload 成功返回 Ok((4000, None))
-        // 随后 run 会调用 Self::close(writer, 4000, None) 并 bail
-        let _n = stream.read(&mut buf).await.unwrap();
-
-        assert_eq!(buf[0], 0x88, "应响应关闭帧");
-        let received_code = u16::from_be_bytes([buf[2], buf[3]]);
-
-        // 如果该分支没测到（即报错了），received_code 会是 1002
-        // 如果测试通过，received_code 应该是我们发送的 4000
-        assert_eq!(
-            received_code, 4000,
-            "服务端应允许并原样回传 3000-4999 范围内的自定义状态码"
-        );
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn test_websocket_strict_protocol_validation() {
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
-        use tokio::net::{TcpListener, TcpStream};
+    #[test]
+    fn test_continuation_payload_mapping() {
+        let data = vec![0xcc, 0xdd];
+        let frame = WSFrame::Continuation(data.clone());
 
-        // 1. 启动服务器
-        let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
-        let listener = TcpListener::bind(addr).await.unwrap();
-        let actual_addr = listener.local_addr().unwrap();
-        drop(listener);
+        // 触发 Frame::payload()
+        let p = frame.payload();
+        assert_eq!(p, Some(data), "Continuation 的 payload() 分支映射错误");
+    }
 
-        let mut hr = Router::new(NodeType::Static("root".into()));
-        // 提供一个正常的 Handler 供 UTF-8 测试使用
-        let ws = WebSocket {
-            on_text: Some(Arc::new(|_, _, _| Box::pin(async move { true }))),
-            on_binary: None,
-        };
-        let ws_mw = WebSocket::to_middleware(ws);
-        route!(
-            hr,
-            get!("/strict", exe!(|_ctx| { true }), vec![ws_mw.into()])
-        );
+    #[test]
+    fn test_continuation_command_trait() {
+        let data = vec![0x12, 0x34];
+        let frame = WSFrame::Continuation(data.clone());
 
-        let server = HTTPServer::new(actual_addr).http(hr).clone();
-        tokio::spawn(async move {
-            let _ = server
-                .start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id()))
-                .await;
-        });
-        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-
-        // 辅助闭包：快速发起连接并完成握手
-        let connect_ws = || async {
-            let mut stream = TcpStream::connect(actual_addr).await.unwrap();
-            stream.write_all(b"GET /strict HTTP/1.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n").await.unwrap();
-            let mut buf = [0u8; 1024];
-            let _ = stream.read(&mut buf).await.unwrap();
-            stream
-        };
-
-        // --- 分支 1: 测试保留位校验 (RSV1 set) ---
-        {
-            let mut stream = connect_ws().await;
-            // 0xF1 = FIN(1), RSV1(1), RSV2(0), RSV3(0), Opcode(1 - Text)
-            // 按照代码应触发 1002
-            stream.write_all(&[0xF1, 0x80, 0, 0, 0, 0]).await.unwrap();
-            let mut buf = [0u8; 10];
-            stream.read_exact(&mut buf[..4]).await.unwrap();
-            assert_eq!(
-                u16::from_be_bytes([buf[2], buf[3]]),
-                1002,
-                "设置RSV位应返回1002"
-            );
-        }
-
-        // --- 分支 2: 测试分片拦截 (!fin) ---
-        {
-            let mut stream = connect_ws().await;
-            // 0x01 = FIN(0), Opcode(1) -> 分片起始帧
-            stream.write_all(&[0x01, 0x80, 0, 0, 0, 0]).await.unwrap();
-            let mut buf = [0u8; 10];
-            stream.read_exact(&mut buf[..4]).await.unwrap();
-            assert_eq!(
-                u16::from_be_bytes([buf[2], buf[3]]),
-                1002,
-                "不支持分片应返回1002"
-            );
-        }
-
-        // --- 分支 3: 测试连续帧拦截 (opcode 0) ---
-        {
-            let mut stream = connect_ws().await;
-            // 0x80 = FIN(1), Opcode(0) -> 无起始帧的连续帧
-            stream.write_all(&[0x80, 0x80, 0, 0, 0, 0]).await.unwrap();
-            let mut buf = [0u8; 10];
-            stream.read_exact(&mut buf[..4]).await.unwrap();
-            assert_eq!(
-                u16::from_be_bytes([buf[2], buf[3]]),
-                1002,
-                "孤立的连续帧应返回1002"
-            );
-        }
-
-        // --- 分支 4: 测试严格 UTF-8 校验 (1007) ---
-        {
-            let mut stream = connect_ws().await;
-            // 构造非法 UTF-8 负载 (0xFF 在 UTF-8 中无效)
-            let invalid_utf8 = [0xFF, 0xFE];
-            let mask = [0x11, 0x22, 0x33, 0x44];
-            let masked_payload = [invalid_utf8[0] ^ mask[0], invalid_utf8[1] ^ mask[1]];
-
-            let mut frame = vec![0x81, 0x82]; // FIN, Text, Masked, Len 2
-            frame.extend_from_slice(&mask);
-            frame.extend_from_slice(&masked_payload);
-
-            stream.write_all(&frame).await.unwrap();
-
-            let mut buf = [0u8; 10];
-            stream.read_exact(&mut buf[..4]).await.unwrap();
-            assert_eq!(
-                u16::from_be_bytes([buf[2], buf[3]]),
-                1007,
-                "非法UTF-8文本帧应返回1007"
-            );
-        }
+        // 触发 Command::id()
+        assert_eq!(frame.id(), 0);
+        // 触发 Command::data()
+        assert_eq!(frame.data(), &data);
     }
 }

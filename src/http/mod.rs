@@ -7,3 +7,4 @@ pub mod res;
 pub mod router;
 pub mod types;
 pub mod meta;
+pub mod websocket;
