@@ -1,11 +1,12 @@
 use std::{
     collections::HashSet,
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
-    time::{SystemTime, UNIX_EPOCH},
+    net::{ IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr },
+    time::{ SystemTime, UNIX_EPOCH },
 };
 
-use crate::connection::{protocol::Protocol, types::NetworkScope};
-use serde::{Deserialize, Serialize};
+use crate::connection::{ protocol::Protocol, types::NetworkScope };
+use bincode::{ Decode, Encode };
+use serde::{ Deserialize, Serialize };
 
 //
 // 节点基本信息，同时用于记录本地与远程数据
@@ -16,13 +17,12 @@ use serde::{Deserialize, Serialize};
 // 5. 认别ID，即本地公钥，用于数字签名
 //
 
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Encode, Decode)]
 pub struct Node {
     pub id: Vec<u8>, // 节点 ID，通常是公钥的哈希, 基于这个id，能够与其它节点作出有效的签名
     pub version: u32, // 协议版本
     pub started_at: u64, // 启动时间戳
-    pub port: u16,   // 监听端口,
+    pub port: u16, // 监听端口,
     /// 💡 支持的协议列表，例如: ["tcp", "udp", "http", "ws"]
     pub protocols: HashSet<Protocol>,
     pub ips: Vec<(NetworkScope, IpAddr)>,
@@ -35,10 +35,7 @@ impl Node {
             id,
             version,
             port,
-            started_at: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs(),
+            started_at: SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs(),
             ips,
             protocols: Self::default_protocols(),
         }
@@ -50,7 +47,10 @@ impl Node {
 
         // 1. 自动计算 NetworkScope 并生成元组 Vec
         let scope = crate::connection::node::NetworkScope::from_ip(&ip);
-        let ips = vec![(scope, ip)];
+        let ips = match scope {
+            NetworkScope::Intranet => Self::system_ips(),
+            NetworkScope::Extranet => vec![(scope, ip)],
+        };
 
         // 2. 生成默认 ID (示例：使用随机或固定长度 ID)
         // 在实际应用中，这里可能需要持久化存储或硬件指纹
@@ -77,18 +77,18 @@ impl Node {
 
     /// 自动化构造：从系统环境创建完整节点信息
     pub fn from_system(port: u16, id: Vec<u8>, version: u32) -> Self {
-        let mut node = Self {
+        Self {
             id,
             version,
             port,
-            started_at: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs(),
-            ips: Vec::new(),
+            started_at: SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs(),
+            ips: Self::system_ips(),
             protocols: Self::default_protocols(),
-        };
+        }
+    }
 
+    pub fn system_ips() -> Vec<(NetworkScope, IpAddr)> {
+        let mut ips = vec![];
         // 探测本地网卡
         if let Ok(interfaces) = get_if_addrs::get_if_addrs() {
             for interface in interfaces {
@@ -98,14 +98,17 @@ impl Node {
                 }
 
                 let scope = NetworkScope::from_ip(&ip);
-                node.ips.push((scope, ip));
+                ips.push((scope, ip));
             }
         }
-        node
+        ips
     }
 
     pub fn get_all(&self) -> Vec<IpAddr> {
-        self.ips.iter().map(|(_, addr)| *addr).collect()
+        self.ips
+            .iter()
+            .map(|(_, addr)| *addr)
+            .collect()
     }
 
     /// 根据 Scope 获取地址，可选匹配特定的地址族 (v4 或 v6)
@@ -140,16 +143,13 @@ impl Node {
     }
 
     pub fn get_extranet_ips_v4(&self) -> Vec<IpAddr> {
-        self.get_ips(
-            NetworkScope::Extranet,
-            Some(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0))),
-        )
+        self.get_ips(NetworkScope::Extranet, Some(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0))))
     }
 
     pub fn get_extranet_ips_v6(&self) -> Vec<IpAddr> {
         self.get_ips(
             NetworkScope::Extranet,
-            Some(IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 0))),
+            Some(IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 0)))
         )
     }
 
@@ -158,16 +158,13 @@ impl Node {
     }
 
     pub fn get_intranet_v4(&self) -> Vec<IpAddr> {
-        self.get_ips(
-            NetworkScope::Intranet,
-            Some(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0))),
-        )
+        self.get_ips(NetworkScope::Intranet, Some(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0))))
     }
 
     pub fn get_intranet_v6(&self) -> Vec<IpAddr> {
         self.get_ips(
             NetworkScope::Intranet,
-            Some(IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 0))),
+            Some(IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 0)))
         )
     }
 

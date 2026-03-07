@@ -1,5 +1,6 @@
 use crate::connection::context::BoxWriter;
 use crate::connection::node::Node;
+use bincode::{Decode, Encode};
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -10,7 +11,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tokio_util::sync::CancellationToken;
 use tokio::sync::{Mutex, RwLock};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Encode, Decode)]
 pub enum NetworkScope {
     Intranet, // 内网 (RFC1918, IPv6 LLA/ULA)
     Extranet, // 外网 (公网 IP)
