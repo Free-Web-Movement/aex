@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 //
 
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Node {
     pub id: Vec<u8>, // 节点 ID，通常是公钥的哈希, 基于这个id，能够与其它节点作出有效的签名
     pub version: u32, // 协议版本

@@ -9,7 +9,11 @@ use std::{
 use tokio::sync::{Mutex, RwLock};
 
 use crate::{
-    communicators::{event::EventEmitter, pipe::PipeManager, spreader::SpreadManager},
+    communicators::{
+        event::{Event, EventCallback, EventEmitter},
+        pipe::{PipeCallback, PipeManager},
+        spreader::{SpreadCallback, SpreadManager},
+    },
     connection::context::{SERVER_NAME, TypeMap},
     crypto::session_key_manager::PairedSessionKey,
 };
@@ -76,5 +80,42 @@ impl GlobalContext {
             // boxed_val 是 DashMap 的引用，指向 Box<dyn Any...>
             boxed_val.downcast_ref::<T>().cloned()
         })
+    }
+
+    pub async fn pipe<T>(&self, name: &str, callback: PipeCallback<T>) -> &Self
+    where
+        T: Send + 'static,
+    {
+        self.pipe
+            .register(name, callback)
+            .await
+            .unwrap_or_else(|e| {
+                eprintln!("警告: 管道 {} 注册失败: {}", name, e);
+            });
+        self
+    }
+
+    /// 订阅一个全局广播 (1:N)
+    pub async fn spread<T>(&self, name: &str, callback: SpreadCallback<T>) -> &Self
+    where
+        T: Clone + Send + Sync + 'static,
+    {
+        self.spread
+            .subscribe(name, callback)
+            .await
+            .unwrap_or_else(|e| {
+                eprintln!("警告: 广播 {} 订阅失败: {}", name, e);
+            });
+        self
+    }
+
+    /// 监听一个全局事件 (M:N)
+    pub async fn event<T>(&self, event_name: &str, callback: EventCallback<T>) -> &Self
+    where
+        T: Clone + Send + Sync + 'static,
+    {
+        // 调用我们之前实现的异步版 on
+        Event::<T>::_on(&self.event, event_name.to_string(), callback).await;
+        self
     }
 }

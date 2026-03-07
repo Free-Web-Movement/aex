@@ -3,10 +3,6 @@ use std::sync::Arc;
 use tokio::io::{BufReader, BufWriter};
 use tokio::net::TcpListener;
 use tokio::net::UdpSocket;
-
-use crate::communicators::event::{Event, EventCallback};
-use crate::communicators::pipe::PipeCallback;
-use crate::communicators::spreader::SpreadCallback;
 use crate::connection::context::{BoxReader, BoxWriter, TypeMapExt};
 use crate::connection::global::GlobalContext;
 use crate::connection::types::IDExtractor;
@@ -27,28 +23,22 @@ impl AexServer {
     pub fn new(addr: SocketAddr) -> Self {
         Self {
             addr,
-            // http_router: None,
-            // tcp_router: None,
-            // udp_router: None,
             globals: Arc::new(GlobalContext::new(addr)),
         }
     }
 
     pub fn http(&self, router: HttpRouter) -> &Self {
         self.globals.routers.set_value(Arc::new(router));
-        // self.http_router = Some(Arc::new(router));
         self
     }
 
     pub fn tcp(&self, router: TcpRouter) -> &Self {
         self.globals.routers.set_value(Arc::new(router));
-        // self.tcp_router = Some(Arc::new(router));
         self
     }
 
     pub fn udp(&self, router: UdpRouter) -> &Self {
         self.globals.routers.set_value(Arc::new(router));
-        // self.udp_router = Some(Arc::new(router));
         self
     }
 
@@ -166,46 +156,6 @@ impl AexServer {
             addr: self.addr,
             globals: self.globals.clone(),
         }
-    }
-
-    /// 注册一个全局管道 (N:1)
-    pub async fn pipe<T>(&self, name: &str, callback: PipeCallback<T>) -> &Self
-    where
-        T: Send + 'static,
-    {
-        self.globals
-            .pipe
-            .register(name, callback)
-            .await
-            .unwrap_or_else(|e| {
-                eprintln!("警告: 管道 {} 注册失败: {}", name, e);
-            });
-        self
-    }
-
-    /// 订阅一个全局广播 (1:N)
-    pub async fn spread<T>(&self, name: &str, callback: SpreadCallback<T>) -> &Self
-    where
-        T: Clone + Send + Sync + 'static,
-    {
-        self.globals
-            .spread
-            .subscribe(name, callback)
-            .await
-            .unwrap_or_else(|e| {
-                eprintln!("警告: 广播 {} 订阅失败: {}", name, e);
-            });
-        self
-    }
-
-    /// 监听一个全局事件 (M:N)
-    pub async fn event<T>(&self, event_name: &str, callback: EventCallback<T>) -> &Self
-    where
-        T: Clone + Send + Sync + 'static,
-    {
-        // 调用我们之前实现的异步版 on
-        Event::<T>::_on(&self.globals.event, event_name.to_string(), callback).await;
-        self
     }
 }
 

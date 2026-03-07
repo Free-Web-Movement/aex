@@ -161,7 +161,7 @@ mod aex_tests {
 
         // 1. 测试 Pipe (N:1)
         let p_c = Arc::clone(&pipe_count);
-        server
+        server.globals
             .pipe::<String>(
                 "audit_log",
                 Box::new(move |msg| {
@@ -177,7 +177,7 @@ mod aex_tests {
 
         // 2. 测试 Spread (1:N)
         let s_c = Arc::clone(&spread_count);
-        server
+        server.globals
             .spread::<i32>(
                 "config_sync",
                 Box::new(move |val| {
@@ -193,7 +193,7 @@ mod aex_tests {
 
         // 3. 测试 Event (M:N)
         let e_c = Arc::clone(&event_count);
-        server
+        server.globals
             .event::<u32>(
                 "user_login",
                 Arc::new(move |uid| {
