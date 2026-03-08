@@ -5,11 +5,14 @@ use std::{
 };
 
 use dashmap::DashMap;
-use tokio::sync::{Mutex, RwLock};
+use tokio::{
+    io::{BufReader, BufWriter},
+    sync::{Mutex, RwLock},
+};
 use tokio_util::sync::CancellationToken;
 
 use crate::connection::{
-    context::BoxWriter,
+    context::{BoxReader, BoxWriter},
     status::ConnectionStatus,
     types::{BiDirectionalConnections, ConnectionEntry, NetworkScope},
 };
@@ -46,7 +49,7 @@ impl ConnectionManager {
         f: F,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
     where
-        F: FnOnce(tokio::net::tcp::OwnedReadHalf, Arc<Mutex<BoxWriter>>, CancellationToken) -> Fut
+        F: FnOnce(Arc<Mutex<BoxReader>>, Arc<Mutex<BoxWriter>>, CancellationToken) -> Fut
             + Send
             + 'static,
         Fut: std::future::Future<Output = ()> + Send + 'static,
@@ -67,10 +70,12 @@ impl ConnectionManager {
         // into_split() 返回 (OwnedReadHalf, OwnedWriteHalf)
         let (raw_reader, raw_writer) = stream.into_split();
 
-        // 4. 封装 Writer 为业务所需的 BoxWriter 并套上 Arc<Mutex<>>
-        let writer_obj: BoxWriter = Box::new(raw_writer);
-        let writer = Arc::new(Mutex::new(writer_obj));
-        let writer_for_task = writer.clone();
+        let buf_reader: Arc<Mutex<BoxReader>> =
+            Arc::new(Mutex::new(Box::new(BufReader::new(raw_reader))));
+        let buf_writer: Arc<Mutex<BoxWriter>> =
+            Arc::new(Mutex::new(Box::new(BufWriter::new(raw_writer))));
+
+        let writer = buf_writer.clone();
 
         // 5. 准备生命周期工具
         let child_token = self.cancel_token.child_token();
@@ -79,7 +84,7 @@ impl ConnectionManager {
         // 6. 启动异步任务
         // 将 Reader 和 Writer 的克隆 移交给闭包
         let handle = tokio::spawn(async move {
-            f(raw_reader, writer_for_task, move_token).await;
+            f(buf_reader.clone(), buf_writer.clone(), move_token).await;
         });
 
         // 7. 登记到管理池
