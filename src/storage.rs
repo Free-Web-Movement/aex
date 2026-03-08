@@ -3,8 +3,6 @@ use std::{collections::HashMap, fs, path::PathBuf};
 
 pub const DEFAULT_APP_DIR: &str = ".aex";
 
-
-
 #[derive(Debug, Clone)]
 pub struct Storage {
     pub app_dir: PathBuf,
@@ -36,23 +34,23 @@ impl Storage {
         }
     }
 
-    pub fn save<T>(&self, k: String, t: &T) -> anyhow::Result<()>
+    pub fn save<T>(&self, k: &String, t: &T) -> anyhow::Result<()>
     where
         T: Serialize,
     {
         let json = serde_json::to_vec_pretty(t)?;
         let default_path = PathBuf::from(DEFAULT_APP_DIR);
-        let file = self.files.get(&k).unwrap_or_else(|| &default_path);
+        let file = self.files.get(k).unwrap_or_else(|| &default_path);
         fs::write(file, json)?;
         Ok(())
     }
 
-    pub fn read<T>(&self, k: String) -> anyhow::Result<Option<T>>
+    pub fn read<T>(&self, k: &String) -> anyhow::Result<Option<T>>
     where
         T: for<'a> Deserialize<'a>,
     {
         let default_path = PathBuf::from(DEFAULT_APP_DIR);
-        let file = self.files.get(&k).unwrap_or_else(|| &default_path);
+        let file = self.files.get(k).unwrap_or_else(|| &default_path);
         println!("Reading address from {:?}", &file);
         if !file.exists() {
             println!("Address file does not exist.");

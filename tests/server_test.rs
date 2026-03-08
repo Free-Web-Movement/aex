@@ -5,7 +5,7 @@ mod aex_tests {
     use aex::http::meta::HttpMetadata;
     use aex::http::protocol::header::HeaderKey;
     use aex::http::protocol::status::StatusCode;
-    use aex::server::{AexServer, HTTPServer};
+    use aex::server::HTTPServer;
     use aex::tcp::types::{Codec, Command, RawCodec};
     use futures::FutureExt;
     use std::net::SocketAddr;
@@ -29,7 +29,7 @@ mod aex_tests {
         let test_result = timeout(Duration::from_secs(10), async {
             // 1. 自动分配可用端口
             let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
-            let mut server = AexServer::new(addr);
+            let mut server = HTTPServer::new(addr, None);
 
             // 2. 注册 HTTP 路由
             let mut hr = HttpRouter::new(NodeType::Static("root".into()));
@@ -62,11 +62,15 @@ mod aex_tests {
 
             // 3. 注册 TCP 路由 (ID 10)
             let mut tr = TcpRouter::new();
-            tr.on::<RawCodec, RawCodec>(10, Box::new(|_, _, _,| Box::pin(async move { Ok(true) }).boxed()), vec![]);
+            tr.on::<RawCodec, RawCodec>(
+                10,
+                Box::new(|_, _, _| Box::pin(async move { Ok(true) }).boxed()),
+                vec![],
+            );
 
             // 4. 注册 UDP 路由 (ID 20)
             let mut ur = UdpRouter::new();
-            ur.on::<RawCodec, RawCodec, _, _>(20, | _, _, _, addr, socket| async move {
+            ur.on::<RawCodec, RawCodec, _, _>(20, |_, _, _, addr, socket| async move {
                 socket.send_to(b"udp_ok", addr).await?;
                 Ok(true)
             });
@@ -152,7 +156,7 @@ mod aex_tests {
     #[tokio::test]
     async fn test_server_communication_bus() {
         let addr = "127.0.0.1:0".parse().unwrap(); // 自动分配可用端口
-        let server = HTTPServer::new(addr);
+        let server = HTTPServer::new(addr, None);
 
         // 准备计数器
         let pipe_count = Arc::new(AtomicUsize::new(0));
@@ -161,7 +165,8 @@ mod aex_tests {
 
         // 1. 测试 Pipe (N:1)
         let p_c = Arc::clone(&pipe_count);
-        server.globals
+        server
+            .globals
             .pipe::<String>(
                 "audit_log",
                 Box::new(move |msg| {
@@ -177,7 +182,8 @@ mod aex_tests {
 
         // 2. 测试 Spread (1:N)
         let s_c = Arc::clone(&spread_count);
-        server.globals
+        server
+            .globals
             .spread::<i32>(
                 "config_sync",
                 Box::new(move |val| {
@@ -193,7 +199,8 @@ mod aex_tests {
 
         // 3. 测试 Event (M:N)
         let e_c = Arc::clone(&event_count);
-        server.globals
+        server
+            .globals
             .event::<u32>(
                 "user_login",
                 Arc::new(move |uid| {

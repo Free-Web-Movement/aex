@@ -127,10 +127,10 @@ mod tests {
         storage.files.insert(key.clone(), file_path.clone());
 
         // 测试保存
-        storage.save(key.clone(), &data)?;
+        storage.save(&key, &data)?;
 
         // 测试读取
-        let loaded: Option<TestData> = storage.read(key)?;
+        let loaded: Option<TestData> = storage.read(&key)?;
 
         assert!(loaded.is_some());
         assert_eq!(loaded.unwrap(), data);
@@ -145,7 +145,7 @@ mod tests {
         let (storage, test_dir) = setup_storage();
 
         // 读取一个未定义的 key
-        let result: Option<TestData> = storage.read("none".to_string())?;
+        let result: Option<TestData> = storage.read(&"none".to_string())?;
 
         assert!(result.is_none());
 

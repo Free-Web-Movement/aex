@@ -77,7 +77,7 @@ async fn main() -> anyhow::Result<()> {
 
     // --- 4. 组装并启动服务器 ---
     // 借力于 HTTPServer 类型别名或直接使用 AexServer
-    AexServer::new(addr)
+    AexServer::new(addr, None)
         .http(http_router)
         .tcp(tcp_router)
         .udp(udp_router)

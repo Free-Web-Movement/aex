@@ -1,8 +1,3 @@
-use std::net::SocketAddr;
-use std::sync::Arc;
-use tokio::io::{BufReader, BufWriter};
-use tokio::net::TcpListener;
-use tokio::net::UdpSocket;
 use crate::connection::context::{BoxReader, BoxWriter, TypeMapExt};
 use crate::connection::global::GlobalContext;
 use crate::connection::types::IDExtractor;
@@ -11,6 +6,11 @@ use crate::http::router::Router as HttpRouter;
 use crate::tcp::router::Router as TcpRouter;
 use crate::tcp::types::{TCPCommand, TCPFrame};
 use crate::udp::router::Router as UdpRouter;
+use std::net::SocketAddr;
+use std::sync::Arc;
+use tokio::io::{BufReader, BufWriter};
+use tokio::net::TcpListener;
+use tokio::net::UdpSocket;
 
 /// AexServer: 核心多协议服务器
 #[derive(Clone)]
@@ -20,10 +20,10 @@ pub struct AexServer {
 }
 
 impl AexServer {
-    pub fn new(addr: SocketAddr) -> Self {
+    pub fn new(addr: SocketAddr, globals: Option<Arc<GlobalContext>>) -> Self {
         Self {
             addr,
-            globals: Arc::new(GlobalContext::new(addr)),
+            globals: globals.unwrap_or(Arc::new(GlobalContext::new(addr))),
         }
     }
 
@@ -109,10 +109,8 @@ impl AexServer {
                     let buf_reader = BufReader::new(reader);
                     let buf_writer = BufWriter::new(writer);
 
-                    let mut r_opt: Option<BoxReader> =
-                        Some(Box::new(buf_reader));
-                    let mut w_opt: Option<BoxWriter> =
-                        Some(Box::new(buf_writer));
+                    let mut r_opt: Option<BoxReader> = Some(Box::new(buf_reader));
+                    let mut w_opt: Option<BoxWriter> = Some(Box::new(buf_writer));
                     return tr
                         .clone()
                         .handle::<F, C>(

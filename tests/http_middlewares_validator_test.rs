@@ -40,7 +40,7 @@ async fn test_to_validator_integration_full() {
     // 路由中的 :id 必须对应 DSL 里的 id
     route!(hr, post!("/check/:id", handler, vec![mw_validator]));
 
-    let server = HTTPServer::new(actual_addr).http(hr).clone();
+    let server = HTTPServer::new(actual_addr, None).http(hr).clone();
     tokio::spawn(async move {
         
         let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;
@@ -116,7 +116,7 @@ async fn test_v_macro_integration_full() {
 
     route!(hr, post!("/check/:id", handler, vec![mw_validator]));
 
-    let server = HTTPServer::new(actual_addr).http(hr).clone();
+    let server = HTTPServer::new(actual_addr, None).http(hr).clone();
     tokio::spawn(async move {
         let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;
     });
@@ -198,7 +198,7 @@ async fn test_validator_to_handler_data_flow() {
     // 路由绑定：:id 对应 params 规则
     route!(hr, post!("/user/:id", handler, vec![mw_validator]));
 
-    let server = HTTPServer::new(actual_addr).http(hr).clone();
+    let server = HTTPServer::new(actual_addr, None).http(hr).clone();
     tokio::spawn(async move {
         let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;
     });
@@ -253,7 +253,7 @@ async fn test_validator_conversion_logic_hardcore() {
 
     route!(hr, get!("/test", handler, vec![mw_validator]));
 
-    let server = HTTPServer::new(actual_addr).http(hr).clone();
+    let server = HTTPServer::new(actual_addr, None).http(hr).clone();
     tokio::spawn(async move {
         let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;
     });
@@ -316,7 +316,7 @@ async fn test_validator_edge_cases_and_fallback() {
 
     route!(hr, get!("/edge", handler, vec![mw_validator]));
 
-    let server = HTTPServer::new(actual_addr).http(hr).clone();
+    let server = HTTPServer::new(actual_addr, None).http(hr).clone();
     tokio::spawn(async move {
         let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;
     });
@@ -383,7 +383,7 @@ async fn test_validator_boolean_strict_error_integration() {
         Some(vec![validator_mw]),
     );
 
-    let server = HTTPServer::new(actual_addr).http(hr).clone();
+    let server = HTTPServer::new(actual_addr, None).http(hr).clone();
     tokio::spawn(async move {
         let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;
     });
@@ -438,7 +438,7 @@ async fn test_validator_integer_strict_error_integration() {
     );
 
     // 3. 启动 AexServer
-    let server = HTTPServer::new(actual_addr).http(hr).clone();
+    let server = HTTPServer::new(actual_addr, None).http(hr).clone();
     tokio::spawn(async move {
         let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;
     });
@@ -509,7 +509,7 @@ async fn test_validator_float_strict_error_integration() {
     );
 
     // 3. 启动 AexServer
-    let server = HTTPServer::new(actual_addr).http(hr).clone();
+    let server = HTTPServer::new(actual_addr, None).http(hr).clone();
     tokio::spawn(async move {
         let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;
     });
@@ -592,7 +592,7 @@ async fn test_validator_float_auto_completion_promotion() {
         Some(vec![to_validator(dsl_map)]),
     );
 
-    let server = HTTPServer::new(actual_addr).http(hr).clone();
+    let server = HTTPServer::new(actual_addr, None).http(hr).clone();
     tokio::spawn(async move {
         let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;
     });
@@ -667,7 +667,7 @@ async fn test_validator_value_to_string_fallback() {
         Some(vec![to_validator(dsl_map)]),
     );
 
-    let server = HTTPServer::new(actual_addr).http(hr).clone();
+    let server = HTTPServer::new(actual_addr, None).http(hr).clone();
     tokio::spawn(async move {
         let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;
     });
@@ -752,7 +752,7 @@ async fn test_validator_params_none_fallback() {
     );
 
     // 2. 启动服务器并发送请求
-    let server = HTTPServer::new(actual_addr).http(hr).clone();
+    let server = HTTPServer::new(actual_addr, None).http(hr).clone();
     tokio::spawn(async move {
         let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;
     });
