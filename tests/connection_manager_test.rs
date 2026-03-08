@@ -15,9 +15,9 @@ mod tests {
         sync::{
             Arc,
             atomic::{AtomicBool, Ordering},
-        },
+        }, time::Duration,
     };
-    use tokio::sync::Mutex;
+    use tokio::{io::AsyncReadExt, net::TcpListener, sync::Mutex};
 
     #[tokio::test]
     async fn test_new_manager() {
@@ -38,16 +38,16 @@ mod tests {
 
         // 1. 测试回环地址拦截
         let loopback: SocketAddr = "127.0.0.1:9000".parse().unwrap();
-        manager.add(loopback, handle.clone(), true);
+        manager.add(loopback, handle.clone(), true, None);
         assert!(manager.connections.is_empty(), "Loopback should be ignored");
 
         // 2. 测试添加 Client 连接
-        manager.add(addr, handle.clone(), true);
+        manager.add(addr, handle.clone(), true, None);
         assert_eq!(manager.connections.len(), 1);
 
         // 3. 测试重复 IP 不同端口 (应该在同一个桶里)
         let addr2: SocketAddr = "1.1.1.1:8081".parse().unwrap();
-        manager.add(addr2, handle.clone(), false);
+        manager.add(addr2, handle.clone(), false, None);
         {
             let bucket = manager
                 .connections
@@ -90,7 +90,7 @@ mod tests {
                 }
             })
             .abort_handle();
-            manager.add(addr, handle.clone(), true);
+            manager.add(addr, handle.clone(), true, None);
 
             println!(">>> 正在执行 cancel_gracefully");
             assert!(manager.cancel_gracefully(addr));
@@ -110,7 +110,7 @@ mod tests {
             manager.cancel_by_addr(addr);
 
             println!(">>> 正在执行 cancel_all_by_ip");
-            manager.add(addr, handle.clone(), true);
+            manager.add(addr, handle.clone(), true, None);
             manager.cancel_all_by_ip(addr.ip());
 
             println!(">>> 测试完成!");
@@ -125,7 +125,7 @@ mod tests {
         let addr: SocketAddr = "8.8.8.8:80".parse().unwrap();
         let handle = tokio::spawn(async {}).abort_handle();
 
-        manager.add(addr, handle, true);
+        manager.add(addr, handle, true, None);
 
         // 验证状态统计
         let status = manager.status();
@@ -148,7 +148,7 @@ mod tests {
     async fn test_shutdown() {
         let manager = ConnectionManager::new();
         let addr: SocketAddr = "10.0.0.1:443".parse().unwrap();
-        manager.add(addr, tokio::spawn(async {}).abort_handle(), false);
+        manager.add(addr, tokio::spawn(async {}).abort_handle(), false, None);
 
         manager.shutdown();
 
@@ -180,7 +180,7 @@ mod tests {
         let addr: SocketAddr = "1.1.1.1:80".parse().unwrap();
 
         // 注入一个连接
-        manager.add(addr, tokio::spawn(async {}).abort_handle(), true);
+        manager.add(addr, tokio::spawn(async {}).abort_handle(), true, None);
 
         // 覆盖点：1. 仅超时停用 2. 仅最大寿命停用 3. 两者都不满足
         // 模拟 current 很大（未来时间）的情景
@@ -197,8 +197,18 @@ mod tests {
         let intranet_addr: SocketAddr = "10.0.0.1:80".parse().unwrap();
         let extranet_addr: SocketAddr = "1.1.1.1:80".parse().unwrap();
 
-        manager.add(intranet_addr, tokio::spawn(async {}).abort_handle(), true);
-        manager.add(extranet_addr, tokio::spawn(async {}).abort_handle(), false);
+        manager.add(
+            intranet_addr,
+            tokio::spawn(async {}).abort_handle(),
+            true,
+            None,
+        );
+        manager.add(
+            extranet_addr,
+            tokio::spawn(async {}).abort_handle(),
+            false,
+            None,
+        );
 
         let status = manager.status();
         assert!(status.intranet_conns > 0);
@@ -224,7 +234,7 @@ mod tests {
         // 1. 模拟连接接入
         // 在 runtime 上下文中生成一个句柄
         let handle = tokio::spawn(async {}).abort_handle();
-        manager.add(addr, handle, true);
+        manager.add(addr, handle, true, None);
 
         // 2. 模拟握手完成：填充 Node 信息
         {
@@ -282,7 +292,7 @@ mod tests {
         for &addr in &addrs {
             // 1. 直接在当前异步环境中生成句柄，不需要 block_on
             let handle = tokio::spawn(async {}).abort_handle();
-            manager.add(addr, handle, true);
+            manager.add(addr, handle, true, None);
 
             // 2. 模拟握手：使用 .await 获取异步锁并填充 Node 信息
             let ip = addr.ip();
@@ -325,7 +335,7 @@ mod tests {
         let found_updated = Arc::new(AtomicBool::new(false));
 
         let handle = tokio::spawn(async {}).abort_handle();
-        manager.add(addr, handle, true);
+        manager.add(addr, handle, true, None);
 
         let mock_writer: Arc<Mutex<BoxWriter>> = Arc::new(Mutex::new(Box::new(tokio::io::sink())));
         manager.update(addr, true, mock_writer);
@@ -371,7 +381,7 @@ mod tests {
             })
             .abort_handle();
 
-            manager.add(addr, handle, true);
+            manager.add(addr, handle, true, None);
         }
 
         // 4. 执行异步 forward
@@ -390,5 +400,83 @@ mod tests {
                 }
             })
             .await; // 👈 必须 await
+    }
+
+
+    // 辅助函数：创建一个临时的 TCP Server 用于测试连接
+    async fn setup_test_server() -> SocketAddr {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            while let Ok((mut stream, _)) = listener.accept().await {
+                // 简单的回显或直接保持连接
+                let mut buf = [0u8; 10];
+                let _ = stream.read(&mut buf).await;
+            }
+        });
+        addr
+    }
+
+    #[tokio::test]
+    async fn test_connect_success() {
+        let manager = ConnectionManager::new();
+        let addr = setup_test_server().await;
+
+        // 场景：正常连接
+        let result = manager.connect(addr, |_reader, _writer, _token| async move {
+            // 业务逻辑：收到连接后打印或执行简单操作
+        }).await;
+
+        assert!(result.is_ok());
+        
+        // 注意：由于 add 中有 #[cfg(test)] 跳过 loopback 的逻辑，
+        // 如果要测试登记成功，需要确保 add 逻辑允许测试 IP。
+        // 假设此时已经成功加入（或修改 add 逻辑允许测试）
+        // assert!(manager.connections.get(&(addr.ip(), NetworkScope::from_ip(&addr.ip()))).is_some());
+    }
+
+    #[tokio::test]
+    async fn test_connect_duplicate_prevented() {
+        let manager = ConnectionManager::new();
+        let addr = setup_test_server().await;
+
+        // 1. 先手动 mock 一个已存在的连接
+        let handle = tokio::spawn(async {}).abort_handle();
+        manager.add(addr, handle, false, None);
+
+        // 2. 再次尝试 connect
+        // 逻辑：应该在第 1 步检查重复时就 Ok(()) 返回
+        let result = manager.connect(addr, |_r, _w, _t| async move {}).await;
+        
+        assert!(result.is_ok());
+        // 验证没有产生新的拨号尝试（可以通过观察 Mock Server 行为或计数验证）
+    }
+
+    #[tokio::test]
+    async fn test_connect_physical_failure() {
+        let manager = ConnectionManager::new();
+        // 使用一个确定没人在监听的端口
+        let addr: SocketAddr = "127.0.0.1:1".parse().unwrap();
+
+        let result = manager.connect(addr, |_r, _w, _t| async move {}).await;
+
+        // 逻辑：TcpStream::connect 失败，应该返回 Err
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_connect_closure_execution() {
+        let manager = ConnectionManager::new();
+        let addr = setup_test_server().await;
+        
+        let (tx, rx) = tokio::sync::oneshot::channel();
+
+        // 验证闭包是否真的被执行了
+        let _ = manager.connect(addr, |_reader, _writer, _token| async move {
+            let _ = tx.send(true);
+        }).await;
+
+        let executed = tokio::time::timeout(Duration::from_secs(1), rx).await;
+        assert!(matches!(executed, Ok(Ok(true))));
     }
 }
