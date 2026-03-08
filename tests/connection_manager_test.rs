@@ -337,7 +337,7 @@ mod tests {
         let handle = tokio::spawn(async {}).abort_handle();
         manager.add(addr, handle, true, None);
 
-        let mock_writer: Arc<Mutex<BoxWriter>> = Arc::new(Mutex::new(Box::new(tokio::io::sink())));
+        let mock_writer: Arc<Mutex<Option<BoxWriter>>> = Arc::new(Mutex::new(Some(Box::new(tokio::io::sink()))));
         manager.update(addr, true, mock_writer);
 
         // 2. 克隆 Arc 传入异步闭包

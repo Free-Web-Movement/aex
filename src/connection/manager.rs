@@ -49,7 +49,7 @@ impl ConnectionManager {
         f: F,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
     where
-        F: FnOnce(Arc<Mutex<BoxReader>>, Arc<Mutex<BoxWriter>>, CancellationToken) -> Fut
+        F: FnOnce(Arc<Mutex<Option<BoxReader>>>, Arc<Mutex<Option<BoxWriter>>>, CancellationToken) -> Fut
             + Send
             + 'static,
         Fut: std::future::Future<Output = ()> + Send + 'static,
@@ -70,10 +70,10 @@ impl ConnectionManager {
         // into_split() 返回 (OwnedReadHalf, OwnedWriteHalf)
         let (raw_reader, raw_writer) = stream.into_split();
 
-        let buf_reader: Arc<Mutex<BoxReader>> =
-            Arc::new(Mutex::new(Box::new(BufReader::new(raw_reader))));
-        let buf_writer: Arc<Mutex<BoxWriter>> =
-            Arc::new(Mutex::new(Box::new(BufWriter::new(raw_writer))));
+        let buf_reader: Arc<Mutex<Option<BoxReader>>> =
+            Arc::new(Mutex::new(Some(Box::new(BufReader::new(raw_reader)))));
+        let buf_writer: Arc<Mutex<Option<BoxWriter>>> =
+            Arc::new(Mutex::new(Some(Box::new(BufWriter::new(raw_writer)))));
 
         let writer = buf_writer.clone();
 
@@ -99,7 +99,7 @@ impl ConnectionManager {
         addr: SocketAddr,
         handle: tokio::task::AbortHandle,
         is_client: bool,
-        writer: Option<Arc<Mutex<BoxWriter>>>,
+        writer: Option<Arc<Mutex<Option<BoxWriter>>>>,
     ) {
         let ip = addr.ip();
         if ip.is_loopback() {
@@ -139,7 +139,7 @@ impl ConnectionManager {
         }
     }
 
-    pub fn update(&self, addr: SocketAddr, is_client: bool, writer: Arc<Mutex<BoxWriter>>) {
+    pub fn update(&self, addr: SocketAddr, is_client: bool, writer: Arc<Mutex<Option<BoxWriter>>>) {
         let ip = addr.ip();
         let scope = NetworkScope::from_ip(&ip);
         let key = (ip, scope);
