@@ -7,3 +7,4 @@ pub mod communicators;
 pub mod crypto;
 pub mod time;
 pub mod storage;
+pub mod macros;
