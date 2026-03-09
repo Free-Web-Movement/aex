@@ -47,7 +47,7 @@ pub struct ConnectionEntry {
     pub addr: SocketAddr,
     pub writer: Option<Arc<Mutex<Option<BoxWriter>>>>,
     pub abort_handle: tokio::task::AbortHandle,
-    pub context: Option<Arc<Context>>,
+    pub context: Option<Arc<Mutex<Context>>>,
     pub cancel_token: CancellationToken,
     pub connected_at: u64,
     /// 最后活跃时间戳（秒）
@@ -70,7 +70,7 @@ impl fmt::Debug for ConnectionEntry {
 
 impl ConnectionEntry {
 
-    pub fn new_empty_node(addr: SocketAddr, context: Option<Arc<Context>>, writer: Option<Arc<Mutex<Option<BoxWriter>>>>, handle: tokio::task::AbortHandle, cancel_token: CancellationToken) -> Self {
+    pub fn new_empty_node(addr: SocketAddr, context: Option<Arc<Mutex<Context>>>, writer: Option<Arc<Mutex<Option<BoxWriter>>>>, handle: tokio::task::AbortHandle, cancel_token: CancellationToken) -> Self {
         let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
         Self {
             node: Arc::new(RwLock::new(None)),

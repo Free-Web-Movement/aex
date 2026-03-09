@@ -102,7 +102,7 @@ impl ConnectionManager {
         addr: SocketAddr,
         handle: tokio::task::AbortHandle,
         is_client: bool,
-        context: Option<Arc<Context>>,
+        context: Option<Arc<Mutex<Context>>>,
         writer: Option<Arc<Mutex<Option<BoxWriter>>>>,
     ) {
         let ip = addr.ip();
@@ -144,7 +144,7 @@ impl ConnectionManager {
         }
     }
 
-    pub fn update(&self, addr: SocketAddr, is_client: bool, context: Option<Arc<Context>>, writer: Arc<Mutex<Option<BoxWriter>>>) {
+    pub fn update(&self, addr: SocketAddr, is_client: bool, context: Option<Arc<Mutex<Context>>>, writer: Arc<Mutex<Option<BoxWriter>>>) {
         let ip = addr.ip();
         let scope = NetworkScope::from_ip(&ip);
         let key = (ip, scope);
