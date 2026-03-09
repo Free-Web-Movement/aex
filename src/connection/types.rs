@@ -1,4 +1,4 @@
-use crate::connection::context::BoxWriter;
+use crate::connection::context::{BoxWriter, Context};
 use crate::connection::node::Node;
 use bincode::{Decode, Encode};
 use dashmap::DashMap;
@@ -47,6 +47,7 @@ pub struct ConnectionEntry {
     pub addr: SocketAddr,
     pub writer: Option<Arc<Mutex<Option<BoxWriter>>>>,
     pub abort_handle: tokio::task::AbortHandle,
+    pub context: Option<Arc<Context>>,
     pub cancel_token: CancellationToken,
     pub connected_at: u64,
     /// 最后活跃时间戳（秒）
@@ -69,7 +70,7 @@ impl fmt::Debug for ConnectionEntry {
 
 impl ConnectionEntry {
 
-    pub fn new_empty_node(addr: SocketAddr, writer: Option<Arc<Mutex<Option<BoxWriter>>>>, handle: tokio::task::AbortHandle, cancel_token: CancellationToken) -> Self {
+    pub fn new_empty_node(addr: SocketAddr, context: Option<Arc<Context>>, writer: Option<Arc<Mutex<Option<BoxWriter>>>>, handle: tokio::task::AbortHandle, cancel_token: CancellationToken) -> Self {
         let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
         Self {
             node: Arc::new(RwLock::new(None)),
@@ -77,6 +78,7 @@ impl ConnectionEntry {
             writer,
             abort_handle: handle,
             cancel_token,
+            context,
             connected_at: now,
             last_seen: Arc::new(AtomicU64::new(now)),
         }

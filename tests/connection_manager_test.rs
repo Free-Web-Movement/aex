@@ -38,16 +38,16 @@ mod tests {
 
         // 1. 测试回环地址拦截
         let loopback: SocketAddr = "127.0.0.1:9000".parse().unwrap();
-        manager.add(loopback, handle.clone(), true, None);
+        manager.add(loopback, handle.clone(), true, None, None);
         assert!(manager.connections.is_empty(), "Loopback should be ignored");
 
         // 2. 测试添加 Client 连接
-        manager.add(addr, handle.clone(), true, None);
+        manager.add(addr, handle.clone(), true, None, None);
         assert_eq!(manager.connections.len(), 1);
 
         // 3. 测试重复 IP 不同端口 (应该在同一个桶里)
         let addr2: SocketAddr = "1.1.1.1:8081".parse().unwrap();
-        manager.add(addr2, handle.clone(), false, None);
+        manager.add(addr2, handle.clone(), false, None, None);
         {
             let bucket = manager
                 .connections
@@ -90,7 +90,7 @@ mod tests {
                 }
             })
             .abort_handle();
-            manager.add(addr, handle.clone(), true, None);
+            manager.add(addr, handle.clone(), true, None, None);
 
             println!(">>> 正在执行 cancel_gracefully");
             assert!(manager.cancel_gracefully(addr));
@@ -110,7 +110,7 @@ mod tests {
             manager.cancel_by_addr(addr);
 
             println!(">>> 正在执行 cancel_all_by_ip");
-            manager.add(addr, handle.clone(), true, None);
+            manager.add(addr, handle.clone(), true, None, None);
             manager.cancel_all_by_ip(addr.ip());
 
             println!(">>> 测试完成!");
@@ -125,7 +125,7 @@ mod tests {
         let addr: SocketAddr = "8.8.8.8:80".parse().unwrap();
         let handle = tokio::spawn(async {}).abort_handle();
 
-        manager.add(addr, handle, true, None);
+        manager.add(addr, handle, true, None, None);
 
         // 验证状态统计
         let status = manager.status();
@@ -148,7 +148,7 @@ mod tests {
     async fn test_shutdown() {
         let manager = ConnectionManager::new();
         let addr: SocketAddr = "10.0.0.1:443".parse().unwrap();
-        manager.add(addr, tokio::spawn(async {}).abort_handle(), false, None);
+        manager.add(addr, tokio::spawn(async {}).abort_handle(), false, None, None);
 
         manager.shutdown();
 
@@ -180,7 +180,7 @@ mod tests {
         let addr: SocketAddr = "1.1.1.1:80".parse().unwrap();
 
         // 注入一个连接
-        manager.add(addr, tokio::spawn(async {}).abort_handle(), true, None);
+        manager.add(addr, tokio::spawn(async {}).abort_handle(), true, None, None);
 
         // 覆盖点：1. 仅超时停用 2. 仅最大寿命停用 3. 两者都不满足
         // 模拟 current 很大（未来时间）的情景
@@ -202,12 +202,14 @@ mod tests {
             tokio::spawn(async {}).abort_handle(),
             true,
             None,
+            None,
         );
         manager.add(
             extranet_addr,
             tokio::spawn(async {}).abort_handle(),
             false,
             None,
+            None
         );
 
         let status = manager.status();
@@ -234,7 +236,7 @@ mod tests {
         // 1. 模拟连接接入
         // 在 runtime 上下文中生成一个句柄
         let handle = tokio::spawn(async {}).abort_handle();
-        manager.add(addr, handle, true, None);
+        manager.add(addr, handle, true, None, None);
 
         // 2. 模拟握手完成：填充 Node 信息
         {
@@ -292,7 +294,7 @@ mod tests {
         for &addr in &addrs {
             // 1. 直接在当前异步环境中生成句柄，不需要 block_on
             let handle = tokio::spawn(async {}).abort_handle();
-            manager.add(addr, handle, true, None);
+            manager.add(addr, handle, true, None, None);
 
             // 2. 模拟握手：使用 .await 获取异步锁并填充 Node 信息
             let ip = addr.ip();
@@ -335,10 +337,10 @@ mod tests {
         let found_updated = Arc::new(AtomicBool::new(false));
 
         let handle = tokio::spawn(async {}).abort_handle();
-        manager.add(addr, handle, true, None);
+        manager.add(addr, handle, true, None, None);
 
         let mock_writer: Arc<Mutex<Option<BoxWriter>>> = Arc::new(Mutex::new(Some(Box::new(tokio::io::sink()))));
-        manager.update(addr, true, mock_writer);
+        manager.update(addr, true, None, mock_writer);
 
         // 2. 克隆 Arc 传入异步闭包
         let found_clone = Arc::clone(&found_updated);
@@ -381,7 +383,7 @@ mod tests {
             })
             .abort_handle();
 
-            manager.add(addr, handle, true, None);
+            manager.add(addr, handle, true, None, None);
         }
 
         // 4. 执行异步 forward
@@ -442,7 +444,7 @@ mod tests {
 
         // 1. 先手动 mock 一个已存在的连接
         let handle = tokio::spawn(async {}).abort_handle();
-        manager.add(addr, handle, false, None);
+        manager.add(addr, handle, false, None, None);
 
         // 2. 再次尝试 connect
         // 逻辑：应该在第 1 步检查重复时就 Ok(()) 返回

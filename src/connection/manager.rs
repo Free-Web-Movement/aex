@@ -12,7 +12,7 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 
 use crate::connection::{
-    context::{BoxReader, BoxWriter},
+    context::{BoxReader, BoxWriter, Context},
     status::ConnectionStatus,
     types::{BiDirectionalConnections, ConnectionEntry, NetworkScope},
 };
@@ -89,7 +89,10 @@ impl ConnectionManager {
 
         // 7. 登记到管理池
         // 💡 优化：这里我们直接把构造好的 writer 存入 Entry，省去了后续再 update 的麻烦
-        self.add(addr, handle.abort_handle(), false, Some(writer));
+
+        // 初始化Context
+        // 当前默认为None
+        self.add(addr, handle.abort_handle(), false, None, Some(writer));
 
         Ok(())
     }
@@ -99,6 +102,7 @@ impl ConnectionManager {
         addr: SocketAddr,
         handle: tokio::task::AbortHandle,
         is_client: bool,
+        context: Option<Arc<Context>>,
         writer: Option<Arc<Mutex<Option<BoxWriter>>>>,
     ) {
         let ip = addr.ip();
@@ -123,6 +127,7 @@ impl ConnectionManager {
             writer,
             abort_handle: handle,
             connected_at: now, // 💡 记录建立时间
+            context,
             cancel_token: child_token,
             last_seen: Arc::new(AtomicU64::new(now)), // 初始活跃时间等于建立时间
         });
@@ -139,7 +144,7 @@ impl ConnectionManager {
         }
     }
 
-    pub fn update(&self, addr: SocketAddr, is_client: bool, writer: Arc<Mutex<Option<BoxWriter>>>) {
+    pub fn update(&self, addr: SocketAddr, is_client: bool, context: Option<Arc<Context>>, writer: Arc<Mutex<Option<BoxWriter>>>) {
         let ip = addr.ip();
         let scope = NetworkScope::from_ip(&ip);
         let key = (ip, scope);
@@ -162,6 +167,7 @@ impl ConnectionManager {
                 let new_entry = Arc::new(ConnectionEntry {
                     addr: old_entry.addr,
                     node: old_entry.node.clone(),
+                    context,
                     writer: Some(writer), // ⚡ 填充传入的 writer
                     abort_handle: old_entry.abort_handle.clone(),
                     connected_at: old_entry.connected_at,

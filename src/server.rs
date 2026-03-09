@@ -124,7 +124,7 @@ impl AexServer {
                 }
                 Ok::<(), anyhow::Error>(())
             });
-            manager.add(addr, join_handler.abort_handle(), true, None);
+            manager.add(addr, join_handler.abort_handle(), true, None, None);
         }
     }
 
