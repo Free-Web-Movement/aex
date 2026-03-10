@@ -7,7 +7,8 @@ use std::{
 use dashmap::DashMap;
 use tokio::{
     io::{BufReader, BufWriter},
-    sync::{Mutex, RwLock}, task::AbortHandle,
+    sync::{Mutex, RwLock},
+    task::AbortHandle,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -49,7 +50,11 @@ impl ConnectionManager {
         f: F,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
     where
-        F: FnOnce(Arc<Mutex<Option<BoxReader>>>, Arc<Mutex<Option<BoxWriter>>>, CancellationToken) -> Fut
+        F: FnOnce(
+                Arc<Mutex<Option<BoxReader>>>,
+                Arc<Mutex<Option<BoxWriter>>>,
+                CancellationToken,
+            ) -> Fut
             + Send
             + 'static,
         Fut: std::future::Future<Output = ()> + Send + 'static,
@@ -92,7 +97,14 @@ impl ConnectionManager {
 
         // 初始化Context
         // 当前默认为None
-        self.add(addr, handle.abort_handle(), child_token, false, None, Some(writer));
+        self.add(
+            addr,
+            handle.abort_handle(),
+            child_token,
+            false,
+            None,
+            Some(writer),
+        );
 
         Ok(())
     }
@@ -143,7 +155,13 @@ impl ConnectionManager {
         }
     }
 
-    pub fn update(&self, addr: SocketAddr, is_client: bool, context: Option<Arc<Mutex<Context>>>, writer: Arc<Mutex<Option<BoxWriter>>>) {
+    pub fn update(
+        &self,
+        addr: SocketAddr,
+        is_client: bool,
+        context: Option<Arc<Mutex<Context>>>,
+        writer: Arc<Mutex<Option<BoxWriter>>>,
+    ) {
         let ip = addr.ip();
         let scope = NetworkScope::from_ip(&ip);
         let key = (ip, scope);
@@ -356,32 +374,32 @@ impl ConnectionManager {
 
     /// 全局关闭：停止所有连接任务并清理所有内存
     pub fn shutdown(&self) {
-        // 1. 发送全局取消信号
-        // 配合每个连接任务中对此 token 的 select! 监听
         self.cancel_token.cancel();
 
-        // 2. 物理切断：强制 abort 每一个现有的任务
-        // 我们利用现有的迭代逻辑，确保不漏掉任何一个
-        for mut bucket_ref in self.connections.iter_mut() {
-            let (_, bi_conn) = bucket_ref.pair_mut();
+        let mut handles = Vec::new();
 
+        // 1. 快速收集所有 handle 并清空 Map
+        // 使用 drain 可以获取所有权并自动释放锁
+        for mut bucket in self.connections.iter_mut() {
+            let bi_conn = bucket.value_mut();
             bi_conn
                 .clients
                 .iter()
-                .for_each(|r| r.value().abort_handle.abort());
+                .for_each(|r| handles.push(r.value().abort_handle.clone()));
             bi_conn
                 .servers
                 .iter()
-                .for_each(|r| r.value().abort_handle.abort());
-
+                .for_each(|r| handles.push(r.value().abort_handle.clone()));
             bi_conn.clients.clear();
             bi_conn.servers.clear();
         }
-
-        // 3. 清空整个路由表
         self.connections.clear();
 
-        println!("ConnectionManager: All connections shut down and cleared.");
+        // 2. 在锁外物理掐断
+        for h in handles {
+            h.abort();
+        }
+        println!("ConnectionManager: All connections physically aborted.");
     }
 
     /// 优雅地取消单个连接：先发信号，让任务自己处理后事

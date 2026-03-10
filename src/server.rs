@@ -49,32 +49,83 @@ impl AexServer {
     }
 
     /// 🚀 统一启动入口
-    pub async fn start<F, C>(&self, extractor: IDExtractor<C>) -> anyhow::Result<()>
-    where
+    // pub async fn start<F, C>(&self, extractor: IDExtractor<C>) -> anyhow::Result<()>
+    // where
+    //     F: TCPFrame,
+    //     C: TCPCommand,
+    // {
+    //     let server = Arc::new(self.clone());
+
+    //     let extractor_udp = extractor.clone();
+
+    //     // 1. 启动 UDP 监听 (后台协程)
+    //     let router: Option<Arc<UdpRouter>> = server.globals.routers.get_value();
+    //     if router.is_some() {
+    //         let server_udp = server.clone();
+    //         tokio::spawn(async move {
+    //             if let Err(e) = server_udp.start_udp::<F, C>(extractor_udp.clone()).await {
+    //                 eprintln!("[AEX] UDP Server Error: {}", e);
+    //             }
+    //         });
+    //     }
+
+    //     // 2. 启动 TCP 监听 (主协程阻塞)
+    //     server.start_tcp::<F, C>(extractor).await
+    // }
+
+    pub async fn start<F, C>(&self, extractor: IDExtractor<C>) -> anyhow::Result<()> 
+        where
         F: TCPFrame,
         C: TCPCommand,
     {
         let server = Arc::new(self.clone());
 
+        // --- UDP ---
+        let udp_token = CancellationToken::new();
+        let udp_loop_token = udp_token.clone();
+        let server_udp = server.clone();
         let extractor_udp = extractor.clone();
 
-        // 1. 启动 UDP 监听 (后台协程)
-        let router: Option<Arc<UdpRouter>> = server.globals.routers.get_value();
-        if router.is_some() {
-            let server_udp = server.clone();
-            tokio::spawn(async move {
-                if let Err(e) = server_udp.start_udp::<F, C>(extractor_udp.clone()).await {
-                    eprintln!("[AEX] UDP Server Error: {}", e);
-                }
-            });
-        }
+        let udp_handle = tokio::spawn(async move {
+            // 注意：内部 start_udp 不要再 add_exit 了！只管监听 token
+            let _ = server_udp
+                .start_udp::<F, C>(extractor_udp, udp_loop_token)
+                .await;
+        });
+        // 🔑 存入真正的 udp_handle
+        server
+            .globals
+            .add_exit("udp", udp_token, udp_handle.abort_handle())
+            .await;
 
-        // 2. 启动 TCP 监听 (主协程阻塞)
-        server.start_tcp::<F, C>(extractor).await
+        // --- TCP ---
+        let tcp_token = CancellationToken::new();
+        let tcp_loop_token = tcp_token.clone();
+        let server_tcp = server.clone();
+
+        let tcp_handle = tokio::spawn(async move {
+            // 内部 start_tcp 不要再 add_exit 了！
+            let _ = server_tcp
+                .start_tcp::<F, C>(extractor, tcp_loop_token)
+                .await;
+        });
+        // 🔑 存入真正的 tcp_handle
+        server
+            .globals
+            .add_exit("tcp", tcp_token, tcp_handle.abort_handle())
+            .await;
+
+        // 必须 Await，确保 shutdown_all 触发后，start 函数能正常返回
+        tcp_handle.await.ok();
+        Ok(())
     }
 
     /// 🛠️ TCP 核心分发循环
-    pub async fn start_tcp<F, C>(&self, extractor: IDExtractor<C>) -> anyhow::Result<()>
+    pub async fn start_tcp<F, C>(
+        &self,
+        extractor: IDExtractor<C>,
+        loop_token: CancellationToken,
+    ) -> anyhow::Result<()>
     where
         F: TCPFrame,
         C: TCPCommand,
@@ -82,19 +133,8 @@ impl AexServer {
         let listener = TcpListener::bind(self.addr).await?;
         println!("[AEX] TCP listener started on {}", self.addr);
 
-        // 1. 创建服务器级总 Token (Server-Level)
-        let server_token = CancellationToken::new();
-        let loop_token = server_token.clone();
-
         // 2. 获取当前任务的 AbortHandle
         // 假设 start_tcp 是在主 spawn 中运行，我们需要将其存入 Global 以便 shutdown_all 调用
-        let current_handle = tokio::task::spawn(async {}).abort_handle();
-
-        // 3. 注册到 GlobalContext
-        self.globals
-            .add_exit("tcp", server_token, current_handle)
-            .await;
-
         loop {
             tokio::select! {
                 // A. 响应来自 GlobalContext.shutdown_all() 的总闸信号
@@ -178,27 +218,12 @@ impl AexServer {
         Ok(())
     }
 
-    // /// 🛠️ UDP 核心分发循环
-    // pub async fn start_udp<F, C>(&self, extractor: IDExtractor<C>) -> anyhow::Result<()>
-    // where
-    //     F: TCPFrame,
-    //     C: TCPCommand,
-    // {
-    //     let router: Option<Arc<UdpRouter>> = self.globals.routers.get_value();
-
-    //     if let Some(router) = &router {
-    //         let socket = Arc::new(UdpSocket::bind(self.addr).await?);
-    //         println!("[AEX] UDP listener started on {}", self.addr);
-    //         let rt = router.clone();
-    //         return rt
-    //             .handle::<F, C>(self.globals.clone(), socket, extractor)
-    //             .await;
-    //     }
-    //     Ok(())
-    // }
-
     /// 🛠️ UDP 核心分发循环
-    pub async fn start_udp<F, C>(&self, extractor: IDExtractor<C>) -> anyhow::Result<()>
+    pub async fn start_udp<F, C>(
+        &self,
+        extractor: IDExtractor<C>,
+        task_token: CancellationToken,
+    ) -> anyhow::Result<()>
     where
         F: TCPFrame,
         C: TCPCommand,
@@ -207,19 +232,6 @@ impl AexServer {
         let router: Option<Arc<UdpRouter>> = self.globals.routers.get_value();
 
         if let Some(router) = &router {
-            // 2. 准备服务级 Token 与 Handle
-            let udp_token = tokio_util::sync::CancellationToken::new();
-            let task_token = udp_token.clone();
-
-            // 获取当前任务句柄用于物理关停登记
-            let current_handle = tokio::task::spawn(async {}).abort_handle();
-
-            // 3. 注册到 GlobalContext
-            self.globals
-                .add_exit("udp", udp_token, current_handle)
-                .await;
-
-            // 4. 绑定端口
             let socket = Arc::new(UdpSocket::bind(self.addr).await?);
             println!("[AEX] UDP listener started on {}", self.addr);
 
