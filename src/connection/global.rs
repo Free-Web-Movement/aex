@@ -2,11 +2,16 @@
 
 use std::{
     any::{Any, TypeId},
+    collections::HashMap,
     net::SocketAddr,
     sync::Arc,
 };
 
-use tokio::sync::{Mutex, RwLock};
+use tokio::{
+    sync::{Mutex, RwLock},
+    task::AbortHandle,
+};
+use tokio_util::sync::CancellationToken;
 
 use crate::{
     communicators::{
@@ -31,10 +36,14 @@ pub struct GlobalContext {
     /// 全局 TypeMap：允许灵活添加数据库连接池、全局配置等
     pub extensions: Arc<RwLock<TypeMap>>,
     pub routers: TypeMap,
+    pub exits: Mutex<HashMap<String, (CancellationToken, AbortHandle)>>,
 }
 
 impl GlobalContext {
-    pub fn new(addr: SocketAddr, paired_session_keys: Option<Arc<Mutex<PairedSessionKey>>>) -> Self {
+    pub fn new(
+        addr: SocketAddr,
+        paired_session_keys: Option<Arc<Mutex<PairedSessionKey>>>,
+    ) -> Self {
         Self {
             addr,
             // 假设 Node 和 ConnectionManager 都有默认初始化方法
@@ -49,6 +58,7 @@ impl GlobalContext {
             paired_session_keys,
             extensions: Arc::new(RwLock::new(TypeMap::default())),
             routers: TypeMap::default(),
+            exits: Mutex::new(HashMap::new()),
         }
     }
 
@@ -117,5 +127,42 @@ impl GlobalContext {
         // 调用我们之前实现的异步版 on
         Event::<T>::_on(&self.event, event_name.to_string(), callback).await;
         self
+    }
+
+    /// 🚀 注册服务退出点 (由外部提供 Token 和 Handle)
+    pub async fn add_exit(&self, key: &str, token: CancellationToken, handle: AbortHandle) {
+        let mut exits = self.exits.lock().await;
+
+        // 健壮性检查：如果 key 已存在，先清理旧的服务避免冲突
+        if let Some((old_token, old_handle)) = exits.get(key) {
+            old_token.cancel();
+            old_handle.abort();
+        }
+
+        exits.insert(key.to_string(), (token, handle));
+    }
+
+    /// 🔍 获取当前活跃的服务列表
+    pub async fn get_exits(&self) -> Vec<String> {
+        let exits = self.exits.lock().await;
+        exits.keys().cloned().collect()
+    }
+
+    /// 🛑 一键全断
+    pub async fn shutdown_all(&self) {
+        let mut exits = self.exits.lock().await;
+
+        // drain 获取所有权并清空 Map
+        for (key, (token, handle)) in exits.drain() {
+            // 1. 逻辑退出信号
+            token.cancel();
+            // 2. 物理强制中止
+            handle.abort();
+
+            println!("[AEX] Shutdown component: {}", key);
+        }
+
+        // 3. 联动清理 ConnectionManager 里的所有 Peer 连接
+        self.manager.shutdown();
     }
 }

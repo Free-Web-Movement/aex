@@ -7,7 +7,7 @@ use std::{
 use dashmap::DashMap;
 use tokio::{
     io::{BufReader, BufWriter},
-    sync::{Mutex, RwLock},
+    sync::{Mutex, RwLock}, task::AbortHandle,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -92,7 +92,7 @@ impl ConnectionManager {
 
         // 初始化Context
         // 当前默认为None
-        self.add(addr, handle.abort_handle(), false, None, Some(writer));
+        self.add(addr, handle.abort_handle(), child_token, false, None, Some(writer));
 
         Ok(())
     }
@@ -100,7 +100,8 @@ impl ConnectionManager {
     pub fn add(
         &self,
         addr: SocketAddr,
-        handle: tokio::task::AbortHandle,
+        handle: AbortHandle,
+        cancel_token: CancellationToken,
         is_client: bool,
         context: Option<Arc<Mutex<Context>>>,
         writer: Option<Arc<Mutex<Option<BoxWriter>>>>,
@@ -119,8 +120,6 @@ impl ConnectionManager {
             .unwrap_or_default()
             .as_secs();
 
-        let child_token = self.cancel_token.child_token();
-
         let entry = Arc::new(ConnectionEntry {
             addr,
             node: Arc::new(RwLock::new(None)), // 初始时没有节点信息，握手完成后会填充
@@ -128,7 +127,7 @@ impl ConnectionManager {
             abort_handle: handle,
             connected_at: now, // 💡 记录建立时间
             context,
-            cancel_token: child_token,
+            cancel_token,
             last_seen: Arc::new(AtomicU64::new(now)), // 初始活跃时间等于建立时间
         });
 

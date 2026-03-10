@@ -3,6 +3,7 @@ use crate::connection::node::Node;
 use bincode::{Decode, Encode};
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
+use tokio::task::AbortHandle;
 use std::fmt;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -46,7 +47,7 @@ pub struct ConnectionEntry {
     pub node: Arc<RwLock<Option<Node>>>,
     pub addr: SocketAddr,
     pub writer: Option<Arc<Mutex<Option<BoxWriter>>>>,
-    pub abort_handle: tokio::task::AbortHandle,
+    pub abort_handle: AbortHandle,
     pub context: Option<Arc<Mutex<Context>>>,
     pub cancel_token: CancellationToken,
     pub connected_at: u64,
@@ -133,7 +134,7 @@ impl Drop for ConnectionEntry {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BiDirectionalConnections {
     pub clients: DashMap<SocketAddr, Arc<ConnectionEntry>>,
     /// 出站连接池：我们主动连出的节点 (Outbound)

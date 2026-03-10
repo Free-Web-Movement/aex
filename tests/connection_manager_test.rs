@@ -15,7 +15,8 @@ mod tests {
         sync::{
             Arc,
             atomic::{AtomicBool, Ordering},
-        }, time::Duration,
+        },
+        time::Duration,
     };
     use tokio::{io::AsyncReadExt, net::TcpListener, sync::Mutex};
 
@@ -38,16 +39,19 @@ mod tests {
 
         // 1. 测试回环地址拦截
         let loopback: SocketAddr = "127.0.0.1:9000".parse().unwrap();
-        manager.add(loopback, handle.clone(), true, None, None);
+        let cancellation_token: tokio_util::sync::CancellationToken =
+            tokio_util::sync::CancellationToken::new();
+
+        manager.add(loopback, handle.clone(), cancellation_token.clone(), true, None, None);
         assert!(manager.connections.is_empty(), "Loopback should be ignored");
 
         // 2. 测试添加 Client 连接
-        manager.add(addr, handle.clone(), true, None, None);
+        manager.add(addr, handle.clone(), cancellation_token.clone(), true, None, None);
         assert_eq!(manager.connections.len(), 1);
 
         // 3. 测试重复 IP 不同端口 (应该在同一个桶里)
         let addr2: SocketAddr = "1.1.1.1:8081".parse().unwrap();
-        manager.add(addr2, handle.clone(), false, None, None);
+        manager.add(addr2, handle.clone(), cancellation_token.clone(),  false, None, None);
         {
             let bucket = manager
                 .connections
@@ -90,7 +94,9 @@ mod tests {
                 }
             })
             .abort_handle();
-            manager.add(addr, handle.clone(), true, None, None);
+                let cancellation_token: tokio_util::sync::CancellationToken =
+            tokio_util::sync::CancellationToken::new();
+            manager.add(addr, handle.clone(), cancellation_token.clone(),  true, None, None);
 
             println!(">>> 正在执行 cancel_gracefully");
             assert!(manager.cancel_gracefully(addr));
@@ -110,7 +116,7 @@ mod tests {
             manager.cancel_by_addr(addr);
 
             println!(">>> 正在执行 cancel_all_by_ip");
-            manager.add(addr, handle.clone(), true, None, None);
+            manager.add(addr, handle.clone(), cancellation_token.clone(),  true, None, None);
             manager.cancel_all_by_ip(addr.ip());
 
             println!(">>> 测试完成!");
@@ -124,8 +130,9 @@ mod tests {
         let manager = ConnectionManager::new();
         let addr: SocketAddr = "8.8.8.8:80".parse().unwrap();
         let handle = tokio::spawn(async {}).abort_handle();
-
-        manager.add(addr, handle, true, None, None);
+        let cancellation_token: tokio_util::sync::CancellationToken =
+            tokio_util::sync::CancellationToken::new();
+        manager.add(addr, handle, cancellation_token.clone(),  true, None, None);
 
         // 验证状态统计
         let status = manager.status();
@@ -148,7 +155,16 @@ mod tests {
     async fn test_shutdown() {
         let manager = ConnectionManager::new();
         let addr: SocketAddr = "10.0.0.1:443".parse().unwrap();
-        manager.add(addr, tokio::spawn(async {}).abort_handle(), false, None, None);
+                let cancellation_token: tokio_util::sync::CancellationToken =
+            tokio_util::sync::CancellationToken::new();
+        manager.add(
+            addr,
+            tokio::spawn(async {}).abort_handle(),
+            cancellation_token,
+            false,
+            None,
+            None,
+        );
 
         manager.shutdown();
 
@@ -178,9 +194,17 @@ mod tests {
     async fn test_extreme_deactivate() {
         let manager = ConnectionManager::new();
         let addr: SocketAddr = "1.1.1.1:80".parse().unwrap();
-
+        let cancellation_token: tokio_util::sync::CancellationToken =
+            tokio_util::sync::CancellationToken::new();
         // 注入一个连接
-        manager.add(addr, tokio::spawn(async {}).abort_handle(), true, None, None);
+        manager.add(
+            addr,
+            tokio::spawn(async {}).abort_handle(),
+            cancellation_token,
+            true,
+            None,
+            None,
+        );
 
         // 覆盖点：1. 仅超时停用 2. 仅最大寿命停用 3. 两者都不满足
         // 模拟 current 很大（未来时间）的情景
@@ -196,10 +220,12 @@ mod tests {
         let manager = ConnectionManager::new();
         let intranet_addr: SocketAddr = "10.0.0.1:80".parse().unwrap();
         let extranet_addr: SocketAddr = "1.1.1.1:80".parse().unwrap();
-
+        let cancellation_token: tokio_util::sync::CancellationToken =
+            tokio_util::sync::CancellationToken::new();
         manager.add(
             intranet_addr,
             tokio::spawn(async {}).abort_handle(),
+            cancellation_token.clone(),
             true,
             None,
             None,
@@ -207,9 +233,10 @@ mod tests {
         manager.add(
             extranet_addr,
             tokio::spawn(async {}).abort_handle(),
+            cancellation_token,
             false,
             None,
-            None
+            None,
         );
 
         let status = manager.status();
@@ -236,7 +263,9 @@ mod tests {
         // 1. 模拟连接接入
         // 在 runtime 上下文中生成一个句柄
         let handle = tokio::spawn(async {}).abort_handle();
-        manager.add(addr, handle, true, None, None);
+                let cancellation_token: tokio_util::sync::CancellationToken =
+            tokio_util::sync::CancellationToken::new();
+        manager.add(addr, handle, cancellation_token.clone(),  true, None, None);
 
         // 2. 模拟握手完成：填充 Node 信息
         {
@@ -294,7 +323,9 @@ mod tests {
         for &addr in &addrs {
             // 1. 直接在当前异步环境中生成句柄，不需要 block_on
             let handle = tokio::spawn(async {}).abort_handle();
-            manager.add(addr, handle, true, None, None);
+                    let cancellation_token: tokio_util::sync::CancellationToken =
+            tokio_util::sync::CancellationToken::new();
+            manager.add(addr, handle, cancellation_token.clone(),  true, None, None);
 
             // 2. 模拟握手：使用 .await 获取异步锁并填充 Node 信息
             let ip = addr.ip();
@@ -337,9 +368,12 @@ mod tests {
         let found_updated = Arc::new(AtomicBool::new(false));
 
         let handle = tokio::spawn(async {}).abort_handle();
-        manager.add(addr, handle, true, None, None);
+                let cancellation_token: tokio_util::sync::CancellationToken =
+            tokio_util::sync::CancellationToken::new();
+        manager.add(addr, handle, cancellation_token.clone(),  true, None, None);
 
-        let mock_writer: Arc<Mutex<Option<BoxWriter>>> = Arc::new(Mutex::new(Some(Box::new(tokio::io::sink()))));
+        let mock_writer: Arc<Mutex<Option<BoxWriter>>> =
+            Arc::new(Mutex::new(Some(Box::new(tokio::io::sink()))));
         manager.update(addr, true, None, mock_writer);
 
         // 2. 克隆 Arc 传入异步闭包
@@ -382,8 +416,9 @@ mod tests {
                 tokio::time::sleep(std::time::Duration::from_secs(10)).await;
             })
             .abort_handle();
-
-            manager.add(addr, handle, true, None, None);
+        let cancellation_token: tokio_util::sync::CancellationToken =
+            tokio_util::sync::CancellationToken::new();
+            manager.add(addr, handle, cancellation_token.clone(),  true, None, None);
         }
 
         // 4. 执行异步 forward
@@ -403,7 +438,6 @@ mod tests {
             })
             .await; // 👈 必须 await
     }
-
 
     // 辅助函数：创建一个临时的 TCP Server 用于测试连接
     async fn setup_test_server() -> SocketAddr {
@@ -425,12 +459,14 @@ mod tests {
         let addr = setup_test_server().await;
 
         // 场景：正常连接
-        let result = manager.connect(addr, |_reader, _writer, _token| async move {
-            // 业务逻辑：收到连接后打印或执行简单操作
-        }).await;
+        let result = manager
+            .connect(addr, |_reader, _writer, _token| async move {
+                // 业务逻辑：收到连接后打印或执行简单操作
+            })
+            .await;
 
         assert!(result.is_ok());
-        
+
         // 注意：由于 add 中有 #[cfg(test)] 跳过 loopback 的逻辑，
         // 如果要测试登记成功，需要确保 add 逻辑允许测试 IP。
         // 假设此时已经成功加入（或修改 add 逻辑允许测试）
@@ -444,12 +480,15 @@ mod tests {
 
         // 1. 先手动 mock 一个已存在的连接
         let handle = tokio::spawn(async {}).abort_handle();
-        manager.add(addr, handle, false, None, None);
+        let cancellation_token: tokio_util::sync::CancellationToken =
+            tokio_util::sync::CancellationToken::new();
+
+        manager.add(addr, handle, cancellation_token, false, None, None);
 
         // 2. 再次尝试 connect
         // 逻辑：应该在第 1 步检查重复时就 Ok(()) 返回
         let result = manager.connect(addr, |_r, _w, _t| async move {}).await;
-        
+
         assert!(result.is_ok());
         // 验证没有产生新的拨号尝试（可以通过观察 Mock Server 行为或计数验证）
     }
@@ -470,13 +509,15 @@ mod tests {
     async fn test_connect_closure_execution() {
         let manager = ConnectionManager::new();
         let addr = setup_test_server().await;
-        
+
         let (tx, rx) = tokio::sync::oneshot::channel();
 
         // 验证闭包是否真的被执行了
-        let _ = manager.connect(addr, |_reader, _writer, _token| async move {
-            let _ = tx.send(true);
-        }).await;
+        let _ = manager
+            .connect(addr, |_reader, _writer, _token| async move {
+                let _ = tx.send(true);
+            })
+            .await;
 
         let executed = tokio::time::timeout(Duration::from_secs(1), rx).await;
         assert!(matches!(executed, Ok(Ok(true))));
