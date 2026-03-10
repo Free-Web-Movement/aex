@@ -1,6 +1,7 @@
 use crate::connection::context::{BoxReader, BoxWriter, TypeMapExt};
 use crate::connection::global::GlobalContext;
 use crate::connection::types::IDExtractor;
+use crate::crypto::session_key_manager::PairedSessionKey;
 use crate::http::protocol::method::HttpMethod;
 use crate::http::router::Router as HttpRouter;
 use crate::tcp::router::Router as TcpRouter;
@@ -11,6 +12,7 @@ use std::sync::Arc;
 use tokio::io::{BufReader, BufWriter};
 use tokio::net::TcpListener;
 use tokio::net::UdpSocket;
+use tokio::sync::Mutex;
 
 /// AexServer: 核心多协议服务器
 #[derive(Clone)]
@@ -23,7 +25,7 @@ impl AexServer {
     pub fn new(addr: SocketAddr, globals: Option<Arc<GlobalContext>>) -> Self {
         Self {
             addr,
-            globals: globals.unwrap_or(Arc::new(GlobalContext::new(addr))),
+            globals: globals.unwrap_or(Arc::new(GlobalContext::new(addr, Some(Arc::new(Mutex::new(PairedSessionKey::new(16))))))),
         }
     }
 

@@ -34,7 +34,7 @@ pub struct GlobalContext {
 }
 
 impl GlobalContext {
-    pub fn new(addr: SocketAddr) -> Self {
+    pub fn new(addr: SocketAddr, paired_session_keys: Option<Arc<Mutex<PairedSessionKey>>>) -> Self {
         Self {
             addr,
             // 假设 Node 和 ConnectionManager 都有默认初始化方法
@@ -46,7 +46,7 @@ impl GlobalContext {
             spread: SpreadManager::default(),
             event: EventEmitter::default(),
             name: SERVER_NAME.to_string(),
-            paired_session_keys: None,
+            paired_session_keys,
             extensions: Arc::new(RwLock::new(TypeMap::default())),
             routers: TypeMap::default(),
         }

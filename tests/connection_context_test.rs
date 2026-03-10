@@ -47,7 +47,7 @@ mod tests {
     #[test]
     fn test_global_context_init() {
         let addr: SocketAddr = "127.0.0.1:8080".parse().unwrap();
-        let global = GlobalContext::new(addr);
+        let global = GlobalContext::new(addr, None);
 
         assert_eq!(global.addr, addr);
         // 验证 extensions 是否可写
@@ -59,7 +59,7 @@ mod tests {
     #[tokio::test]
     async fn test_context_flow() {
         let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
-        let global = Arc::new(GlobalContext::new(addr));
+        let global = Arc::new(GlobalContext::new(addr, None));
 
         // 模拟 I/O：使用 dummy 向量模拟 reader 和 writer
         let reader_data = Cursor::new(vec![0u8; 10]);
@@ -111,7 +111,7 @@ mod tests {
     #[tokio::test]
     async fn test_context_concurrency() {
         let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
-        let global = Arc::new(GlobalContext::new(addr));
+        let global = Arc::new(GlobalContext::new(addr, None));
 
         let reader_data = Cursor::new(vec![0u8; 10]);
         let writer_data = Cursor::new(vec![0u8; 10]);
@@ -131,7 +131,7 @@ mod tests {
     async fn test_context_full_flow() {
         // 1. 初始化 GlobalContext
         let addr = "127.0.0.1:8080".parse().unwrap();
-        let mut global = GlobalContext::new(addr);
+        let mut global = GlobalContext::new(addr, None);
 
         global.set_server_name("Aex".to_string());
 
@@ -284,7 +284,7 @@ mod tests {
             Some(Box::new(tokio::io::BufReader::new(empty())));
         let writer_opt: Option<Box<dyn AsyncWrite + Send + Unpin + Sync>> = Some(Box::new(sink()));
 
-        let global = Arc::new(GlobalContext::new("127.0.0.1:8080".parse().unwrap()));
+        let global = Arc::new(GlobalContext::new("127.0.0.1:8080".parse().unwrap(), None));
         let addr = "127.0.0.1:1234".parse().unwrap();
 
         let ctx = Context::new(reader_opt, writer_opt, global, addr);

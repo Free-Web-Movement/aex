@@ -112,7 +112,7 @@ mod websocket_tests {
             Box::new(s_writer)
         );
         let addr = "127.0.0.1:8080".parse::<SocketAddr>().unwrap();
-        let global = Arc::new(GlobalContext::new(addr));
+        let global = Arc::new(GlobalContext::new(addr, None));
 
         let mut ctx = Context::new(reader_param, writer_param, global, addr); // 假设有默认 Context
 
@@ -183,7 +183,7 @@ mod websocket_tests {
     async fn test_websocket_full_interaction() {
         let (client, server) = duplex(2048);
         let addr = "127.0.0.1:8080".parse::<SocketAddr>().unwrap();
-        let global = Arc::new(GlobalContext::new(addr));
+        let global = Arc::new(GlobalContext::new(addr, None));
 
         // 1. 定义更复杂的业务逻辑
         let ws = WebSocket {
@@ -372,7 +372,7 @@ mod websocket_tests {
         // 启动服务端 (简化 Context 初始化)
         let (r, w) = tokio::io::split(server);
         let addr = "127.0.0.1:8080".parse::<SocketAddr>().unwrap();
-        let global = Arc::new(GlobalContext::new(addr));
+        let global = Arc::new(GlobalContext::new(addr, None));
         let mut ctx = Context::new(
             Some(Box::new(BufReader::new(r))),
             Some(Box::new(w)),

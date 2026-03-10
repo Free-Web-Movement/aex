@@ -20,7 +20,7 @@ use serde::{ Deserialize, Serialize };
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Encode, Decode)]
 pub struct Node {
     pub id: Vec<u8>, // 节点 ID，通常是公钥的哈希, 基于这个id，能够与其它节点作出有效的签名
-    pub version: u32, // 协议版本
+    pub version: u8, // 协议版本
     pub started_at: u64, // 启动时间戳
     pub port: u16, // 监听端口,
     /// 💡 支持的协议列表，例如: ["tcp", "udp", "http", "ws"]
@@ -30,7 +30,7 @@ pub struct Node {
 
 impl Node {
     /// 基础构造：手动传入所有信息
-    pub fn new(port: u16, id: Vec<u8>, version: u32, ips: Vec<(NetworkScope, IpAddr)>) -> Self {
+    pub fn new(port: u16, id: Vec<u8>, version: u8, ips: Vec<(NetworkScope, IpAddr)>) -> Self {
         Self {
             id,
             version,
@@ -41,7 +41,7 @@ impl Node {
         }
     }
 
-    pub fn from_addr(addr: SocketAddr, version: Option<u32>, id: Option<Vec<u8>>) -> Self {
+    pub fn from_addr(addr: SocketAddr, version: Option<u8>, id: Option<Vec<u8>>) -> Self {
         let ip = addr.ip();
         let port = addr.port();
 
@@ -76,7 +76,7 @@ impl Node {
     }
 
     /// 自动化构造：从系统环境创建完整节点信息
-    pub fn from_system(port: u16, id: Vec<u8>, version: u32) -> Self {
+    pub fn from_system(port: u16, id: Vec<u8>, version: u8) -> Self {
         Self {
             id,
             version,

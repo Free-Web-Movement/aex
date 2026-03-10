@@ -19,7 +19,7 @@ mod tests {
     async fn test_global_context_extensions() {
         // 1. 初始化 Context
         let addr: SocketAddr = "127.0.0.1:8080".parse().unwrap();
-        let ctx = GlobalContext::new(addr);
+        let ctx = GlobalContext::new(addr, None);
 
         // 2. 准备测试数据
         let config = MyConfig { port: 3000, enabled: true };

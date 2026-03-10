@@ -77,7 +77,7 @@ mod router_tests {
     async fn test_handle_frame_coverage() {
         let mut router: Router = Router::new();
         let addr: SocketAddr = "127.0.0.1:8080".parse().unwrap();
-        let global = GlobalContext::new(addr);
+        let global = GlobalContext::new(addr, None);
 
         let arc_g = Arc::new(global);
 
@@ -274,7 +274,7 @@ mod router_tests {
     async fn test_reader_writer_already_taken() {
         let mut router: Router = Router::new();
         let addr: SocketAddr = "127.0.0.1:8080".parse().unwrap();
-        let global = GlobalContext::new(addr);
+        let global = GlobalContext::new(addr, None);
 
         let arc_g = Arc::new(global);
 
@@ -324,7 +324,7 @@ mod router_tests {
     async fn test_writer_already_taken() {
         let mut router: Router = Router::new();
         let addr: SocketAddr = "127.0.0.1:8080".parse().unwrap();
-        let global = GlobalContext::new(addr);
+        let global = GlobalContext::new(addr, None);
 
         let arc_g = Arc::new(global);
 
