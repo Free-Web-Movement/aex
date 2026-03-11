@@ -48,31 +48,6 @@ impl AexServer {
         self
     }
 
-    /// 🚀 统一启动入口
-    // pub async fn start<F, C>(&self, extractor: IDExtractor<C>) -> anyhow::Result<()>
-    // where
-    //     F: TCPFrame,
-    //     C: TCPCommand,
-    // {
-    //     let server = Arc::new(self.clone());
-
-    //     let extractor_udp = extractor.clone();
-
-    //     // 1. 启动 UDP 监听 (后台协程)
-    //     let router: Option<Arc<UdpRouter>> = server.globals.routers.get_value();
-    //     if router.is_some() {
-    //         let server_udp = server.clone();
-    //         tokio::spawn(async move {
-    //             if let Err(e) = server_udp.start_udp::<F, C>(extractor_udp.clone()).await {
-    //                 eprintln!("[AEX] UDP Server Error: {}", e);
-    //             }
-    //         });
-    //     }
-
-    //     // 2. 启动 TCP 监听 (主协程阻塞)
-    //     server.start_tcp::<F, C>(extractor).await
-    // }
-
     pub async fn start<F, C>(&self, extractor: IDExtractor<C>) -> anyhow::Result<()> 
         where
         F: TCPFrame,
@@ -156,12 +131,13 @@ impl AexServer {
                     // --- C. 派生连接分闸 (Connection-Level) ---
                     // 关键：conn_token 继承自 loop_token。
                     // 当全局总闸关掉时，所有派生出的 conn_token 会同步触发取消。
-                    let conn_token = loop_token.child_token();
+                    // let conn_token = loop_token.child_token();
 
                     let server_ctx = Arc::new(self.clone_internal());
                     let extractor_ctx = extractor.clone();
                     let manager = server_ctx.globals.manager.clone();
-                    let task_token = conn_token.clone();
+                    let task_token = manager.cancel_token.child_token();
+                    let task_token_cloned = task_token.clone();
 
                     let join_handler = tokio::spawn(async move {
                         tokio::select! {
@@ -209,7 +185,7 @@ impl AexServer {
 
                     // --- D. 存入 ConnectionManager ---
                     // 这里记录每个 Peer 的独立控制权
-                    manager.add(peer_addr, join_handler.abort_handle(), conn_token, true, None, None);
+                    manager.add(peer_addr, join_handler.abort_handle(), task_token_cloned, true, None, None);
                 }
             }
         }

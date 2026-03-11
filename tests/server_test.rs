@@ -5,7 +5,7 @@ mod aex_tests {
     use aex::http::meta::HttpMetadata;
     use aex::http::protocol::header::HeaderKey;
     use aex::http::protocol::status::StatusCode;
-    use aex::server::HTTPServer;
+    use aex::server::{AexServer, HTTPServer};
     use aex::tcp::types::{Codec, Command, RawCodec};
     use futures::FutureExt;
     use std::net::SocketAddr;
@@ -253,5 +253,45 @@ mod aex_tests {
         );
 
         println!("✅ AexServer 通讯总线功能验证通过！");
+    }
+
+    #[tokio::test]
+    async fn test_local_shutdown() -> anyhow::Result<()> {
+        let addr: SocketAddr = "127.0.0.1:0".parse()?; // 使用 0 端口自动分配
+        let server = AexServer::new(addr, None);
+        let globals = server.globals.clone();
+
+        // 1. 启动服务器 (在后台 Task)
+        // 这里的 extractor 简单返回 id
+        let server_handle = tokio::spawn(async move {
+            server.start::<RawCodec, RawCodec>(Arc::new(|c| c.id())).await
+        });
+
+        // 给一点时间让服务器起来
+        sleep(Duration::from_millis(200)).await;
+        
+        // 检查服务是否已注册到 exits
+        let active_exits = globals.get_exits().await;
+        println!("当前活跃服务: {:?}", active_exits);
+        assert!(active_exits.contains(&"tcp".to_string()));
+        assert!(active_exits.contains(&"udp".to_string()));
+
+        // 2. 模拟本地触发“一键全断”
+        println!("--- 正在触发全局关闭 ---");
+        globals.shutdown_all().await;
+
+        // 3. 验证结果
+        // 如果 start 函数正常返回，说明 loop 已经 break
+        let result = tokio::time::timeout(Duration::from_secs(2), server_handle).await;
+        
+        match result {
+            Ok(res) => {
+                println!("服务器已成功优雅退出。");
+                res??; // 检查内部 anyhow::Result
+            },
+            Err(_) => panic!("服务器未能在超时时间内退出，可能存在死循环或信号阻塞！"),
+        }
+
+        Ok(())
     }
 }
