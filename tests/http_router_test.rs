@@ -20,7 +20,7 @@ mod tests {
             types::{Executor, to_executor},
         },
         route,
-        server::{AexServer, HTTPServer},
+        server::{Server, HTTPServer},
         tcp::types::{Command, RawCodec},
     };
     use futures::FutureExt;
@@ -138,9 +138,9 @@ mod tests {
         let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
         let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
         let actual_addr = listener.local_addr().unwrap();
-        drop(listener); // 释放端口给 AexServer
+        drop(listener); // 释放端口给 Server
 
-        let server = AexServer::new(actual_addr, None);
+        let server = Server::new(actual_addr, None);
         let server = server.http(hr).clone();
 
         tokio::spawn(async move {
@@ -178,7 +178,7 @@ mod tests {
         let body = res.text().await.unwrap();
         assert_eq!(body, "User:9527, Auth:secret-token-v3");
 
-        println!("✅ AexServer 全链路 Router 自动化集成测试通过！");
+        println!("✅ Server 全链路 Router 自动化集成测试通过！");
     }
 
     #[tokio::test]
@@ -241,7 +241,7 @@ mod tests {
         let actual_addr = listener.local_addr().unwrap();
         drop(listener);
 
-        let server = AexServer::new(actual_addr, None);
+        let server = Server::new(actual_addr, None);
         let server = server.http(hr).clone();
 
         tokio::spawn(async move {
@@ -350,7 +350,7 @@ mod tests {
             .local_addr()
             .unwrap();
 
-        let server = AexServer::new(actual_addr, None);
+        let server = Server::new(actual_addr, None);
         let server = server.http(hr).clone();
         tokio::spawn(async move {
             let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;

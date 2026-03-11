@@ -15,14 +15,14 @@ use tokio::net::UdpSocket;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
-/// AexServer: 核心多协议服务器
+/// Server: 核心多协议服务器
 #[derive(Clone)]
-pub struct AexServer {
+pub struct Server {
     pub addr: SocketAddr,
     pub globals: Arc<GlobalContext>,
 }
 
-impl AexServer {
+impl Server {
     pub fn new(addr: SocketAddr, globals: Option<Arc<GlobalContext>>) -> Self {
         Self {
             addr,
@@ -244,4 +244,4 @@ impl AexServer {
     }
 }
 
-pub type HTTPServer = AexServer;
+pub type HTTPServer = Server;

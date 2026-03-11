@@ -14,6 +14,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::connection::{
     context::{BoxReader, BoxWriter, Context},
+    global::GlobalContext,
     status::ConnectionStatus,
     types::{BiDirectionalConnections, ConnectionEntry, NetworkScope},
 };
@@ -47,16 +48,11 @@ impl ConnectionManager {
     pub async fn connect<F, Fut>(
         &self,
         addr: SocketAddr,
+        global: Arc<GlobalContext>,
         f: F,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
     where
-        F: FnOnce(
-                Arc<Mutex<Option<BoxReader>>>,
-                Arc<Mutex<Option<BoxWriter>>>,
-                CancellationToken,
-            ) -> Fut
-            + Send
-            + 'static,
+        F: FnOnce(Arc<Mutex<Context>>, CancellationToken) -> Fut + Send + 'static,
         Fut: std::future::Future<Output = ()> + Send + 'static,
     {
         // 1. 检查重复连接 (防止对同一地址多次拨号)
@@ -74,13 +70,22 @@ impl ConnectionManager {
         // 3. ⚡ 核心步骤：拆分 TcpStream
         // into_split() 返回 (OwnedReadHalf, OwnedWriteHalf)
         let (raw_reader, raw_writer) = stream.into_split();
+        // let buf_witer = Box::new(BufWriter::new(raw_writer));
 
-        let buf_reader: Arc<Mutex<Option<BoxReader>>> =
-            Arc::new(Mutex::new(Some(Box::new(BufReader::new(raw_reader)))));
-        let buf_writer: Arc<Mutex<Option<BoxWriter>>> =
-            Arc::new(Mutex::new(Some(Box::new(BufWriter::new(raw_writer)))));
+        let reader_opt: Option<BoxReader> = Some(Box::new(BufReader::new(raw_reader)));
+        // let writer_opt: Option<BoxWriter> = Some(buf_witer.clone());
 
-        let writer = buf_writer.clone();
+        let shared_writer = Arc::new(Mutex::new(Some(
+            Box::new(BufWriter::new(raw_writer)) as BoxWriter
+        )));
+        let writer_for_context = shared_writer.clone();
+
+        let writer_opt = {
+            let mut guard = writer_for_context.lock().await;
+            guard.take() // 此时 Context 拿到了所有权，shared_writer 内部变为了 None
+        };
+
+        let writer = shared_writer.clone();
 
         // 5. 准备生命周期工具
         let child_token = self.cancel_token.child_token();
@@ -89,7 +94,10 @@ impl ConnectionManager {
         // 6. 启动异步任务
         // 将 Reader 和 Writer 的克隆 移交给闭包
         let handle = tokio::spawn(async move {
-            f(buf_reader.clone(), buf_writer.clone(), move_token).await;
+            let ctx = Arc::new(Mutex::new(Context::new(
+                reader_opt, writer_opt, global, addr,
+            )));
+            f(ctx, move_token).await;
         });
 
         // 7. 登记到管理池

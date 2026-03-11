@@ -5,7 +5,7 @@ mod aex_tests {
     use aex::http::meta::HttpMetadata;
     use aex::http::protocol::header::HeaderKey;
     use aex::http::protocol::status::StatusCode;
-    use aex::server::{AexServer, HTTPServer};
+    use aex::server::{Server, HTTPServer};
     use aex::tcp::types::{Codec, Command, RawCodec};
     use futures::FutureExt;
     use std::net::SocketAddr;
@@ -252,13 +252,13 @@ mod aex_tests {
             "Event 回调应执行 1 次"
         );
 
-        println!("✅ AexServer 通讯总线功能验证通过！");
+        println!("✅ Server 通讯总线功能验证通过！");
     }
 
     #[tokio::test]
     async fn test_local_shutdown() -> anyhow::Result<()> {
         let addr: SocketAddr = "127.0.0.1:0".parse()?; // 使用 0 端口自动分配
-        let server = AexServer::new(addr, None);
+        let server = Server::new(addr, None);
         let globals = server.globals.clone();
 
         // 1. 启动服务器 (在后台 Task)

@@ -2,10 +2,7 @@
 mod tests {
     use aex::{
         connection::{
-            context::BoxWriter,
-            manager::ConnectionManager,
-            node::Node,
-            types::{BiDirectionalConnections, NetworkScope},
+            context::BoxWriter, global::{self, GlobalContext}, manager::ConnectionManager, node::Node, types::{BiDirectionalConnections, NetworkScope}
         },
         time::SystemTime,
     };
@@ -457,10 +454,11 @@ mod tests {
     async fn test_connect_success() {
         let manager = ConnectionManager::new();
         let addr = setup_test_server().await;
+        let global = Arc::new(GlobalContext::new(addr, None));
 
         // 场景：正常连接
         let result = manager
-            .connect(addr, |_reader, _writer, _token| async move {
+            .connect(addr, global,|_ctx, _token| async move {
                 // 业务逻辑：收到连接后打印或执行简单操作
             })
             .await;
@@ -487,7 +485,8 @@ mod tests {
 
         // 2. 再次尝试 connect
         // 逻辑：应该在第 1 步检查重复时就 Ok(()) 返回
-        let result = manager.connect(addr, |_r, _w, _t| async move {}).await;
+                let global = Arc::new(GlobalContext::new(addr, None));
+        let result = manager.connect(addr, global, |_ctx, _t| async move {}).await;
 
         assert!(result.is_ok());
         // 验证没有产生新的拨号尝试（可以通过观察 Mock Server 行为或计数验证）
@@ -498,8 +497,9 @@ mod tests {
         let manager = ConnectionManager::new();
         // 使用一个确定没人在监听的端口
         let addr: SocketAddr = "127.0.0.1:1".parse().unwrap();
+        let global = Arc::new(GlobalContext::new(addr, None));
 
-        let result = manager.connect(addr, |_r, _w, _t| async move {}).await;
+        let result = manager.connect(addr,global, |_ctx, _t| async move {}).await;
 
         // 逻辑：TcpStream::connect 失败，应该返回 Err
         assert!(result.is_err());
@@ -511,10 +511,11 @@ mod tests {
         let addr = setup_test_server().await;
 
         let (tx, rx) = tokio::sync::oneshot::channel();
+        let global = Arc::new(GlobalContext::new(addr, None));
 
         // 验证闭包是否真的被执行了
         let _ = manager
-            .connect(addr, |_reader, _writer, _token| async move {
+            .connect(addr, global,|_ctx, _token| async move {
                 let _ = tx.send(true);
             })
             .await;
