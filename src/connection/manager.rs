@@ -91,26 +91,27 @@ impl ConnectionManager {
         let child_token = self.cancel_token.child_token();
         let move_token = child_token.clone();
 
+        // 初始化Context
+        let ctx = Arc::new(Mutex::new(Context::new(
+            reader_opt, writer_opt, global, addr,
+        )));
+        let ctx_cloned = ctx.clone();
+
         // 6. 启动异步任务
         // 将 Reader 和 Writer 的克隆 移交给闭包
         let handle = tokio::spawn(async move {
-            let ctx = Arc::new(Mutex::new(Context::new(
-                reader_opt, writer_opt, global, addr,
-            )));
-            f(ctx, move_token).await;
+            f(ctx_cloned.clone(), move_token).await;
         });
 
         // 7. 登记到管理池
-        // 💡 优化：这里我们直接把构造好的 writer 存入 Entry，省去了后续再 update 的麻烦
+        // 💡 优化：这里我们直接把构造好的 writer 存入 Entry，省去了后续再 update 的麻
 
-        // 初始化Context
-        // 当前默认为None
         self.add(
             addr,
             handle.abort_handle(),
             child_token,
             false,
-            None,
+            Some(ctx),
             Some(writer),
         );
 
