@@ -1,19 +1,19 @@
-use std::{collections::HashMap, net::SocketAddr, sync::Arc};
+use std::{collections::HashMap, sync::Arc};
 
 use tokio::{
-    io::{AsyncReadExt, BufReader, BufWriter},
-    net::tcp::{OwnedReadHalf, OwnedWriteHalf},
-};
+    io::AsyncReadExt, sync::Mutex}
+;
+
+ use std::result::Result::Ok;
 
 use crate::{
-    connection::{
-        context::{BoxReader, BoxWriter, Context, TypeMapExt},
-        global::GlobalContext,
-    },
+    connection::
+        context::{Context, TypeMapExt}
+    ,
     http::{
         meta::HttpMetadata,
         params::Params,
-        protocol::{media_type::SubMediaType, status::StatusCode},
+        protocol::{media_type::SubMediaType, method::HttpMethod, status::StatusCode},
         types::Executor,
     },
 };
@@ -142,16 +142,13 @@ impl Router {
         None
     }
 
-    pub async fn handle(
-        self: Arc<Self>,
-        global: Arc<GlobalContext>,
-        reader: BufReader<OwnedReadHalf>,
-        writer: BufWriter<OwnedWriteHalf>,
-        peer_addr: SocketAddr,
-    ) -> anyhow::Result<()> {
-        let reader: Option<BoxReader> = Some(Box::new(reader));
-        let writer: Option<BoxWriter> = Some(Box::new(writer));
-        let mut ctx = Context::new(reader, writer, global, peer_addr);
+    pub async fn handle(self: Arc<Self>, ctx: Arc<Mutex<Context>>) -> anyhow::Result<()> {
+        // let reader: Option<BoxReader> = Some(Box::new(reader));
+        // let writer: Option<BoxWriter> = Some(Box::new(writer));
+        // let mut ctx = Context::new(reader, writer, global, peer_addr);
+
+        let guard = ctx.lock().await;
+        let mut ctx = guard;
         ctx.req().parse_to_local().await?;
         // handle_request 返回 true 表示所有中间件和 Handler 正常通过
         // 返回 false 表示被拦截（如 validator 发现类型不匹配）
@@ -267,6 +264,27 @@ impl Router {
             ctx.local.set_value(meta);
         }
         true
+    }
+
+    pub async fn is_http(self: Arc<Self>, ctx: Arc<Mutex<Context>>) -> anyhow::Result<bool> {
+        // 1. 获取可变锁（注意这里需要 mut guard，因为我们要借用里面的 reader 进行读取）
+        let mut guard = ctx.lock().await;
+
+        // 2. 使用 as_mut() 进入 Option 内部并获取可变引用
+        if let Some(inner_reader) = guard.reader.as_mut() {
+            // 此时 inner_reader 的类型是 &mut Box<dyn AsyncBufRead...>
+            // 直接传入即可，不需要再加 &mut
+            if HttpMethod::is_http_connection(inner_reader).await? {
+                // 在调用 handle 之前释放锁，防止 handle 内部尝试获取同一个锁导致死锁
+                drop(guard);
+                self.handle(ctx).await?;
+                return Ok(true);
+            }
+        } else {
+            return Ok(false);
+        }
+
+        Ok(false) // 如果不是 HTTP，返回 false 以便后续 P2P 逻辑继续
     }
 }
 

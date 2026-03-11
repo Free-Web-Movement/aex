@@ -85,7 +85,7 @@ impl ConnectionManager {
             guard.take() // 此时 Context 拿到了所有权，shared_writer 内部变为了 None
         };
 
-        let writer = shared_writer.clone();
+        // let writer = shared_writer.clone();
 
         // 5. 准备生命周期工具
         let child_token = self.cancel_token.child_token();
@@ -112,7 +112,7 @@ impl ConnectionManager {
             child_token,
             false,
             Some(ctx),
-            Some(writer),
+            // Some(writer),
         );
 
         Ok(())
@@ -125,7 +125,7 @@ impl ConnectionManager {
         cancel_token: CancellationToken,
         is_client: bool,
         context: Option<Arc<Mutex<Context>>>,
-        writer: Option<Arc<Mutex<Option<BoxWriter>>>>,
+        // writer: Option<Arc<Mutex<Option<BoxWriter>>>>,
     ) {
         let ip = addr.ip();
         if ip.is_loopback() {
@@ -144,7 +144,7 @@ impl ConnectionManager {
         let entry = Arc::new(ConnectionEntry {
             addr,
             node: Arc::new(RwLock::new(None)), // 初始时没有节点信息，握手完成后会填充
-            writer,
+            // writer,
             abort_handle: handle,
             connected_at: now, // 💡 记录建立时间
             context,
@@ -169,7 +169,6 @@ impl ConnectionManager {
         addr: SocketAddr,
         is_client: bool,
         context: Option<Arc<Mutex<Context>>>,
-        writer: Arc<Mutex<Option<BoxWriter>>>,
     ) {
         let ip = addr.ip();
         let scope = NetworkScope::from_ip(&ip);
@@ -194,7 +193,7 @@ impl ConnectionManager {
                     addr: old_entry.addr,
                     node: old_entry.node.clone(),
                     context,
-                    writer: Some(writer), // ⚡ 填充传入的 writer
+                    // writer: Some(writer), // ⚡ 填充传入的 writer
                     abort_handle: old_entry.abort_handle.clone(),
                     connected_at: old_entry.connected_at,
                     cancel_token: old_entry.cancel_token.clone(),

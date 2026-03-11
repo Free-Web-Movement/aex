@@ -1,4 +1,4 @@
-use crate::connection::context::{BoxWriter, Context};
+use crate::connection::context::Context;
 use crate::connection::node::Node;
 use bincode::{Decode, Encode};
 use dashmap::DashMap;
@@ -46,7 +46,7 @@ pub struct ConnectionEntry {
     /// 这个数据在握手成功后填入，并在连接生命周期内保持不变
     pub node: Arc<RwLock<Option<Node>>>,
     pub addr: SocketAddr,
-    pub writer: Option<Arc<Mutex<Option<BoxWriter>>>>,
+    // pub writer: Option<Arc<Mutex<Option<BoxWriter>>>>,
     pub abort_handle: AbortHandle,
     pub context: Option<Arc<Mutex<Context>>>,
     pub cancel_token: CancellationToken,
@@ -61,7 +61,7 @@ impl fmt::Debug for ConnectionEntry {
         f.debug_struct("ConnectionEntry")
             .field("addr", &self.addr)
             // 这里我们手动跳过 writer 的内部详情，只打印状态
-            .field("writer", if self.writer.is_some() { &"Connected" } else { &"None" })
+            // .field("writer", if self.writer.is_some() { &"Connected" } else { &"None" })
             .field("connected_at", &self.connected_at)
             // 如果有 last_seen 等字段，照常添加
             // .field("last_seen", &self.last_seen) 
@@ -71,12 +71,12 @@ impl fmt::Debug for ConnectionEntry {
 
 impl ConnectionEntry {
 
-    pub fn new_empty_node(addr: SocketAddr, context: Option<Arc<Mutex<Context>>>, writer: Option<Arc<Mutex<Option<BoxWriter>>>>, handle: tokio::task::AbortHandle, cancel_token: CancellationToken) -> Self {
+    pub fn new_empty_node(addr: SocketAddr, context: Option<Arc<Mutex<Context>>>, handle: tokio::task::AbortHandle, cancel_token: CancellationToken) -> Self {
         let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
         Self {
             node: Arc::new(RwLock::new(None)),
             addr,
-            writer,
+            // writer,
             abort_handle: handle,
             cancel_token,
             context,

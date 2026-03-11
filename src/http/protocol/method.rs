@@ -1,4 +1,4 @@
-use tokio::net::tcp::OwnedReadHalf;
+use tokio::{io::AsyncBufReadExt, net::tcp::OwnedReadHalf};
 
 #[repr(u8)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
@@ -130,14 +130,22 @@ impl HttpMethod {
         false
     }
 
-    pub async fn is_http_connection(reader: &mut OwnedReadHalf) -> anyhow::Result<bool> {
+    pub async fn is_http_connection<R>(reader: &mut R) -> anyhow::Result<bool>
+    where
+        R: tokio::io::AsyncBufRead + Unpin + ?Sized,
+    {
+        // fill_buf() 会返回当前缓冲区的数据，但不会移动读取位置
+        // 这在逻辑上等同于一次成功的 peek
+        let buf = reader.fill_buf().await?;
 
-        let mut buf = [0u8; 16_usize];
-        let n = reader.peek(&mut buf).await?;
-        if n == 0 {
+        if buf.is_empty() {
             return Ok(false);
         }
-        let s = std::str::from_utf8(&buf[..n]).unwrap_or("");
+
+        // 取前 16 个字节进行 HTTP 前缀判定
+        let limit = std::cmp::min(buf.len(), 16);
+        let s = std::str::from_utf8(&buf[..limit]).unwrap_or("");
+
         Ok(HttpMethod::is_prefixed(s))
     }
 }

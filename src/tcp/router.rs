@@ -2,13 +2,11 @@ use anyhow::Ok;
 use futures::future::BoxFuture;
 use std::any::Any;
 use std::collections::HashMap;
-use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::io::AsyncReadExt;
 use tokio::sync::Mutex;
 
-use crate::connection::context::{BoxReader, BoxWriter, Context};
-use crate::connection::global::GlobalContext;
+use crate::connection::context::Context;
 use crate::connection::types::IDExtractor;
 use crate::tcp::types::{Codec, TCPCommand, TCPFrame};
 
@@ -110,11 +108,7 @@ impl Router {
 
     pub async fn handle<F, C>(
         &self,
-        addr: SocketAddr,
-        global: Arc<GlobalContext>,
-        // ⚡ 直接传入 Option 的 mutable 引用，这样 handle_frame 才能 take 走并放回
-        reader: &mut Option<BoxReader>,
-        writer: &mut Option<BoxWriter>,
+        ctx: Arc<Mutex<Context>>,
         extractor: IDExtractor<C>,
     ) -> anyhow::Result<()>
     where
@@ -128,11 +122,15 @@ impl Router {
         loop {
             // ⚡ 修复点 1：解包 Option 拿到里面的 Box (它才实现了 AsyncBufRead)
             // 使用 as_deref_mut() 拿到 &mut (dyn AsyncBufRead + ...)
-            let n = match &mut reader.as_deref_mut() {
-                Some(r) => r.read(&mut buf).await?,
-                None => {
-                    println!("Reader taken and not returned!");
-                    break;
+
+            let n = {
+                let mut guard = ctx.lock().await;
+                match &mut guard.reader.as_deref_mut() {
+                    Some(r) => r.read(&mut buf).await?,
+                    None => {
+                        println!("Reader taken and not returned!");
+                        break;
+                    }
                 }
             };
 
@@ -145,21 +143,21 @@ impl Router {
                 use std::result::Result::Ok;
                 match <F as Codec>::decode(&session_buf) {
                     Ok(frame) => {
-                        let ctx = Context::new(reader.take(), writer.take(), global.clone(), addr);
+                        // let ctx = Context::new(reader.take(), writer.take(), global.clone(), addr);
                         let should_continue = self
-                            .handle_frame::<F, C>(
-                                Arc::new(Mutex::new(ctx)),
-                                frame,
-                                extractor.clone(),
-                            )
+                            .handle_frame::<F, C>(ctx.clone(), frame, extractor.clone())
                             .await?;
 
                         session_buf.clear();
 
                         // ⚡ 修复点 3：检查 reader 是否被 Handler 归还
-                        if !should_continue || reader.is_none() {
-                            println!("Handler terminated connection or kept the stream");
-                            return Ok(());
+                        {
+                            let guard = ctx.lock().await;
+                            let reader = &guard.reader;
+                            if !should_continue || reader.is_none() {
+                                println!("Handler terminated connection or kept the stream");
+                                return Ok(());
+                            }
                         }
                     }
                     Err(_) => break,

@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
     use aex::http::protocol::method::HttpMethod;
-    use tokio::io::AsyncWriteExt;
+    use tokio::io::{AsyncWriteExt, BufReader};
 
     #[tokio::test]
     async fn test_is_http_connection_eof() {
@@ -30,7 +30,9 @@ mod tests {
         });
 
         let (server_stream, _) = listener.accept().await.unwrap();
-        let (mut reader, _) = server_stream.into_split();
+        let (reader, _) = server_stream.into_split();
+
+        let mut reader = BufReader::new(reader);
 
         let result = HttpMethod::is_http_connection(&mut reader).await.unwrap();
 
@@ -84,7 +86,8 @@ mod tests {
         });
 
         let (server_stream, _) = listener.accept().await.unwrap();
-        let (mut reader, _) = server_stream.into_split();
+        let (reader, _) = server_stream.into_split();
+        let mut reader = BufReader::new(reader);
 
         // 执行函数
         let result = HttpMethod::is_http_connection(&mut reader).await.unwrap();

@@ -39,7 +39,7 @@ mod tests {
         }).abort_handle();
         
         // 1. 测试 new_empty_node (初始状态 node 应该是 None)
-        let entry = ConnectionEntry::new_empty_node(addr, None, None, handle, token);
+        let entry = ConnectionEntry::new_empty_node(addr, None, handle, token);
 
         // 验证初始化时间戳
         assert!(entry.uptime_secs() <= 1);
@@ -80,7 +80,6 @@ mod tests {
         let entry = ConnectionEntry::new_empty_node(
             addr, 
             None,
-            None, 
             tokio::spawn(async {}).abort_handle(), 
             CancellationToken::new()
         );
@@ -121,7 +120,6 @@ mod tests {
             let _entry = ConnectionEntry::new_empty_node(
                 addr, 
                 None, 
-                None,
                 abort_handle, 
                 CancellationToken::new()
             );

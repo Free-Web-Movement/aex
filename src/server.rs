@@ -1,8 +1,7 @@
-use crate::connection::context::{BoxReader, BoxWriter, TypeMapExt};
+use crate::connection::context::{BoxReader, BoxWriter, Context, TypeMapExt};
 use crate::connection::global::GlobalContext;
 use crate::connection::types::IDExtractor;
 use crate::crypto::session_key_manager::PairedSessionKey;
-use crate::http::protocol::method::HttpMethod;
 use crate::http::router::Router as HttpRouter;
 use crate::tcp::router::Router as TcpRouter;
 use crate::tcp::types::{TCPCommand, TCPFrame};
@@ -48,8 +47,8 @@ impl Server {
         self
     }
 
-    pub async fn start<F, C>(&self, extractor: IDExtractor<C>) -> anyhow::Result<()> 
-        where
+    pub async fn start<F, C>(&self, extractor: IDExtractor<C>) -> anyhow::Result<()>
+    where
         F: TCPFrame,
         C: TCPCommand,
     {
@@ -135,9 +134,13 @@ impl Server {
 
                     let server_ctx = Arc::new(self.clone_internal());
                     let extractor_ctx = extractor.clone();
+                    let global = server_ctx.globals.clone();
+                    let addr = server_ctx.addr.clone();
                     let manager = server_ctx.globals.manager.clone();
                     let task_token = manager.cancel_token.child_token();
                     let task_token_cloned = task_token.clone();
+
+                    let manager_cloned = manager.clone();
 
                     let join_handler = tokio::spawn(async move {
                         tokio::select! {
@@ -148,32 +151,29 @@ impl Server {
                             }
                             // 执行业务逻辑
                             res = async {
-                                let (mut reader, writer) = socket.into_split();
+                                let (reader, writer) = socket.into_split();
+                                    let r_opt: Option<BoxReader> = Some(Box::new(BufReader::new(reader)));
+                                    let w_opt: Option<BoxWriter> = Some(Box::new(BufWriter::new(writer)));
+                                    let ctx = Arc::new(Mutex::new(Context::new(r_opt, w_opt, global, addr)));
+                                    let ctx_clone = ctx.clone();
+
+                                    manager_cloned.update(peer_addr, true, Some(ctx.clone()));
 
                                 // 1. 协议嗅探：HTTP
                                 let router: Option<Arc<HttpRouter>> = server_ctx.globals.routers.get_value();
                                 if let Some(hr) = &router
-                                    && HttpMethod::is_http_connection(&mut reader)
-                                        .await
-                                        .unwrap_or_default()
+                                    && hr.clone().is_http(ctx_clone).await?
                                 {
-                                    let reader = BufReader::new(reader);
-                                    let writer = BufWriter::new(writer);
-                                    return hr.clone().handle(server_ctx.globals.clone(), reader, writer, peer_addr).await;
+                                    return Ok(());
                                 }
 
                                 // 2. 自定义 TCP 处理
                                 let router: Option<Arc<TcpRouter>> = server_ctx.globals.routers.get_value();
                                 if let Some(tr) = &router {
-                                    let mut r_opt: Option<BoxReader> = Some(Box::new(BufReader::new(reader)));
-                                    let mut w_opt: Option<BoxWriter> = Some(Box::new(BufWriter::new(writer)));
                                     return tr
                                         .clone()
                                         .handle::<F, C>(
-                                            peer_addr,
-                                            server_ctx.globals.clone(),
-                                            &mut r_opt,
-                                            &mut w_opt,
+                                            ctx,
                                             extractor_ctx,
                                         )
                                         .await;
@@ -185,7 +185,7 @@ impl Server {
 
                     // --- D. 存入 ConnectionManager ---
                     // 这里记录每个 Peer 的独立控制权
-                    manager.add(peer_addr, join_handler.abort_handle(), task_token_cloned, true, None, None);
+                    manager.add(peer_addr, join_handler.abort_handle(), task_token_cloned, true, None);
                 }
             }
         }
