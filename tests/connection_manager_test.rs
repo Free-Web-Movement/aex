@@ -2,7 +2,7 @@
 mod tests {
     use aex::{
         connection::{
-            context::{BoxWriter, Context}, global::{self, GlobalContext}, manager::ConnectionManager, node::Node, types::{BiDirectionalConnections, NetworkScope}
+            global::GlobalContext, manager::ConnectionManager, node::Node, types::{BiDirectionalConnections, NetworkScope}
         },
         time::SystemTime,
     };
@@ -15,7 +15,7 @@ mod tests {
         },
         time::Duration,
     };
-    use tokio::{io::AsyncReadExt, net::TcpListener, sync::Mutex};
+    use tokio::{io::AsyncReadExt, net::TcpListener};
 
     #[tokio::test]
     async fn test_new_manager() {

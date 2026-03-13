@@ -50,8 +50,6 @@ mod tests {
         let storage = Storage::new(Some(&get_temp_test_dir()));
 
         // 验证 HashMap 是否初始化为空
-        assert!(storage.files.is_empty());
-
         // 清理
         let _ = fs::remove_dir_all(&storage.app_dir);
     }
@@ -59,18 +57,9 @@ mod tests {
     #[test]
     fn test_file_path_joining() {
         let test_dir = get_temp_test_dir();
-        let mut storage = Storage::new(Some(&test_dir));
+        let mut _storage = Storage::new(Some(&test_dir));
 
         // 模拟添加一个 session 配置文件路径
-        let file_name = "session_key.bin".to_string();
-        let file_path = storage.app_dir.join(&file_name);
-        storage.files.insert(file_name.clone(), file_path.clone());
-
-        assert!(storage.files.contains_key(&file_name));
-        assert_eq!(
-            storage.files.get(&file_name).unwrap(),
-            &storage.app_dir.join("session_key.bin")
-        );
 
         let _ = fs::remove_dir_all(&test_dir);
     }
@@ -113,7 +102,7 @@ mod tests {
 
     #[test]
     fn test_save_and_read_success() -> anyhow::Result<()> {
-        let (mut storage, test_dir) = setup_storage();
+        let (storage, test_dir) = setup_storage();
 
         // 准备数据
         let key = "user_1".to_string();
@@ -123,9 +112,6 @@ mod tests {
         };
 
         // 手动插入路径到 files (模拟实际使用场景)
-        let file_path = storage.app_dir.join("user_1.json");
-        storage.files.insert(key.clone(), file_path.clone());
-
         // 测试保存
         storage.save(&key, &data)?;
 

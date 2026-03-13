@@ -1,26 +1,19 @@
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, fs, path::PathBuf};
+use std::{fs, path::PathBuf};
 
 pub const DEFAULT_APP_DIR: &str = ".aex";
 
 #[derive(Debug, Clone)]
 pub struct Storage {
     pub app_dir: PathBuf,
-    pub files: HashMap<String, PathBuf>,
 }
 
 impl Storage {
     pub fn new(data_dir: Option<&str>) -> Self {
         // 调用提取出来的逻辑
         let app_dir = Self::resolve_app_dir(data_dir, dirs_next::data_dir());
-
-        println!("Storage app dir: {:?}", app_dir);
         let _ = fs::create_dir_all(&app_dir);
-
-        Storage {
-            app_dir,
-            files: HashMap::new(),
-        }
+        Storage { app_dir }
     }
 
     // 将逻辑提取为纯函数，方便注入测试
@@ -34,13 +27,18 @@ impl Storage {
         }
     }
 
+    pub fn real_path(&self, k: &String) -> PathBuf {
+        let mut path = PathBuf::from(&self.app_dir);
+        path.push(k);
+        path
+    }
+
     pub fn save<T>(&self, k: &String, t: &T) -> anyhow::Result<()>
     where
         T: Serialize,
     {
         let json = serde_json::to_vec_pretty(t)?;
-        let default_path = PathBuf::from(DEFAULT_APP_DIR);
-        let file = self.files.get(k).unwrap_or_else(|| &default_path);
+        let file = self.real_path(k);
         fs::write(file, json)?;
         Ok(())
     }
@@ -49,11 +47,9 @@ impl Storage {
     where
         T: for<'a> Deserialize<'a>,
     {
-        let default_path = PathBuf::from(DEFAULT_APP_DIR);
-        let file = self.files.get(k).unwrap_or_else(|| &default_path);
-        println!("Reading address from {:?}", &file);
+        let file = self.real_path(k);
         if !file.exists() {
-            println!("Address file does not exist.");
+            eprintln!("Address file does not exist.");
             return Ok(None);
         }
 
