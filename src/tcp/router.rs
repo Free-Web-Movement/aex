@@ -69,32 +69,25 @@ impl Router {
             let c: Option<C>;
             if !frame.is_flat() {
                 use std::result::Result::Ok;
-
                 if let Ok(cmd) = <C as crate::tcp::types::Codec>::decode(&data) {
-                    // ... 之前的 decode 成功逻辑 ...
                     key = (extractor)(&cmd);
                     c = Some(cmd);
                 } else {
-                    // 只有在 decode 失败且满足 F == C 时才尝试直接转换
                     let boxed_f = Box::new(frame.clone()) as Box<dyn Any>;
                     if let Ok(cmd) = boxed_f.downcast::<C>() {
-                        let c_val = *cmd; // 这里拿到了 C 的所有权
+                        let c_val = *cmd;
                         key = (extractor)(&c_val);
                         c = Some(c_val);
                     } else {
-                        // 如果既不能 decode 也不是同类型，处理报错或跳过
                         return Ok(false);
                     }
                 }
 
                 if let Some(any_handler) = self.handlers.get(&key) {
                     for handler in any_handler {
-                        let handler =
-                            handler.downcast_ref::<Box<Doer<F, C>>>().ok_or_else(|| {
-                                anyhow::anyhow!("Handler type mismatch for key: {}", key)
-                            })?;
-
-                        // 现在 r 和 w 正好符合 Handler 的参数要求
+                        let handler = handler.downcast_ref::<Doer<F, C>>().ok_or_else(|| {
+                            anyhow::anyhow!("Handler type mismatch for key: {}", key)
+                        })?;
                         if !handler(ctx.clone(), frame.clone(), c.clone().unwrap().clone()).await? {
                             return Ok(false);
                         }
@@ -117,7 +110,6 @@ impl Router {
     {
         let mut session_buf: Vec<u8> = Vec::with_capacity(4096);
         let mut buf = vec![0u8; 1024];
-        println!("inside handle!");
 
         loop {
             // ⚡ 修复点 1：解包 Option 拿到里面的 Box (它才实现了 AsyncBufRead)
@@ -128,34 +120,29 @@ impl Router {
                 match &mut guard.reader.as_deref_mut() {
                     Some(r) => r.read(&mut buf).await?,
                     None => {
-                        println!("Reader taken and not returned!");
+                        eprintln!("Reader taken and not returned!");
                         break;
                     }
                 }
             };
-
             if n == 0 {
                 break;
             }
             session_buf.extend_from_slice(&buf[..n]);
-
             while !session_buf.is_empty() {
                 use std::result::Result::Ok;
                 match <F as Codec>::decode(&session_buf) {
                     Ok(frame) => {
-                        // let ctx = Context::new(reader.take(), writer.take(), global.clone(), addr);
                         let should_continue = self
                             .handle_frame::<F, C>(ctx.clone(), frame, extractor.clone())
                             .await?;
 
                         session_buf.clear();
-
-                        // ⚡ 修复点 3：检查 reader 是否被 Handler 归还
                         {
                             let guard = ctx.lock().await;
                             let reader = &guard.reader;
                             if !should_continue || reader.is_none() {
-                                println!("Handler terminated connection or kept the stream");
+                                eprintln!("Handler terminated connection or kept the stream");
                                 return Ok(());
                             }
                         }
