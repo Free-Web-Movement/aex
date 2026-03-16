@@ -67,7 +67,7 @@ impl GlobalContext {
     }
 
     /// 存入扩展实例 (Async)
-    pub async fn set<T: Send + Sync + 'static>(&self, data: T) {
+    pub async fn set<T: Clone + Send + Sync + 'static>(&self, data: T) {
         // 1. 获取异步写锁（注意：tokio 的 write() 不需要 .expect()）
         let ext = self.extensions.write().await;
 
