@@ -4,7 +4,7 @@ use std::{
     time::{ SystemTime, UNIX_EPOCH },
 };
 
-use crate::connection::{ protocol::Protocol, types::NetworkScope };
+use crate::connection::{ protocol::Protocol, scope::NetworkScope };
 use bincode::{ Decode, Encode };
 use serde::{ Deserialize, Serialize };
 

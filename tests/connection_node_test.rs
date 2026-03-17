@@ -5,7 +5,7 @@ mod tests {
         net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     };
 
-    use aex::connection::{node::Node, protocol::Protocol, types::NetworkScope};
+    use aex::connection::{node::Node, protocol::Protocol, scope::NetworkScope};
 
     // --- 1. 基础构造函数测试 ---
     #[test]

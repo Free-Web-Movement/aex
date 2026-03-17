@@ -2,7 +2,7 @@
 mod tests {
     
     use std::{net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr}, sync::{atomic::Ordering}};
-    use aex::connection::{node::Node, protocol::Protocol, types::{ConnectionEntry, NetworkScope}};
+    use aex::connection::{entry::ConnectionEntry, node::Node, protocol::Protocol, scope::NetworkScope};
     use tokio_util::sync::CancellationToken;
 
     // --- 1. NetworkScope 测试 (覆盖 IPv4/v6 各种分类) ---

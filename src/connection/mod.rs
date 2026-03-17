@@ -5,3 +5,5 @@ pub mod node;
 pub mod protocol;
 pub mod global;
 pub mod context;
+pub mod entry;
+pub mod scope;
