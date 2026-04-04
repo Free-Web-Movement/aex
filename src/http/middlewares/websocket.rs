@@ -1,20 +1,25 @@
 use crate::{
-    connection::context::{ Context, TypeMapExt },
+    connection::context::{Context, TypeMapExt},
     http::{
         meta::HttpMetadata,
-        protocol::{ header::HeaderKey, method::HttpMethod },
-        types::{ Executor },
-        websocket::{ WSCodec, WSFrame, WebSocketHandler },
+        protocol::{header::HeaderKey, method::HttpMethod},
+        types::Executor,
+        websocket::{WSCodec, WSFrame, WebSocketHandler},
     },
     // 假设这些是你定义的路径
 };
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
-use sha1::{ Digest, Sha1 };
-use std::{ collections::HashMap, sync::Arc, pin::Pin, task::{ Poll, Context as TaskContext } };
-use tokio::{ io::{ AsyncRead, AsyncWrite, AsyncWriteExt, ReadBuf } };
+use futures::{FutureExt, SinkExt, StreamExt};
+use sha1::{Digest, Sha1};
+use std::{
+    collections::HashMap,
+    pin::Pin,
+    sync::Arc,
+    task::{Context as TaskContext, Poll},
+};
+use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, ReadBuf};
 use tokio_util::codec::Framed;
-use futures::{ SinkExt, StreamExt, FutureExt };
 
 use futures::future::BoxFuture;
 
@@ -28,7 +33,7 @@ impl AsyncRead for CombinedStream {
     fn poll_read(
         mut self: Pin<&mut Self>,
         cx: &mut TaskContext<'_>,
-        buf: &mut ReadBuf<'_>
+        buf: &mut ReadBuf<'_>,
     ) -> Poll<std::io::Result<()>> {
         Pin::new(&mut self.reader).poll_read(cx, buf)
     }
@@ -38,7 +43,7 @@ impl AsyncWrite for CombinedStream {
     fn poll_write(
         mut self: Pin<&mut Self>,
         cx: &mut TaskContext<'_>,
-        buf: &[u8]
+        buf: &[u8],
     ) -> Poll<std::io::Result<usize>> {
         Pin::new(&mut self.writer).poll_write(cx, buf)
     }
@@ -47,7 +52,7 @@ impl AsyncWrite for CombinedStream {
     }
     fn poll_shutdown(
         mut self: Pin<&mut Self>,
-        cx: &mut TaskContext<'_>
+        cx: &mut TaskContext<'_>,
     ) -> Poll<std::io::Result<()>> {
         Pin::new(&mut self.writer).poll_shutdown(cx)
     }
@@ -64,11 +69,11 @@ impl WebSocket {
 
     /// 设置通用处理器
     pub fn set_handler<F>(mut self, handler: F) -> Self
-        where
-            F: Fn(&WebSocket, &mut Context, WSFrame) -> BoxFuture<'static, bool> +
-                Send +
-                Sync +
-                'static
+    where
+        F: Fn(&WebSocket, &mut Context, WSFrame) -> BoxFuture<'static, bool>
+            + Send
+            + Sync
+            + 'static,
     {
         self.on_frame = Some(Arc::new(handler));
         self
@@ -93,7 +98,7 @@ impl WebSocket {
     /// 完成 WebSocket 握手
     pub async fn handshake(
         writer: &mut (dyn AsyncWrite + Send + Unpin),
-        headers: &HashMap<HeaderKey, String>
+        headers: &HashMap<HeaderKey, String>,
     ) -> anyhow::Result<()> {
         let key = headers
             .get(&HeaderKey::SecWebSocketKey)
@@ -104,11 +109,13 @@ impl WebSocket {
         sha.update(b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11");
         let accept_key = STANDARD.encode(sha.finalize());
 
-        let response =
-            format!("HTTP/1.1 101 Switching Protocols\r\n\
+        let response = format!(
+            "HTTP/1.1 101 Switching Protocols\r\n\
             Upgrade: websocket\r\n\
             Connection: Upgrade\r\n\
-            Sec-WebSocket-Accept: {}\r\n\r\n", accept_key);
+            Sec-WebSocket-Accept: {}\r\n\r\n",
+            accept_key
+        );
 
         writer.write_all(response.as_bytes()).await?;
         writer.flush().await?;
@@ -117,8 +124,14 @@ impl WebSocket {
 
     /// WebSocket 核心运行循环
     pub async fn run(ws: &WebSocket, ctx: &mut Context) -> anyhow::Result<()> {
-        let reader = ctx.reader.take().ok_or_else(|| anyhow::anyhow!("Reader missing"))?;
-        let writer = ctx.writer.take().ok_or_else(|| anyhow::anyhow!("Writer missing"))?;
+        let reader = ctx
+            .reader
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("Reader missing"))?;
+        let writer = ctx
+            .writer
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("Writer missing"))?;
 
         let io = CombinedStream { reader, writer };
         let mut framed = Framed::new(io, WSCodec);
@@ -135,7 +148,9 @@ impl WebSocket {
             if let Some(handler) = &ws.on_frame {
                 // 调用处理器。如果返回 false，表示业务层要求关闭连接
                 if !handler(ws, ctx, frame.clone()).await {
-                    let _ = framed.send(WSFrame::Close(1000, Some("Handler exit".into()))).await;
+                    let _ = framed
+                        .send(WSFrame::Close(1000, Some("Handler exit".into())))
+                        .await;
                     break;
                 }
             }
@@ -161,36 +176,35 @@ impl WebSocket {
 
         Box::new(move |ctx: &mut Context| {
             let ws = ws.clone();
-            (
-                async move {
-                    let meta = match ctx.local.get_value::<HttpMetadata>() {
-                        Some(m) => m,
-                        None => {
-                            return true;
-                        }
-                    };
-
-                    if !Self::check(meta.method, &meta.headers) {
+            (async move {
+                let meta = match ctx.local.get_value::<HttpMetadata>() {
+                    Some(m) => m,
+                    None => {
                         return true;
                     }
+                };
 
-                    // 进行握手
-                    {
-                        let w = ctx.writer.as_deref_mut().unwrap();
-                        if let Err(e) = Self::handshake(w, &meta.headers).await {
-                            eprintln!("WS Handshake Error: {:?}", e);
-                            return false;
-                        }
-                    }
-
-                    // 启动循环 (内部会接管 reader/writer)
-                    if let Err(e) = Self::run(&ws, ctx).await {
-                        eprintln!("WS Connection Ended: {:?}", e);
-                    }
-
-                    false // 拦截，不继续执行后续 HTTP 中间件
+                if !Self::check(meta.method, &meta.headers) {
+                    return true;
                 }
-            ).boxed()
+
+                // 进行握手
+                {
+                    let w = ctx.writer.as_deref_mut().unwrap();
+                    if let Err(e) = Self::handshake(w, &meta.headers).await {
+                        eprintln!("WS Handshake Error: {:?}", e);
+                        return false;
+                    }
+                }
+
+                // 启动循环 (内部会接管 reader/writer)
+                if let Err(e) = Self::run(&ws, ctx).await {
+                    eprintln!("WS Connection Ended: {:?}", e);
+                }
+
+                false // 拦截，不继续执行后续 HTTP 中间件
+            })
+            .boxed()
         })
     }
 

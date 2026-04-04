@@ -1,8 +1,8 @@
-use crate::connection::context::{ BoxReader, BoxWriter, Context, TypeMapExt };
+use crate::connection::context::{BoxReader, BoxWriter, Context, TypeMapExt};
 use crate::connection::global::GlobalContext;
 use crate::connection::node::Node;
 use crate::connection::types::IDExtractor;
-use crate::tcp::types::{ TCPCommand, TCPFrame };
+use crate::tcp::types::{TCPCommand, TCPFrame};
 
 use crate::http::router::Router as HttpRouter;
 use crate::tcp::router::Router as TcpRouter;
@@ -10,11 +10,11 @@ use std::fmt;
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::sync::atomic::{ AtomicU64, Ordering };
-use std::time::{ SystemTime, UNIX_EPOCH };
-use tokio::io::{ BufReader, BufWriter };
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
+use tokio::io::{BufReader, BufWriter};
 use tokio::net::TcpStream;
-use tokio::sync::{ Mutex, RwLock };
+use tokio::sync::{Mutex, RwLock};
 use tokio::task::AbortHandle;
 use tokio_util::sync::CancellationToken;
 
@@ -49,9 +49,12 @@ impl ConnectionEntry {
         addr: SocketAddr,
         context: Option<Arc<Mutex<Context>>>,
         handle: tokio::task::AbortHandle,
-        cancel_token: CancellationToken
+        cancel_token: CancellationToken,
     ) -> Self {
-        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
         Self {
             node: Arc::new(RwLock::new(None)),
             addr,
@@ -65,7 +68,10 @@ impl ConnectionEntry {
     }
 
     pub fn uptime_secs(&self) -> u64 {
-        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
         now.saturating_sub(self.connected_at)
     }
 
@@ -104,12 +110,11 @@ impl ConnectionEntry {
     pub fn default_pipeline<F, C>(
         peer_addr: std::net::SocketAddr,
         is_server: bool,
-        extractor: IDExtractor<C>
-    )
-        -> impl FnOnce(
-            Arc<Mutex<Context>>
-        ) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>>
-        where F: TCPFrame, C: TCPCommand
+        extractor: IDExtractor<C>,
+    ) -> impl FnOnce(Arc<Mutex<Context>>) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>>
+    where
+        F: TCPFrame,
+        C: TCPCommand,
     {
         move |ctx: Arc<Mutex<Context>>| {
             Box::pin(async move {
@@ -144,14 +149,13 @@ impl ConnectionEntry {
         socket: TcpStream,
         addr: std::net::SocketAddr,
         global: Arc<GlobalContext>,
-        f: FF
-    )
-        -> (CancellationToken, tokio::task::AbortHandle)
-        where
-            F: TCPFrame,
-            C: TCPCommand,
-            FF: FnOnce(Arc<Mutex<Context>>) -> Fut + Send + 'static,
-            Fut: std::future::Future<Output = anyhow::Result<()>> + Send + 'static
+        f: FF,
+    ) -> (CancellationToken, tokio::task::AbortHandle)
+    where
+        F: TCPFrame,
+        C: TCPCommand,
+        FF: FnOnce(Arc<Mutex<Context>>) -> Fut + Send + 'static,
+        Fut: std::future::Future<Output = anyhow::Result<()>> + Send + 'static,
     {
         // 1. ⚡ 关键：派生子令牌，这样外部可以单独 cancel 这个连接而不影响全局
         let child_token = parent_token.child_token();
@@ -180,7 +184,7 @@ impl ConnectionEntry {
                     raw_ctx.set(task_token.clone()).await;
                     let ctx = Arc::new(Mutex::new(raw_ctx));
 
-                    
+
 
                     // 执行业务逻辑
                     f(ctx).await?;

@@ -2,7 +2,7 @@
 mod tests {
     use std::collections::HashMap;
 
-    use aex::http::protocol::header::{ HeaderKey, Headers };
+    use aex::http::protocol::header::{HeaderKey, Headers};
 
     // ---------- from_str 标准 header ----------
     #[test]
@@ -157,7 +157,7 @@ mod tests {
             HeaderKey::XForwardedProto,
             HeaderKey::DNT,
             HeaderKey::KeepAlive,
-            HeaderKey::UpgradeInsecureRequests
+            HeaderKey::UpgradeInsecureRequests,
         ];
 
         for header in headers {
@@ -220,7 +220,12 @@ mod tests {
             .with(HeaderKey::from_str("X-Request-ID").unwrap(), "12345");
 
         assert_eq!(headers.get(&HeaderKey::Host).unwrap(), "localhost");
-        assert_eq!(headers.get(&HeaderKey::from_str("x-request-id").unwrap()).unwrap(), "12345");
+        assert_eq!(
+            headers
+                .get(&HeaderKey::from_str("x-request-id").unwrap())
+                .unwrap(),
+            "12345"
+        );
     }
 
     #[test]
@@ -244,7 +249,7 @@ mod tests {
         // 6. 测试从数组/迭代器创建
         let data = vec![
             (HeaderKey::Accept, "text/html".to_string()),
-            (HeaderKey::from_str("X-Version").unwrap(), "1.0".to_string())
+            (HeaderKey::from_str("X-Version").unwrap(), "1.0".to_string()),
         ];
 
         let headers: Headers = data.into_iter().collect();
@@ -285,7 +290,10 @@ mod tests {
 
         let headers = Headers::from(map);
         assert!(headers.contains(&HeaderKey::Authorization));
-        assert_eq!(headers.get(&HeaderKey::Authorization).unwrap(), "Bearer token123");
+        assert_eq!(
+            headers.get(&HeaderKey::Authorization).unwrap(),
+            "Bearer token123"
+        );
 
         // 2. 测试从 Headers 转回 HashMap
         // 这在需要调用只接受 HashMap 的第三方库时非常有用

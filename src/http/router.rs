@@ -1,15 +1,11 @@
 use std::{collections::HashMap, sync::Arc};
 
-use tokio::{
-    io::AsyncReadExt, sync::Mutex}
-;
+use tokio::{io::AsyncReadExt, sync::Mutex};
 
- use std::result::Result::Ok;
+use std::result::Result::Ok;
 
 use crate::{
-    connection::
-        context::{Context, TypeMapExt}
-    ,
+    connection::context::{Context, TypeMapExt},
     http::{
         meta::HttpMetadata,
         params::Params,

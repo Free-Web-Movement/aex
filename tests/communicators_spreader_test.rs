@@ -15,13 +15,13 @@ async fn test_spread_broadcast() {
             "config_update",
             Box::new(move |v: usize| {
                 let c = Arc::clone(&c1);
-                (
-                    async move {
-                        c.fetch_add(v, std::sync::atomic::Ordering::SeqCst);
-                    }
-                ).boxed()
-            })
-        ).await
+                (async move {
+                    c.fetch_add(v, std::sync::atomic::Ordering::SeqCst);
+                })
+                .boxed()
+            }),
+        )
+        .await
         .unwrap();
 
     // 订阅者 2
@@ -31,13 +31,13 @@ async fn test_spread_broadcast() {
             "config_update",
             Box::new(move |v: usize| {
                 let c = Arc::clone(&c2);
-                (
-                    async move {
-                        c.fetch_add(v, std::sync::atomic::Ordering::SeqCst);
-                    }
-                ).boxed()
-            })
-        ).await
+                (async move {
+                    c.fetch_add(v, std::sync::atomic::Ordering::SeqCst);
+                })
+                .boxed()
+            }),
+        )
+        .await
         .unwrap();
 
     // 发布一次消息，两个订阅者都应该收到

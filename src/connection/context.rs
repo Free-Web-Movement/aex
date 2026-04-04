@@ -52,7 +52,7 @@ pub struct Context {
     pub reader: Option<BoxReader>,
     pub writer: Option<BoxWriter>,
     pub global: Arc<GlobalContext>,
-    pub local: Arc<TypeMap>
+    pub local: Arc<TypeMap>,
 }
 
 impl Context {

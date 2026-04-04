@@ -21,8 +21,7 @@ mod tests {
 
         // 1. ⚡ 修改：使用 Cursor 包装 Vec，并让 Box 拥有 Cursor 的所有权
         // 这样就满足了 'static 的要求，因为 Box 现在拥有数据，而不是借用数据
-        let mut writer: Option<BoxWriter> =
-            Some(Box::new(Cursor::new(Vec::new())));
+        let mut writer: Option<BoxWriter> = Some(Box::new(Cursor::new(Vec::new())));
 
         let local = Arc::new(TypeMap::new());
 
@@ -84,8 +83,7 @@ mod tests {
 
         // 1. 准备底层数据
         // 我们需要 Cursor 来拥有 Vec，从而满足 Box 的 'static 要求
-        let mut writer_opt: Option<BoxWriter> =
-            Some(Box::new(Cursor::new(Vec::new())));
+        let mut writer_opt: Option<BoxWriter> = Some(Box::new(Cursor::new(Vec::new())));
         let local = Arc::new(TypeMap::new());
 
         // 2. 构造元数据 (保持不变)

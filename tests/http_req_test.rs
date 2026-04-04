@@ -46,7 +46,7 @@ mod tests {
 
         let reader = BufReader::new(Cursor::new(input));
         let mut reader: Option<BoxReader> = Some(Box::new(reader));
-                let mut req = Request::new(&mut reader, local.clone());
+        let mut req = Request::new(&mut reader, local.clone());
         req.parse_to_local().await.unwrap();
 
         let meta = local.get_value::<HttpMetadata>().unwrap();

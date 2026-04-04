@@ -39,10 +39,7 @@ mod tests {
     #[test]
     fn test_protocol_serde_roundtrip() {
         // 覆盖序列化与反序列化，特别是 Custom 变体
-        let protocols = vec![
-            Protocol::Tcp,
-            Protocol::Custom("grpc".to_string()),
-        ];
+        let protocols = vec![Protocol::Tcp, Protocol::Custom("grpc".to_string())];
 
         let serialized = serde_json::to_string(&protocols).unwrap();
         // 验证 JSON 格式是否符合预期
@@ -59,7 +56,7 @@ mod tests {
         let p1 = Protocol::Custom("p2p".to_string());
         let p2 = p1.clone();
         assert_eq!(p1, p2);
-        
+
         // 覆盖 Debug
         assert!(format!("{:?}", p1).contains("Custom"));
     }

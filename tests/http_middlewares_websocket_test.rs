@@ -1,19 +1,19 @@
 #[cfg(test)]
 mod websocket_tests {
     use aex::{
-        connection::{ context::Context, global::GlobalContext },
+        connection::{context::Context, global::GlobalContext},
         http::{
             middlewares::websocket::WebSocket,
-            protocol::{ header::HeaderKey, method::HttpMethod },
-            websocket::{ WSCodec, WSFrame },
+            protocol::{header::HeaderKey, method::HttpMethod},
+            websocket::{WSCodec, WSFrame},
         },
-        tcp::types::{ Command, Frame },
+        tcp::types::{Command, Frame},
     };
-    use futures::{ SinkExt, StreamExt };
-    use tokio::io::{ BufReader, duplex };
-    use tokio_util::codec::{ Decoder, Encoder, Framed };
     use bytes::BytesMut;
-    use std::{ collections::HashMap, net::SocketAddr, sync::Arc };
+    use futures::{SinkExt, StreamExt};
+    use std::{collections::HashMap, net::SocketAddr, sync::Arc};
+    use tokio::io::{BufReader, duplex};
+    use tokio_util::codec::{Decoder, Encoder, Framed};
 
     // 辅助工具：模拟客户端发送带 Mask 的 WebSocket 帧
     fn create_masked_frame(opcode: u8, payload: &[u8]) -> Vec<u8> {
@@ -83,16 +83,14 @@ mod websocket_tests {
 
         // 模拟业务逻辑：收到任何消息都回复 "ACK"
         let ws = WebSocket {
-            on_frame: Some(
-                Arc::new(|_ws, _ctx, frame| {
-                    Box::pin(async move {
-                        match frame {
-                            WSFrame::Text(t) if t == "ping" => true,
-                            _ => false, // 收到非 ping 则断开
-                        }
-                    })
+            on_frame: Some(Arc::new(|_ws, _ctx, frame| {
+                Box::pin(async move {
+                    match frame {
+                        WSFrame::Text(t) if t == "ping" => true,
+                        _ => false, // 收到非 ping 则断开
+                    }
                 })
-            ),
+            })),
         };
 
         // 启动服务器循环
@@ -104,13 +102,11 @@ mod websocket_tests {
 
         // 3. 构造满足 Context::new 签名要求的参数
         // 注意：必须明确指定类型以匹配 dyn Trait
-        let reader_param: Option<Box<dyn tokio::io::AsyncBufRead + Send + Sync + Unpin>> = Some(
-            Box::new(s_reader_buffered)
-        );
+        let reader_param: Option<Box<dyn tokio::io::AsyncBufRead + Send + Sync + Unpin>> =
+            Some(Box::new(s_reader_buffered));
 
-        let writer_param: Option<Box<dyn tokio::io::AsyncWrite + Send + Sync + Unpin>> = Some(
-            Box::new(s_writer)
-        );
+        let writer_param: Option<Box<dyn tokio::io::AsyncWrite + Send + Sync + Unpin>> =
+            Some(Box::new(s_writer));
         let addr = "127.0.0.1:8080".parse::<SocketAddr>().unwrap();
         let global = Arc::new(GlobalContext::new(addr, None));
 
@@ -122,10 +118,16 @@ mod websocket_tests {
         let mut client_framed = Framed::new(client, WSCodec);
 
         // 发送合法 Text
-        client_framed.send(WSFrame::Text("ping".into())).await.unwrap();
+        client_framed
+            .send(WSFrame::Text("ping".into()))
+            .await
+            .unwrap();
 
         // 发送会导致 Handler 返回 false 的消息
-        client_framed.send(WSFrame::Text("die".into())).await.unwrap();
+        client_framed
+            .send(WSFrame::Text("die".into()))
+            .await
+            .unwrap();
 
         let res = server_handle.await.unwrap();
         assert!(res.is_ok());
@@ -187,34 +189,28 @@ mod websocket_tests {
 
         // 1. 定义更复杂的业务逻辑
         let ws = WebSocket {
-            on_frame: Some(
-                Arc::new(|_ws, _ctx, frame| {
-                    Box::pin(async move {
-                        match frame {
-                            WSFrame::Binary(data) => {
-                                // 收到二进制数据，验证内容
-                                assert_eq!(data, vec![0xde, 0xad]);
-                                true
-                            }
-                            WSFrame::Text(t) if t == "exit" => false, // 自定义指令：退出
-                            WSFrame::Ping(_) => true, // 允许 Ping 穿透到默认处理器（自动回 Pong）
-                            _ => true,
+            on_frame: Some(Arc::new(|_ws, _ctx, frame| {
+                Box::pin(async move {
+                    match frame {
+                        WSFrame::Binary(data) => {
+                            // 收到二进制数据，验证内容
+                            assert_eq!(data, vec![0xde, 0xad]);
+                            true
                         }
-                    })
+                        WSFrame::Text(t) if t == "exit" => false, // 自定义指令：退出
+                        WSFrame::Ping(_) => true, // 允许 Ping 穿透到默认处理器（自动回 Pong）
+                        _ => true,
+                    }
                 })
-            ),
+            })),
         };
 
         // 2. 准备 Server Context
         let (s_reader, s_writer) = tokio::io::split(server);
-        let ctx_reader = Some(
-            Box::new(BufReader::new(s_reader)) as Box<
-                dyn tokio::io::AsyncBufRead + Send + Sync + Unpin
-            >
-        );
-        let ctx_writer = Some(
-            Box::new(s_writer) as Box<dyn tokio::io::AsyncWrite + Send + Sync + Unpin>
-        );
+        let ctx_reader = Some(Box::new(BufReader::new(s_reader))
+            as Box<dyn tokio::io::AsyncBufRead + Send + Sync + Unpin>);
+        let ctx_writer =
+            Some(Box::new(s_writer) as Box<dyn tokio::io::AsyncWrite + Send + Sync + Unpin>);
         let mut ctx = Context::new(ctx_reader, ctx_writer, global, addr);
 
         // 3. 启动 Server
@@ -225,7 +221,10 @@ mod websocket_tests {
 
         // --- A. 测试 Ping/Pong ---
         // 发送 Ping，负载为 [1, 2, 3]
-        client_framed.send(WSFrame::Ping(vec![1, 2, 3])).await.unwrap();
+        client_framed
+            .send(WSFrame::Ping(vec![1, 2, 3]))
+            .await
+            .unwrap();
         // 期待收到 Pong
         if let Some(Ok(WSFrame::Pong(payload))) = client_framed.next().await {
             assert_eq!(payload, vec![1, 2, 3]);
@@ -234,10 +233,16 @@ mod websocket_tests {
         }
 
         // --- B. 测试 Binary ---
-        client_framed.send(WSFrame::Binary(vec![0xde, 0xad])).await.unwrap();
+        client_framed
+            .send(WSFrame::Binary(vec![0xde, 0xad]))
+            .await
+            .unwrap();
 
         // --- C. 测试自定义指令 (Text: exit) ---
-        client_framed.send(WSFrame::Text("exit".into())).await.unwrap();
+        client_framed
+            .send(WSFrame::Text("exit".into()))
+            .await
+            .unwrap();
 
         // 5. 验证服务是否正常关闭
         let res = server_handle.await.unwrap();
@@ -331,7 +336,11 @@ mod websocket_tests {
         codec.encode(pong_out, &mut buf).unwrap();
 
         assert_eq!(buf[0], 0x8a, "First byte must be 0x8A (FIN + Pong)");
-        assert_eq!(buf[1], test_payload.len() as u8, "Payload length must match");
+        assert_eq!(
+            buf[1],
+            test_payload.len() as u8,
+            "Payload length must match"
+        );
         assert_eq!(&buf[2..], test_payload, "Raw payload must match");
         buf.clear();
 
@@ -355,7 +364,10 @@ mod websocket_tests {
             .expect("Should return a frame");
 
         if let WSFrame::Pong(p) = result {
-            assert_eq!(p, test_payload, "Decoded Pong payload must be unmasked correctly");
+            assert_eq!(
+                p, test_payload,
+                "Decoded Pong payload must be unmasked correctly"
+            );
         } else {
             panic!("Decoded frame was not a Pong variant");
         }
@@ -377,7 +389,7 @@ mod websocket_tests {
             Some(Box::new(BufReader::new(r))),
             Some(Box::new(w)),
             global,
-            addr
+            addr,
         );
 
         tokio::spawn(async move {
@@ -386,11 +398,17 @@ mod websocket_tests {
 
         // 客户端发送带特定负载的 Ping
         let secret_payload = vec![0x42, 0x43, 0x44];
-        client_framed.send(WSFrame::Ping(secret_payload.clone())).await.unwrap();
+        client_framed
+            .send(WSFrame::Ping(secret_payload.clone()))
+            .await
+            .unwrap();
 
         // 验证客户端收到的 Pong 是否携带了相同的负载
         if let Some(Ok(WSFrame::Pong(received_payload))) = client_framed.next().await {
-            assert_eq!(received_payload, secret_payload, "Pong must echo the Ping payload exactly");
+            assert_eq!(
+                received_payload, secret_payload,
+                "Pong must echo the Ping payload exactly"
+            );
         } else {
             panic!("Did not receive the expected Pong frame");
         }
@@ -417,7 +435,10 @@ mod websocket_tests {
         let mut decode_buf = bytes::BytesMut::from(&raw_input[..]);
 
         // 1. 解码验证
-        let result = codec.decode(&mut decode_buf).unwrap().expect("Should decode a frame");
+        let result = codec
+            .decode(&mut decode_buf)
+            .unwrap()
+            .expect("Should decode a frame");
 
         // 验证变体识别是否与 Opcode 2 对应
         if let WSFrame::Binary(p) = result {
@@ -525,7 +546,9 @@ mod websocket_tests {
         // 只有 1 个字节，无法判断 Opcode 和 Mask 标志
         let mut src = bytes::BytesMut::from(&[0x81][..]);
 
-        let result = codec.decode(&mut src).expect("Decode should not error on partial data");
+        let result = codec
+            .decode(&mut src)
+            .expect("Decode should not error on partial data");
         assert!(result.is_none(), "Header < 2 bytes should return None");
         assert_eq!(src.len(), 1, "Should not consume bytes");
     }
@@ -562,7 +585,10 @@ mod websocket_tests {
         src.extend_from_slice(&[0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01]);
 
         let result = codec.decode(&mut src).expect("Decode fail");
-        assert!(result.is_none(), "Should return None when src.len() < 10 for 127-mode");
+        assert!(
+            result.is_none(),
+            "Should return None when src.len() < 10 for 127-mode"
+        );
         assert_eq!(src.len(), 9);
     }
 
@@ -577,7 +603,10 @@ mod websocket_tests {
         src.extend_from_slice(&(200u16).to_be_bytes()); // 扩展长度设为 200
 
         // 目前 src.len() = 4，虽然满足了长度读取，但 Mask Key 还没收齐
-        assert!(codec.decode(&mut src).unwrap().is_none(), "Should wait for 4-byte mask key");
+        assert!(
+            codec.decode(&mut src).unwrap().is_none(),
+            "Should wait for 4-byte mask key"
+        );
 
         // 补齐 3 字节 Mask，还是不够
         src.extend_from_slice(&[0x01, 0x02, 0x03]);
@@ -595,11 +624,17 @@ mod websocket_tests {
 
         // 1. 测试 head_len 增加后的第一个边界：不足 10 字节 (2 基础 + 8 扩展)
         // 目前只有 2 字节，还差 8 字节扩展长度
-        assert!(codec.decode(&mut src).unwrap().is_none(), "必须等待 8 字节扩展长度");
+        assert!(
+            codec.decode(&mut src).unwrap().is_none(),
+            "必须等待 8 字节扩展长度"
+        );
 
         // 2. 模拟收到 4 字节扩展长度 (总计 6 字节)
         src.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]);
-        assert!(codec.decode(&mut src).unwrap().is_none(), "扩展长度未收齐时应返回 None");
+        assert!(
+            codec.decode(&mut src).unwrap().is_none(),
+            "扩展长度未收齐时应返回 None"
+        );
 
         // 3. 补齐剩下的 4 字节扩展长度 (总计 10 字节)
         // 现在 8 字节扩展长度收齐了，但因为有 Mask 标志，还需要 4 字节掩码
@@ -738,7 +773,12 @@ mod websocket_tests {
         };
 
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Unsupported opcode: 0x10"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Unsupported opcode: 0x10")
+        );
     }
 
     #[test]
@@ -845,12 +885,20 @@ mod websocket_tests {
         // --- 2. ReservedNonControl (0x3..0x7) ---
         let data3 = vec![0x33, 0x44];
         let f3 = WSFrame::ReservedNonControl(0x3, data3.clone());
-        assert_eq!(f3.payload(), Some(data3), "ReservedNonControl 必须导出其载荷数据");
+        assert_eq!(
+            f3.payload(),
+            Some(data3),
+            "ReservedNonControl 必须导出其载荷数据"
+        );
 
         // --- 3. ReservedControl (0xB..0xF) ---
         let datab = vec![0x55, 0x66];
         let fb = WSFrame::ReservedControl(0xb, datab.clone());
-        assert_eq!(fb.payload(), Some(datab), "ReservedControl 必须导出其载荷数据");
+        assert_eq!(
+            fb.payload(),
+            Some(datab),
+            "ReservedControl 必须导出其载荷数据"
+        );
     }
 
     #[test]

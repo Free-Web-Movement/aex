@@ -4,7 +4,6 @@ mod tests {
     use chrono::Utc;
     use x25519_dalek::PublicKey;
 
-
     #[test]
     fn test_full_handshake_and_communication() -> anyhow::Result<()> {
         // 1. 初始化两个对端
@@ -29,7 +28,7 @@ mod tests {
 
         // 5. 测试加密与解密
         let message = b"Hello, Zero Trust P2P!";
-        
+
         // Alice 加密
         let ciphertext = alice.encrypt(message)?;
         // 密文长度应为：Nonce(24 bytes) + Tag(16 bytes) + Message(22 bytes) = 62
@@ -77,10 +76,10 @@ mod tests {
         bob.establish(&alice.ephemeral_public)?;
 
         let mut ciphertext = alice.encrypt(b"Original Data")?;
-        
+
         // 篡改密文最后一个字节（通常属于 Poly1305 Tag）
         if let Some(last) = ciphertext.last_mut() {
-            *last ^= 0xFF; 
+            *last ^= 0xFF;
         }
 
         // 解密必须失败（AEAD 完整性校验）

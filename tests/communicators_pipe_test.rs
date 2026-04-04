@@ -1,8 +1,11 @@
 #[cfg(test)]
 mod tests {
-    use std::sync::{ Arc, atomic::{ AtomicUsize, Ordering } };
     use aex::communicators::pipe::PipeManager;
     use futures::future::FutureExt;
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
 
     #[tokio::test]
     async fn test_pipe_register_and_send_success() {
@@ -16,18 +19,24 @@ mod tests {
                 "add_one",
                 Box::new(move |val: usize| {
                     let c = Arc::clone(&counter_clone);
-                    (
-                        async move {
-                            c.fetch_add(val, Ordering::SeqCst);
-                        }
-                    ).boxed()
-                })
-            ).await
+                    (async move {
+                        c.fetch_add(val, Ordering::SeqCst);
+                    })
+                    .boxed()
+                }),
+            )
+            .await
             .expect("Register should succeed");
 
         // 2. 发送端投递：模拟多个生产者发送数据
-        manager.send("add_one", 10usize).await.expect("Send 1 should succeed");
-        manager.send("add_one", 20usize).await.expect("Send 2 should succeed");
+        manager
+            .send("add_one", 10usize)
+            .await
+            .expect("Send 1 should succeed");
+        manager
+            .send("add_one", 20usize)
+            .await
+            .expect("Send 2 should succeed");
 
         // 3. 给异步任务一点处理时间
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
@@ -40,17 +49,15 @@ mod tests {
         let manager = PipeManager::new();
 
         // 第一次注册成功
-        let res1 = manager.register(
-            "unique_pipe",
-            Box::new(|_: String| (async {}).boxed())
-        ).await;
+        let res1 = manager
+            .register("unique_pipe", Box::new(|_: String| (async {}).boxed()))
+            .await;
         assert!(res1.is_ok());
 
         // 第二次注册同名管道，应该返回 Err
-        let res2 = manager.register(
-            "unique_pipe",
-            Box::new(|_: String| (async {}).boxed())
-        ).await;
+        let res2 = manager
+            .register("unique_pipe", Box::new(|_: String| (async {}).boxed()))
+            .await;
         assert!(res2.is_err());
         assert!(res2.unwrap_err().contains("already in use"));
     }
@@ -61,10 +68,8 @@ mod tests {
 
         // 注册为处理 String 的管道
         manager
-            .register(
-                "string_pipe",
-                Box::new(|_: String| (async {}).boxed())
-            ).await
+            .register("string_pipe", Box::new(|_: String| (async {}).boxed()))
+            .await
             .unwrap();
 
         // 尝试发送 i32 类型，应该返回类型不匹配错误
@@ -96,15 +101,11 @@ mod tests {
         for _ in 0..num_tasks {
             let mgr = Arc::clone(&manager);
             let bar = Arc::clone(&barrier);
-            handles.push(
-                tokio::spawn(async move {
-                    bar.wait().await;
-                    mgr.register(
-                        pipe_name,
-                        Box::new(|_: String| (async {}).boxed())
-                    ).await
-                })
-            );
+            handles.push(tokio::spawn(async move {
+                bar.wait().await;
+                mgr.register(pipe_name, Box::new(|_: String| (async {}).boxed()))
+                    .await
+            }));
         }
 
         let mut results = Vec::new();
@@ -112,14 +113,8 @@ mod tests {
             results.push(h.await.unwrap());
         }
 
-        let ok_count = results
-            .iter()
-            .filter(|r| r.is_ok())
-            .count();
-        let err_count = results
-            .iter()
-            .filter(|r| r.is_err())
-            .count();
+        let ok_count = results.iter().filter(|r| r.is_ok()).count();
+        let err_count = results.iter().filter(|r| r.is_err()).count();
 
         assert_eq!(ok_count, 1);
         assert_eq!(err_count, num_tasks - 1);

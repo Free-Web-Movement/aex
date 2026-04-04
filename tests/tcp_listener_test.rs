@@ -1,9 +1,12 @@
 #[cfg(test)]
 mod tests {
-    
+
     use aex::tcp::listeners::{Listener, TCPHandler};
-    use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::{TcpListener, TcpStream}};
     use std::{net::SocketAddr, sync::Arc};
+    use tokio::{
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::{TcpListener, TcpStream},
+    };
 
     #[tokio::test]
     async fn test_tcp_handler_full_flow() {
@@ -14,7 +17,7 @@ mod tests {
             listener: None,
         };
         handler_obj.listen().await.expect("Listen failed");
-        
+
         let local_addr = handler_obj.listener.as_ref().unwrap().local_addr().unwrap();
 
         // 2. 解决生命周期问题：
@@ -24,13 +27,18 @@ mod tests {
 
         // 3. 运行 accept
         let accept_handle = tokio::spawn(async move {
-            handler_clone.accept(|mut stream, _addr| async move {
-                let _ = stream.write_all(b"hello").await;
-            }).await.expect("Accept loop failed");
+            handler_clone
+                .accept(|mut stream, _addr| async move {
+                    let _ = stream.write_all(b"hello").await;
+                })
+                .await
+                .expect("Accept loop failed");
         });
 
         // 4. 模拟客户端
-        let mut client = TcpStream::connect(local_addr).await.expect("Connect failed");
+        let mut client = TcpStream::connect(local_addr)
+            .await
+            .expect("Connect failed");
         let mut buffer = [0u8; 5];
         client.read_exact(&mut buffer).await.unwrap();
         assert_eq!(&buffer, b"hello");
@@ -49,7 +57,12 @@ mod tests {
 
         let result = handler_obj.accept(|_, _| async {}).await;
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Listener not bound"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Listener not bound")
+        );
     }
 
     #[tokio::test]

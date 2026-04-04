@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::fmt;
-use std::hash::Hasher;
 use std::hash::Hash;
+use std::hash::Hasher;
 use std::ops::Deref;
 
 macro_rules! define_header_keys {

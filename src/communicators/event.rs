@@ -1,4 +1,4 @@
-use futures::future::{ BoxFuture, FutureExt };
+use futures::future::{BoxFuture, FutureExt};
 use std::any::Any;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -8,13 +8,15 @@ use tokio::sync::RwLock;
 pub type EventCallback<D> = Arc<dyn (Fn(D) -> BoxFuture<'static, ()>) + Send + Sync>;
 
 // 2. 改进后的 Event Trait：不再强制要求返回特定类型的 Map
-pub trait Event<D> where D: Clone + Send + Sync + 'static {
+pub trait Event<D>
+where
+    D: Clone + Send + Sync + 'static,
+{
     /// 这里返回的是擦除类型后的原始 Map
     fn map(&self) -> Arc<RwLock<HashMap<String, Vec<Box<dyn Any + Send + Sync>>>>>;
 
     /// 注册接收器
-    fn _on(&self, event_name: String, callback: EventCallback<D>) -> impl Future<Output = ()>
-    {
+    fn _on(&self, event_name: String, callback: EventCallback<D>) -> impl Future<Output = ()> {
         async {
             let handlers = self.map();
             // 使用异步等待锁，而不是阻塞线程
@@ -31,24 +33,23 @@ pub trait Event<D> where D: Clone + Send + Sync + 'static {
         let handlers_lock = self.map();
         let data = data.clone();
 
-        (
-            async move {
-                let map = handlers_lock.read().await;
-                if let Some(any_callbacks) = map.get(&event_name) {
-                    for any_cb in any_callbacks {
-                        // 核心逻辑：在这里进行动态类型转换
-                        if let Some(cb) = any_cb.downcast_ref::<EventCallback<D>>() {
-                            let d = data.clone();
-                            let cb_clone = Arc::clone(cb);
-                            tokio::spawn(async move {
-                                cb_clone(d).await;
-                            });
-                        }
-                        // 如果类型不匹配，这里会静默跳过，这符合多对多的“订阅/过滤”语义
+        (async move {
+            let map = handlers_lock.read().await;
+            if let Some(any_callbacks) = map.get(&event_name) {
+                for any_cb in any_callbacks {
+                    // 核心逻辑：在这里进行动态类型转换
+                    if let Some(cb) = any_cb.downcast_ref::<EventCallback<D>>() {
+                        let d = data.clone();
+                        let cb_clone = Arc::clone(cb);
+                        tokio::spawn(async move {
+                            cb_clone(d).await;
+                        });
                     }
+                    // 如果类型不匹配，这里会静默跳过，这符合多对多的“订阅/过滤”语义
                 }
             }
-        ).boxed()
+        })
+        .boxed()
     }
 }
 
@@ -70,8 +71,9 @@ impl EventEmitter {
         }
     }
 
-    pub async fn on<D>(&self, name: String, cb: EventCallback<D>) 
-    where D: Clone + Send + Sync + 'static 
+    pub async fn on<D>(&self, name: String, cb: EventCallback<D>)
+    where
+        D: Clone + Send + Sync + 'static,
     {
         // 内部调用 Trait 方法
         Event::<D>::_on(self, name, cb).await;
@@ -79,7 +81,10 @@ impl EventEmitter {
 }
 
 // 4. 让 EventEmitter 支持任何符合条件的 D
-impl<D> Event<D> for EventEmitter where D: Clone + Send + Sync + 'static {
+impl<D> Event<D> for EventEmitter
+where
+    D: Clone + Send + Sync + 'static,
+{
     fn map(&self) -> Arc<RwLock<HashMap<String, Vec<Box<dyn Any + Send + Sync>>>>> {
         Arc::clone(&self.handlers)
     }

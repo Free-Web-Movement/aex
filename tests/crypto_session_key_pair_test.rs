@@ -183,11 +183,11 @@ mod tests {
     #[tokio::test]
     async fn test_establish_ends_flow() -> Result<()> {
         let manager = PairedSessionKey::new(16);
-        
+
         // 1. 模拟初始化阶段：服务端生成临时 Session 并发给客户端自己的公钥
         // 此时 is_main = false，SessionKey 存在 temp 中
         let (session_id, _server_pub) = manager.create(false).await;
-        
+
         {
             let temp_map = manager.temp.lock().await;
             assert!(temp_map.contains_key(&session_id), "应该在临时表中");
@@ -199,17 +199,25 @@ mod tests {
         let client_pub_bytes = client_pub.as_bytes();
 
         // 3. 服务端调用 establish_ends：处理客户端公钥，并将 session 移至 main
-        let success = manager.establish_ends(session_id.clone(), client_pub_bytes).await?;
+        let success = manager
+            .establish_ends(session_id.clone(), client_pub_bytes)
+            .await?;
         assert!(success, "握手结束阶段应返回 true");
 
         // 4. 验证状态迁移
         {
             let temp_map = manager.temp.lock().await;
             let main_map = manager.main.read().await;
-            
-            assert!(!temp_map.contains_key(&session_id), "临时表应该已经移除该 Session");
-            assert!(main_map.contains_key(&session_id), "正式表应该已经存入该 Session");
-            
+
+            assert!(
+                !temp_map.contains_key(&session_id),
+                "临时表应该已经移除该 Session"
+            );
+            assert!(
+                main_map.contains_key(&session_id),
+                "正式表应该已经存入该 Session"
+            );
+
             // 验证 key 字段是否已经从 None 变成了 Some（即握手完成，对称密钥已生成）
             let sk = main_map.get(&session_id).unwrap();
             assert!(sk.key.is_some(), "对称密钥 session_key 应该已经生成");

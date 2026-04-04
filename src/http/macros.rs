@@ -104,8 +104,7 @@ macro_rules! all {
 // -----------------------------
 #[macro_export]
 macro_rules! route {
-    ($root:expr, $method_macro:expr) => {
-        {
+    ($root:expr, $method_macro:expr) => {{
         let (method, path, handler, middleware) = $method_macro;
         $root.insert(
             path,
@@ -113,15 +112,13 @@ macro_rules! route {
             handler,
             middleware,
         );
-        }
-    };
+    }};
 }
 
 #[macro_export]
 macro_rules! exe {
     // 带有 pre 处理的分支
-    (| $ctx:ident, $data:ident | $body:block, | $pre_ctx:ident | $pre:block) => {
-        {
+    (| $ctx:ident, $data:ident | $body:block, | $pre_ctx:ident | $pre:block) => {{
         use futures::future::FutureExt;
         use std::sync::Arc;
         use $crate::connection::context::Context;
@@ -143,12 +140,10 @@ macro_rules! exe {
             .boxed() // 相当于 Box::pin(async move { ... })
         });
         executor
-        }
-    };
+    }};
 
     // 仅 body 的分支
-    (| $ctx:ident | $body:block) => {
-        {
+    (| $ctx:ident | $body:block) => {{
         use futures::future::FutureExt;
         use std::sync::Arc;
         use $crate::connection::context::Context;
@@ -157,8 +152,7 @@ macro_rules! exe {
         let executor: Arc<Executor> =
             Arc::new(move |$ctx: &mut Context| async move { $body }.boxed());
         executor
-        }
-    };
+    }};
 }
 
 #[macro_export]
@@ -205,10 +199,10 @@ macro_rules! body {
 
             // 自动插入到 Headers 集合中
             meta.headers.insert(
-                HeaderKey::ContentLength, 
+                HeaderKey::ContentLength,
                 len.to_string()
             );
-            
+
             // 赋值 Body
             meta.body = bytes;
             $ctx.local.set_value::<HttpMetadata>(meta);
@@ -221,8 +215,8 @@ macro_rules! body {
             // 注意：在调用自身时，最好使用 $crate::body 以防作用域冲突
             $(
                 $ctx.meta.headers.insert($key, $val.into());
-            )*     
-            $crate::body!($ctx, $content); 
+            )*
+            $crate::body!($ctx, $content);
 
         }
     };

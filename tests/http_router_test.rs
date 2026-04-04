@@ -20,7 +20,7 @@ mod tests {
             types::{Executor, to_executor},
         },
         route,
-        server::{Server, HTTPServer},
+        server::{HTTPServer, Server},
         tcp::types::{Command, RawCodec},
     };
     use futures::FutureExt;
@@ -144,7 +144,10 @@ mod tests {
         let server = server.http(hr).clone();
 
         tokio::spawn(async move {
-            if let Err(e) = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await {
+            if let Err(e) = server
+                .start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id()))
+                .await
+            {
                 eprintln!("Server exit: {}", e);
             }
         });
@@ -245,7 +248,9 @@ mod tests {
         let server = server.http(hr).clone();
 
         tokio::spawn(async move {
-            let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;
+            let _ = server
+                .start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id()))
+                .await;
         });
 
         // --- 4. 发起真实请求验证 ---
@@ -324,7 +329,9 @@ mod tests {
         let server = HTTPServer::new(actual_addr, None);
         let server = server.http(hr).clone();
         tokio::spawn(async move {
-            let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;
+            let _ = server
+                .start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id()))
+                .await;
         });
 
         sleep(Duration::from_millis(200)).await;
@@ -353,7 +360,9 @@ mod tests {
         let server = Server::new(actual_addr, None);
         let server = server.http(hr).clone();
         tokio::spawn(async move {
-            let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;
+            let _ = server
+                .start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id()))
+                .await;
         });
 
         tokio::time::sleep(Duration::from_millis(200)).await;
@@ -432,7 +441,9 @@ mod tests {
         let server = HTTPServer::new(actual_addr, None);
         let server = server.http(hr).clone();
         tokio::spawn(async move {
-            let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;
+            let _ = server
+                .start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id()))
+                .await;
         });
 
         tokio::time::sleep(Duration::from_millis(200)).await;
@@ -490,7 +501,9 @@ mod tests {
         let server = HTTPServer::new(actual_addr, None);
         let server = server.http(hr).clone();
         tokio::spawn(async move {
-            let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;
+            let _ = server
+                .start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id()))
+                .await;
         });
 
         sleep(Duration::from_millis(200)).await;
@@ -553,7 +566,9 @@ mod tests {
         let server = HTTPServer::new(actual_addr, None);
         let server = server.http(hr).clone();
         tokio::spawn(async move {
-            let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;
+            let _ = server
+                .start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id()))
+                .await;
         });
 
         tokio::time::sleep(Duration::from_millis(200)).await;
@@ -617,7 +632,9 @@ mod tests {
 
         let server = server.http(hr).clone();
         tokio::spawn(async move {
-            let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;
+            let _ = server
+                .start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id()))
+                .await;
         });
 
         tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
@@ -691,7 +708,9 @@ mod tests {
 
         let server = HTTPServer::new(actual_addr, None).http(hr).clone();
         tokio::spawn(async move {
-            let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;
+            let _ = server
+                .start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id()))
+                .await;
         });
 
         // 给服务器起步时间，避免 Connection Refused
@@ -718,7 +737,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_full_macros_suite() {
-         // 使用标准库锁简化测试代码中的同步操作
+        // 使用标准库锁简化测试代码中的同步操作
 
         let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
         let actual_addr = tokio::net::TcpListener::bind(addr)
@@ -759,7 +778,9 @@ mod tests {
         // --- 4. 启动服务器 ---
         let server = HTTPServer::new(actual_addr, None).http(hr).clone();
         tokio::spawn(async move {
-            let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;
+            let _ = server
+                .start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id()))
+                .await;
         });
 
         tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
@@ -804,15 +825,16 @@ mod tests {
             |ctx, info| {
                 // 将 pre 块提取的 info 放入 Response Header 传回 client
                 let mut meta = ctx.local.get_value::<HttpMetadata>().unwrap();
-                meta.headers.insert(HeaderKey::from_str("X-Macro-Info").unwrap(), info);
+                meta.headers
+                    .insert(HeaderKey::from_str("X-Macro-Info").unwrap(), info);
                 ctx.local.set_value(meta);
-                
+
                 async move { true }.await;
                 true
             },
-            |_ctx| { 
+            |_ctx| {
                 // pre 块：这里可以根据不同请求生成动态数据
-                "processed-by-macro".to_string() 
+                "processed-by-macro".to_string()
             }
         );
 
@@ -831,7 +853,9 @@ mod tests {
         // --- 4. 启动服务器 ---
         let server = HTTPServer::new(actual_addr, None).http(hr).clone();
         tokio::spawn(async move {
-            let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await;
+            let _ = server
+                .start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id()))
+                .await;
         });
 
         tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
@@ -847,7 +871,10 @@ mod tests {
             .expect("POST request failed");
 
         // 检查 Header 是否含有中间件注入的信息
-        assert_eq!(resp_all.headers().get("X-Macro-Info").unwrap(), "processed-by-macro");
+        assert_eq!(
+            resp_all.headers().get("X-Macro-Info").unwrap(),
+            "processed-by-macro"
+        );
         // 检查 Body 是否由 Handler 正确设置
         assert_eq!(resp_all.text().await.unwrap(), "Macro OK");
 

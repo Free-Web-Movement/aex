@@ -10,7 +10,7 @@
 //         // 1. 初始化基础环境
 //         let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
 //         let global = Arc::new(GlobalContext::new(addr));
-        
+
 //         // 2. 使用 to_executor 包装一个复杂的异步业务逻辑
 //         let executor = to_executor(|ctx| {
 //             async move {
@@ -41,7 +41,7 @@
 //         // 5. 断言
 //         assert!(result, "Executor 逻辑应返回 true");
 //         assert_eq!(ctx.local.get_value::<String>(), Some("auth_token".to_string()));
-        
+
 //         // 验证 Writer 是否真的被 Executor 修改了
 //         let final_writer = ctx.writer.lock().await;
 //         assert!(final_writer.ends_with(b"executed"));

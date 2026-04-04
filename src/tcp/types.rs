@@ -89,7 +89,6 @@ pub trait Command: Codec {
 #[derive(Serialize, Deserialize, Encode, Decode, Debug, Clone)]
 pub struct RawCodec(pub Vec<u8>);
 
-
 impl Codec for RawCodec {}
 impl Frame for RawCodec {
     fn payload(&self) -> Option<Vec<u8>> {

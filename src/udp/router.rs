@@ -34,7 +34,8 @@ impl Router {
     where
         F: Frame + Send + Sync + Clone + 'static,
         C: Command + Send + Sync + 'static,
-        FFut: Fn(Arc<GlobalContext>, F, C, SocketAddr, Arc<UdpSocket>) -> Fut + Send + Sync + 'static,
+        FFut:
+            Fn(Arc<GlobalContext>, F, C, SocketAddr, Arc<UdpSocket>) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = anyhow::Result<bool>> + Send + 'static,
     {
         // ⚡ 修正：直接构造 Box<UdpHandler<C>>
@@ -54,7 +55,7 @@ impl Router {
         extractor: IDExtractor<C>,
     ) -> anyhow::Result<()>
     where
-        F: Frame + Send + Sync + Clone +'static,
+        F: Frame + Send + Sync + Clone + 'static,
         C: Command + Send + Sync + 'static,
     {
         let mut buf = [0u8; 65535];
@@ -105,7 +106,8 @@ impl Router {
                 if let Some(cmd) = final_cmd {
                     if let Some(any_handler) = router_ctx.handlers.get(&key) {
                         if let Some(handler) = any_handler.downcast_ref::<Box<UdpHandler<F, C>>>() {
-                            if let Err(e) = handler(global, frame, cmd, peer_addr, socket_ctx).await {
+                            if let Err(e) = handler(global, frame, cmd, peer_addr, socket_ctx).await
+                            {
                                 eprintln!("[UDP Handler Error]: {:?}", e);
                             }
                         }

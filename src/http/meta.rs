@@ -1,6 +1,12 @@
 use std::collections::HashMap;
 
-use crate::http::{params::Params, protocol::{content_type::ContentType, header::Headers, method::HttpMethod, status::StatusCode, version::HttpVersion}};
+use crate::http::{
+    params::Params,
+    protocol::{
+        content_type::ContentType, header::Headers, method::HttpMethod, status::StatusCode,
+        version::HttpVersion,
+    },
+};
 
 // 常规的HTTP请求元数据，供中间件和处理器使用
 #[derive(Debug, Clone)]
@@ -24,7 +30,6 @@ pub struct HttpMetadata {
     // 所以不直接放在HttpMetadata里，而是根据需要在中间件里动态解析和存储
     pub body: Vec<u8>, // 处理结果消息体（如验证错误信息等），默认空
 }
-
 
 impl Default for HttpMetadata {
     fn default() -> Self {

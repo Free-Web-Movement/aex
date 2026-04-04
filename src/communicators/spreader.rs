@@ -1,9 +1,8 @@
+use futures::future::BoxFuture;
 use std::any::Any;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{broadcast, RwLock};
-use futures::future::BoxFuture;
-
+use tokio::sync::{RwLock, broadcast};
 
 pub type SpreadCallback<T> = Box<dyn (Fn(T) -> BoxFuture<'static, ()>) + Send + Sync>;
 
@@ -20,7 +19,9 @@ impl Default for SpreadManager {
 
 impl SpreadManager {
     pub fn new() -> Self {
-        Self { hubs: RwLock::new(HashMap::new()) }
+        Self {
+            hubs: RwLock::new(HashMap::new()),
+        }
     }
 
     /// 【订阅消息】—— 频道的“生命源头”
@@ -65,7 +66,7 @@ impl SpreadManager {
         T: Clone + Send + Sync + 'static,
     {
         let map = self.hubs.read().await;
-        
+
         if let Some(any) = map.get(name) {
             if let Some(tx) = any.downcast_ref::<broadcast::Sender<T>>() {
                 // broadcast 的特点：如果没有 Receiver，send 也会成功，但数据会被丢弃

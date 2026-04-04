@@ -1,8 +1,9 @@
-
 #[cfg(test)]
 mod tests {
-    use aex::http::protocol::{content_type::ContentType, media_type::{MediaType, SubMediaType}};
-
+    use aex::http::protocol::{
+        content_type::ContentType,
+        media_type::{MediaType, SubMediaType},
+    };
 
     #[test]
     fn test_top_level_parse() {
@@ -17,7 +18,10 @@ mod tests {
         assert_eq!(ct.top_level, MediaType::Text);
         assert_eq!(ct.sub_type, SubMediaType::Html);
         assert_eq!(ct.parameters.len(), 1);
-        assert_eq!(ct.parameters[0], ("charset".to_string(), "UTF-8".to_string()));
+        assert_eq!(
+            ct.parameters[0],
+            ("charset".to_string(), "UTF-8".to_string())
+        );
 
         let ct2 = ContentType::parse("application/json");
         assert_eq!(ct2.top_level, MediaType::Application);
@@ -61,14 +65,20 @@ mod tests {
         // 测试空格处理、多个参数、带引号的参数
         let s = "text/html; charset=utf-8; boundary=\"something_special\"";
         let ct = ContentType::parse(s);
-        
+
         assert_eq!(ct.top_level.as_str(), "text");
         assert_eq!(ct.sub_type.as_str(), "html");
         assert_eq!(ct.parameters.len(), 2);
-        
-        assert_eq!(ct.parameters[0], ("charset".to_string(), "utf-8".to_string()));
+
+        assert_eq!(
+            ct.parameters[0],
+            ("charset".to_string(), "utf-8".to_string())
+        );
         // 关键点：trim_matches('"') 必须被覆盖到
-        assert_eq!(ct.parameters[1], ("boundary".to_string(), "something_special".to_string()));
+        assert_eq!(
+            ct.parameters[1],
+            ("boundary".to_string(), "something_special".to_string())
+        );
     }
 
     #[test]
@@ -76,12 +86,12 @@ mod tests {
         // 覆盖 type_split.next().unwrap_or("") 的空输入
         let ct = ContentType::parse("");
         assert_eq!(ct.top_level.as_str(), "unknown"); // 假设 from_str("") 返回 Empty/Unknown
-        
+
         // 覆盖只有一个 part 的情况
         let ct = ContentType::parse("application");
         assert_eq!(ct.top_level.as_str(), "application");
         assert_eq!(ct.sub_type.as_str(), "unknown"); // type_split.next() 此时为 None
-        
+
         // 覆盖参数没有 '=' 的情况
         let ct = ContentType::parse("text/plain; invalid_param");
         assert_eq!(ct.parameters[0].0, "invalid_param");
@@ -94,7 +104,8 @@ mod tests {
         let mut ct = ContentType::octet_stream();
         assert_eq!(ct.to_string(), "application/octet-stream");
 
-        ct.parameters.push(("boundary".to_string(), "abc".to_string()));
+        ct.parameters
+            .push(("boundary".to_string(), "abc".to_string()));
         assert_eq!(ct.to_string(), "application/octet-stream; boundary=abc");
     }
 

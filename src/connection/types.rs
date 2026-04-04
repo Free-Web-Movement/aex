@@ -4,7 +4,6 @@ use dashmap::DashMap;
 
 use crate::connection::entry::ConnectionEntry;
 
-
 #[derive(Debug, Clone)]
 pub struct BiDirectionalConnections {
     pub clients: DashMap<SocketAddr, Arc<ConnectionEntry>>,

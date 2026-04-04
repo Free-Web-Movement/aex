@@ -258,5 +258,4 @@ mod tests {
             assert!(!codec.is_trusted())
         }
     }
-
 }

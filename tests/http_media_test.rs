@@ -2,7 +2,6 @@
 mod tests {
     use aex::http::protocol::media_type::{MediaType, SubMediaType};
 
-    
     use std::path::Path;
 
     #[test]

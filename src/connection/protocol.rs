@@ -6,7 +6,7 @@ pub enum Protocol {
     Tcp,
     Udp,
     Http,
-    Ws,    // WebSocket
+    Ws,             // WebSocket
     Custom(String), // 扩展接口
 }
 

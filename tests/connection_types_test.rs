@@ -1,43 +1,79 @@
 #[cfg(test)]
 mod tests {
-    
-    use std::{net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr}, sync::{atomic::Ordering}};
-    use aex::connection::{entry::ConnectionEntry, node::Node, protocol::Protocol, scope::NetworkScope};
+
+    use aex::connection::{
+        entry::ConnectionEntry, node::Node, protocol::Protocol, scope::NetworkScope,
+    };
+    use std::{
+        net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+        sync::atomic::Ordering,
+    };
     use tokio_util::sync::CancellationToken;
 
     // --- 1. NetworkScope 测试 (覆盖 IPv4/v6 各种分类) ---
     #[test]
     fn test_network_scope_logic() {
         // IPv4 Intranet
-        assert_eq!(NetworkScope::from_ip(&IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))), NetworkScope::Intranet);
-        assert_eq!(NetworkScope::from_ip(&IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1))), NetworkScope::Intranet);
-        assert_eq!(NetworkScope::from_ip(&IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))), NetworkScope::Intranet);
-        assert_eq!(NetworkScope::from_ip(&IpAddr::V4(Ipv4Addr::new(169, 254, 1, 1))), NetworkScope::Intranet);
-        
+        assert_eq!(
+            NetworkScope::from_ip(&IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))),
+            NetworkScope::Intranet
+        );
+        assert_eq!(
+            NetworkScope::from_ip(&IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1))),
+            NetworkScope::Intranet
+        );
+        assert_eq!(
+            NetworkScope::from_ip(&IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))),
+            NetworkScope::Intranet
+        );
+        assert_eq!(
+            NetworkScope::from_ip(&IpAddr::V4(Ipv4Addr::new(169, 254, 1, 1))),
+            NetworkScope::Intranet
+        );
+
         // IPv4 Extranet
-        assert_eq!(NetworkScope::from_ip(&IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8))), NetworkScope::Extranet);
-        assert_eq!(NetworkScope::from_ip(&IpAddr::V4(Ipv4Addr::new(114, 114, 114, 114))), NetworkScope::Extranet);
+        assert_eq!(
+            NetworkScope::from_ip(&IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8))),
+            NetworkScope::Extranet
+        );
+        assert_eq!(
+            NetworkScope::from_ip(&IpAddr::V4(Ipv4Addr::new(114, 114, 114, 114))),
+            NetworkScope::Extranet
+        );
 
         // IPv6 Intranet
-        assert_eq!(NetworkScope::from_ip(&IpAddr::V6(Ipv6Addr::LOCALHOST)), NetworkScope::Intranet);
-        assert_eq!(NetworkScope::from_ip(&IpAddr::V6(Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 1))), NetworkScope::Intranet); // Link-local
-        assert_eq!(NetworkScope::from_ip(&IpAddr::V6(Ipv6Addr::new(0xfc00, 0, 0, 0, 0, 0, 0, 1))), NetworkScope::Intranet); // ULA
+        assert_eq!(
+            NetworkScope::from_ip(&IpAddr::V6(Ipv6Addr::LOCALHOST)),
+            NetworkScope::Intranet
+        );
+        assert_eq!(
+            NetworkScope::from_ip(&IpAddr::V6(Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 1))),
+            NetworkScope::Intranet
+        ); // Link-local
+        assert_eq!(
+            NetworkScope::from_ip(&IpAddr::V6(Ipv6Addr::new(0xfc00, 0, 0, 0, 0, 0, 0, 1))),
+            NetworkScope::Intranet
+        ); // ULA
 
         // IPv6 Extranet
-        assert_eq!(NetworkScope::from_ip(&IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1))), NetworkScope::Extranet);
+        assert_eq!(
+            NetworkScope::from_ip(&IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1))),
+            NetworkScope::Extranet
+        );
     }
 
-// --- 2. ConnectionEntry 逻辑测试 ---
+    // --- 2. ConnectionEntry 逻辑测试 ---
     #[tokio::test]
     async fn test_connection_entry_lifecycle() {
         let addr: SocketAddr = "127.0.0.1:8080".parse().unwrap();
         let token = CancellationToken::new();
-        
+
         // 创建一个真正的任务以获取 AbortHandle
         let handle = tokio::spawn(async {
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-        }).abort_handle();
-        
+        })
+        .abort_handle();
+
         // 1. 测试 new_empty_node (初始状态 node 应该是 None)
         let entry = ConnectionEntry::new_empty_node(addr, None, handle, token);
 
@@ -51,8 +87,8 @@ mod tests {
         let node_id = b"fixed_node_id_32_bytes__________".to_vec();
         let mock_node = Node::from_addr(
             "192.168.1.100:9000".parse().unwrap(),
-            Some(3),           // version
-            Some(node_id.clone()) // id
+            Some(3),               // version
+            Some(node_id.clone()), // id
         );
 
         // 3. 测试 update_node (验证异步写锁)
@@ -78,10 +114,10 @@ mod tests {
         let addr: SocketAddr = "127.0.0.1:8080".parse().unwrap();
         // let writer: (AsyncWrite + Send + Unpin) = mock_writer().await;
         let entry = ConnectionEntry::new_empty_node(
-            addr, 
+            addr,
             None,
-            tokio::spawn(async {}).abort_handle(), 
-            CancellationToken::new()
+            tokio::spawn(async {}).abort_handle(),
+            CancellationToken::new(),
         );
 
         let now = entry.connected_at;
@@ -97,7 +133,7 @@ mod tests {
         entry.last_seen.store(now + 10, Ordering::SeqCst);
         // 当前时间 now + 50，距离上次活跃过去了 40s，超过了 timeout(30)
         assert!(entry.is_deactivated(now + 50, 30, 1000));
-        
+
         // 路径 4: 时间倒流或边界 (saturating_sub 保护)
         assert!(!entry.is_deactivated(now - 100, 30, 100));
     }
@@ -106,9 +142,9 @@ mod tests {
     async fn test_drop_aborts_handle() {
         let addr: SocketAddr = "127.0.0.1:8080".parse().unwrap();
         // let writer = mock_writer().await;
-        
+
         let (tx, mut rx) = tokio::sync::mpsc::channel(1);
-        
+
         let handle = tokio::spawn(async move {
             // 永远等待直到被 abort
             tokio::time::sleep(std::time::Duration::from_secs(100)).await;
@@ -117,12 +153,8 @@ mod tests {
 
         {
             let abort_handle = handle.abort_handle();
-            let _entry = ConnectionEntry::new_empty_node(
-                addr, 
-                None, 
-                abort_handle, 
-                CancellationToken::new()
-            );
+            let _entry =
+                ConnectionEntry::new_empty_node(addr, None, abort_handle, CancellationToken::new());
             // entry 在这里离开作用域，触发 Drop
         }
 

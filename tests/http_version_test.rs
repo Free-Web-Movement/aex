@@ -15,7 +15,7 @@ mod tests {
         // 覆盖正常匹配
         assert_eq!(HttpVersion::from_str("HTTP/1.0"), Some(HttpVersion::Http10));
         assert_eq!(HttpVersion::from_str("HTTP/1.1"), Some(HttpVersion::Http11));
-        
+
         // 覆盖 Http2.0 的两个匹配分支
         assert_eq!(HttpVersion::from_str("HTTP/2.0"), Some(HttpVersion::Http20));
         assert_eq!(HttpVersion::from_str("HTTP/2"), Some(HttpVersion::Http20));

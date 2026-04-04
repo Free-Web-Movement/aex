@@ -1,15 +1,18 @@
-use std::net::SocketAddr;
-use tokio::net::{TcpListener, TcpStream};
 use std::future::Future;
+use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::Arc;
+use tokio::net::{TcpListener, TcpStream};
 
 // Trait with methods returning boxed futures to avoid async_trait dependency
 pub trait Listener {
     fn listen<'a>(&'a mut self) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send + 'a>>;
 
     // accept: takes a handler that returns a Future
-    fn accept<'a, F, Fut>(&'a self, handler: F) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send + 'a>>
+    fn accept<'a, F, Fut>(
+        &'a self,
+        handler: F,
+    ) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send + 'a>>
     where
         F: Fn(TcpStream, SocketAddr) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = ()> + Send + 'static;
@@ -31,7 +34,10 @@ impl Listener for TCPHandler {
         })
     }
 
-    fn accept<'a, F, Fut>(&'a self, handler: F) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send + 'a>>
+    fn accept<'a, F, Fut>(
+        &'a self,
+        handler: F,
+    ) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send + 'a>>
     where
         F: Fn(TcpStream, SocketAddr) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = ()> + Send + 'static,
@@ -40,7 +46,9 @@ impl Listener for TCPHandler {
             // 将 handler 放入 Arc，以便在多个线程/协程中共享
             let handler = Arc::new(handler);
 
-            let listener = self.listener.as_ref()
+            let listener = self
+                .listener
+                .as_ref()
                 .ok_or_else(|| anyhow::anyhow!("Listener not bound. Call listen() first."))?;
 
             loop {

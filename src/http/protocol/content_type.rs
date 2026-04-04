@@ -1,6 +1,5 @@
 use crate::http::protocol::media_type::{MediaType, SubMediaType};
 
-
 /// ContentType 结构
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContentType {
@@ -10,7 +9,7 @@ pub struct ContentType {
 }
 
 impl ContentType {
-pub fn parse(s: &str) -> Self {
+    pub fn parse(s: &str) -> Self {
         let mut parts = s.split(';');
         let type_part = parts.next().unwrap_or("").trim();
 
@@ -46,7 +45,6 @@ pub fn parse(s: &str) -> Self {
         self.top_level == MediaType::Application && self.sub_type.is_url_encoded()
     }
 }
-
 
 impl Default for ContentType {
     fn default() -> Self {

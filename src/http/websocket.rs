@@ -1,15 +1,15 @@
 use std::sync::Arc;
 
-use bincode::{ Decode, Encode };
-use futures::future::BoxFuture;
-use serde::{ Deserialize, Serialize };
-use tokio_util::codec::{ Decoder, Encoder };
-use bytes::{ BytesMut, BufMut };
 use crate::{
     connection::context::Context,
     http::middlewares::websocket::WebSocket,
-    tcp::types::{ Codec, Command, Frame },
+    tcp::types::{Codec, Command, Frame},
 };
+use bincode::{Decode, Encode};
+use bytes::{BufMut, BytesMut};
+use futures::future::BoxFuture;
+use serde::{Deserialize, Serialize};
+use tokio_util::codec::{Decoder, Encoder};
 
 // --- WSFrame 适配 ---
 #[derive(Debug, Clone, Decode, Encode, Deserialize, Serialize, PartialEq)]
@@ -39,7 +39,7 @@ impl Frame for WSFrame {
     fn payload(&self) -> Option<Vec<u8>> {
         match self {
             WSFrame::Text(s) => Some(s.as_bytes().to_vec()),
-            | WSFrame::Binary(b)
+            WSFrame::Binary(b)
             | WSFrame::Continuation(b)
             | WSFrame::Ping(b)
             | WSFrame::Pong(b)
@@ -75,7 +75,7 @@ impl Command for WSFrame {
         match self {
             // 注意：Text 这里需要转 Vec 的话会涉及引用问题，
             // 如果 AEX 框架允许，建议 Text 内部也存 Vec<u8> 以实现真正的零拷贝 data()
-            | WSFrame::Binary(b)
+            WSFrame::Binary(b)
             | WSFrame::Continuation(b)
             | WSFrame::Ping(b)
             | WSFrame::Pong(b)
@@ -150,14 +150,7 @@ impl Decoder for WSCodec {
             0x2 => Ok(Some(WSFrame::Binary(payload))),
             0x8 => {
                 let (code, reason) = WebSocket::parse_close_payload(&payload)?;
-                Ok(
-                    Some(
-                        WSFrame::Close(
-                            code,
-                            reason.map(|s| s.to_string())
-                        )
-                    )
-                )
+                Ok(Some(WSFrame::Close(code, reason.map(|s| s.to_string()))))
             }
             0x9 => Ok(Some(WSFrame::Ping(payload))),
             0xa => Ok(Some(WSFrame::Pong(payload))),
@@ -210,6 +203,5 @@ impl Encoder<WSFrame> for WSCodec {
     }
 }
 
-pub type WebSocketHandler = Arc<
-    dyn (Fn(&WebSocket, &mut Context, WSFrame) -> BoxFuture<'static, bool>) + Send + Sync
->;
+pub type WebSocketHandler =
+    Arc<dyn (Fn(&WebSocket, &mut Context, WSFrame) -> BoxFuture<'static, bool>) + Send + Sync>;
