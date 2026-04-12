@@ -1,3 +1,13 @@
+//! # Connection Context
+//!
+//! Per-request context for handling HTTP/TCP/UDP connections.
+//!
+//! ## Context Structure
+//!
+//! - `local`: Per-request TypeMap storage for request/response data
+//! - `global`: Shared state across all connections
+//! - `reader`/`writer`: I/O streams for the connection
+
 use chrono::DateTime;
 use chrono::Utc;
 use std::any::Any;
@@ -13,22 +23,26 @@ use crate::http::res::Response;
 
 pub const SERVER_NAME: &str = "Aex/1.0";
 
-/// 全局扩展存储（TypeMap 抽象）
+/// TypeMap for storing per-request or shared data using TypeId as keys.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// ctx.local.set_value::<MyData>(my_data);
+/// let data = ctx.local.get_value::<MyData>();
+/// ```
 pub type TypeMap = dashmap::DashMap<std::any::TypeId, Box<dyn std::any::Any + Send + Sync>>;
 
+/// Extension trait for TypeMap to get/set values by type.
 pub trait TypeMapExt {
     fn get_value<T: Clone + 'static>(&self) -> Option<T>;
     fn set_value<T: Send + Sync + 'static>(&self, val: T);
 }
 
 impl TypeMapExt for TypeMap {
-    /// 这里的 get 是基于 TypeId 的查找，而不是基于 Key 值的查找
     fn get_value<T: Clone + 'static>(&self) -> Option<T> {
-        self.get(&TypeId::of::<T>()) // 传入 TypeId 作为 Key
-            .and_then(|r| {
-                // r.value() 拿到的是 Box<dyn Any>
-                r.value().downcast_ref::<T>().cloned()
-            })
+        self.get(&TypeId::of::<T>())
+            .and_then(|r| r.value().downcast_ref::<T>().cloned())
     }
 
     fn set_value<T: Send + Sync + 'static>(&self, val: T) {
@@ -36,19 +50,25 @@ impl TypeMapExt for TypeMap {
     }
 }
 
-// --- 基础 Trait 组合 (不带 Box) ---
-// 虽然 Rust 稳定版不能直接定义 trait Alias，但我们可以定义这些别名用于 dyn
 pub type AexReader = dyn AsyncBufRead + Send + Sync + Unpin;
 pub type AexWriter = dyn AsyncWrite + Send + Sync + Unpin;
 
-// --- 包装后的类型 (带 Box) ---
 pub type BoxReader = Box<AexReader>;
 pub type BoxWriter = Box<AexWriter>;
-// --- [Context] ---
+
+/// Per-request context containing connection info, I/O, and data storage.
+///
+/// # Fields
+///
+/// - `addr`: Remote socket address
+/// - `accepted`: Connection acceptance timestamp
+/// - `reader`: Input stream (for reading request data)
+/// - `writer`: Output stream (for writing response data)
+/// - `global`: Shared global context
+/// - `local`: Per-request TypeMap storage
 pub struct Context {
     pub addr: SocketAddr,
     pub accepted: DateTime<Utc>,
-    // ⚡ 统一使用 dyn 包装，不再需要 R 和 W 泛型位
     pub reader: Option<BoxReader>,
     pub writer: Option<BoxWriter>,
     pub global: Arc<GlobalContext>,

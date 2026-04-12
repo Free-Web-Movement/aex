@@ -1,3 +1,35 @@
+//! # Server
+//!
+//! Unified multi-protocol server supporting HTTP, TCP, and UDP.
+//!
+//! ## Example
+//!
+//! ```rust,ignore
+//! use aex::http::router::{NodeType, Router as HttpRouter};
+//! use aex::server::HTTPServer;
+//! use aex::tcp::types::{Command, RawCodec};
+//! use aex::{body, exe, get, route};
+//! use std::net::SocketAddr;
+//! use std::sync::Arc;
+//!
+//! #[tokio::main]
+//! async fn main() -> anyhow::Result<()> {
+//!     let addr: SocketAddr = "0.0.0.0:8080".parse()?;
+//!     let mut router = HttpRouter::new(NodeType::Static("root".into()));
+//!
+//!     route!(router, get!("/", exe!(|ctx| {
+//!         body!(ctx, "Hello!");
+//!         true
+//!     })));
+//!
+//!     HTTPServer::new(addr, None)
+//!         .http(router)
+//!         .start::<RawCodec, RawCodec>(Arc::new(|c| c.id()))
+//!         .await?;
+//!     Ok(())
+//! }
+//! ```
+
 use crate::connection::context::TypeMapExt;
 use crate::connection::entry::ConnectionEntry;
 use crate::connection::global::GlobalContext;
@@ -14,7 +46,18 @@ use tokio::net::UdpSocket;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
-/// Server: 核心多协议服务器
+/// Multi-protocol server supporting HTTP, TCP, and UDP.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// Server::new(addr, None)
+///     .http(http_router)
+///     .tcp(tcp_router)
+///     .udp(udp_router)
+///     .start::<Frame, Command>(extractor)
+///     .await?;
+/// ```
 #[derive(Clone)]
 pub struct Server {
     pub addr: SocketAddr,
@@ -22,6 +65,7 @@ pub struct Server {
 }
 
 impl Server {
+    /// Creates a new Server instance.
     pub fn new(addr: SocketAddr, globals: Option<Arc<GlobalContext>>) -> Self {
         Self {
             addr,
@@ -32,21 +76,25 @@ impl Server {
         }
     }
 
+    /// Sets the HTTP router.
     pub fn http(&self, router: HttpRouter) -> &Self {
         self.globals.routers.set_value(Arc::new(router));
         self
     }
 
+    /// Sets the TCP router.
     pub fn tcp(&self, router: TcpRouter) -> &Self {
         self.globals.routers.set_value(Arc::new(router));
         self
     }
 
+    /// Sets the UDP router.
     pub fn udp(&self, router: UdpRouter) -> &Self {
         self.globals.routers.set_value(Arc::new(router));
         self
     }
 
+    /// Starts the server with all configured protocols.
     pub async fn start<F, C>(&self, extractor: IDExtractor<C>) -> anyhow::Result<()>
     where
         F: TCPFrame,

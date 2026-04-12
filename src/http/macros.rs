@@ -1,7 +1,26 @@
+//! # HTTP Macros
+//!
+//! Macros for defining routes and handlers.
+//!
+//! ## Usage
+//!
+//! ```rust,ignore
+//! use aex::{body, exe, get, post, route};
+//!
+//! // Simple route
+//! route!(router, get!("/path", exe!(|ctx| {
+//!     body!(ctx, "response");
+//!     true
+//! })));
+//!
+//! // With middleware
+//! route!(router, post!("/api/users", handler, [auth_mw, log_mw]));
+//! ```
+
 // for `.boxed()`
 
 // -----------------------------
-// 通用方法宏生成器（内部使用）
+// Internal method macro generator
 // -----------------------------
 #[macro_export]
 macro_rules! make_method_macro {
@@ -117,6 +136,36 @@ macro_rules! route {
 
 #[macro_export]
 macro_rules! exe {
+    // 支持 move 闭包
+    (move | $ctx:ident | $body:block) => {{
+        use futures::future::FutureExt;
+        use std::sync::Arc;
+        use $crate::connection::context::Context;
+        use $crate::http::types::Executor;
+
+        Arc::new(move |$ctx: &mut Context| async move { $body }.boxed())
+    }};
+
+    // 支持 move 闭包 + pre 处理
+    (move | $ctx:ident, $data:ident | $body:block, | $pre_ctx:ident | $pre:block) => {{
+        use futures::future::FutureExt;
+        use std::sync::Arc;
+        use $crate::connection::context::Context;
+        use $crate::http::types::Executor;
+
+        Arc::new(move |$ctx: &mut Context| {
+            let $data = {
+                let $pre_ctx: &mut Context = &mut *$ctx;
+                $pre
+            };
+            async move {
+                let _ = &$data;
+                $body
+            }
+            .boxed()
+        })
+    }};
+
     // 带有 pre 处理的分支
     (| $ctx:ident, $data:ident | $body:block, | $pre_ctx:ident | $pre:block) => {{
         use futures::future::FutureExt;
@@ -124,20 +173,17 @@ macro_rules! exe {
         use $crate::connection::context::Context;
         use $crate::http::types::Executor;
 
-        // 显式指定闭包的生命周期约束
         let executor: Arc<Executor> = Arc::new(move |$ctx: &mut Context| {
-            // 1. 同步执行 pre
             let $data = {
                 let $pre_ctx: &mut Context = &mut *$ctx;
                 $pre
             };
 
-            // 2. 将异步块包装并显式绑定生命周期
             async move {
-                let _ = &$data; // 强制捕获 data
+                let _ = &$data;
                 $body
             }
-            .boxed() // 相当于 Box::pin(async move { ... })
+            .boxed()
         });
         executor
     }};

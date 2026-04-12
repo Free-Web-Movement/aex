@@ -1,3 +1,28 @@
+//! # HTTP Router
+//!
+//! Trie-tree based HTTP router supporting static, param, and wildcard paths.
+//!
+//! ## Path Types
+//!
+//! | Type | Example | Description |
+//! |------|---------|-------------|
+//! | Static | `/api/users` | Exact path match |
+//! | Param | `/api/users/:id` | Captures URL segment |
+//! | Wildcard | `/api/*` | Matches remaining path
+//!
+//! ## Example
+//!
+//! ```rust,ignore
+//! use aex::http::router::{NodeType, Router as HttpRouter};
+//! use aex::{get, post, route};
+//!
+//! let mut router = HttpRouter::new(NodeType::Static("root".into()));
+//!
+//! route!(router, get!("/api/users", users_handler));
+//! route!(router, get!("/api/users/:id", user_handler));
+//! route!(router, post!("/api/users", create_handler));
+//! ```
+
 use std::{collections::HashMap, sync::Arc};
 
 use tokio::{io::AsyncReadExt, sync::Mutex};
@@ -14,25 +39,27 @@ use crate::{
     },
 };
 
-/// 节点类型
+/// Node type for Trie tree router.
 #[derive(Clone, Debug)]
 pub enum NodeType {
-    Static(String), // 静态段
-    Param(String),  // 动态段 :id
-    Wildcard,       // 通配符 *
+    /// Static path segment (e.g., "users")
+    Static(String),
+    /// Parameter segment (e.g., ":id" captures "123")
+    Param(String),
+    /// Wildcard segment (* matches all remaining)
+    Wildcard,
 }
 
-/// Trie 树节点
+/// Trie tree router for HTTP path matching.
 pub struct Router {
     pub node_type: NodeType,
     pub children: HashMap<String, Router>,
-    pub middlewares: Option<HashMap<String, Vec<Arc<Executor>>>>, // 方法级中间件
-    pub handlers: Option<HashMap<String, Arc<Executor>>>,         // 方法级处理器
+    pub middlewares: Option<HashMap<String, Vec<Arc<Executor>>>>,
+    pub handlers: Option<HashMap<String, Arc<Executor>>>,
 }
 
-// pub type Router = Router;
-
 impl Router {
+    /// Creates a new Router with the given node type.
     pub fn new(node_type: NodeType) -> Self {
         Self {
             node_type,
