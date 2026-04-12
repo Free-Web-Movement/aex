@@ -42,7 +42,7 @@ async fn main() -> anyhow::Result<()> {
     let mut router = HttpRouter::new(NodeType::Static("root".into()));
 
     route!(router, get!("/", exe!(|ctx| {
-        body!(ctx, "Hello, World!");
+        ctx.send("Hello, World!");
         true
     })));
 
@@ -144,21 +144,25 @@ pub type Executor = dyn for<'a> Fn(&'a mut Context) -> BoxFuture<'a, bool> + Sen
 - 返回 `false`: 终止执行链
 
 ```rust
-use aex::{body, exe};
+use aex::exe;
 
 let handler = exe!(|ctx| {
-    body!(ctx, "Response body");
+    ctx.send("Response body");
     true  // 继续执行
 });
 ```
 
 ### 3. Context - 上下文
 
-Context 在请求生命周期内传递数据：
+Context 在请求生命周期内传递数据和发送响应：
 
 ```rust
 use aex::connection::context::TypeMapExt;
 use aex::http::meta::HttpMetadata;
+
+// 发送响应（推荐方式）
+ctx.send("Hello, World!");
+ctx.send(format!("User: {}", name));
 
 // 读取请求数据
 let meta = ctx.local.get_value::<HttpMetadata>().unwrap();
@@ -182,7 +186,7 @@ use aex::{body, exe, get, route};
 route!(router, get!(
     "/protected",
     exe!(|ctx| {
-        body!(ctx, "Protected resource");
+        ctx.send("Protected resource");
         true
     }),
     [auth_middleware, logging_middleware]
@@ -226,14 +230,14 @@ route!(router, get!("/ws", exe!(|_ctx| true), [ws_middleware]));
 ```rust
 // 基础用法（同步执行）
 exe!(|ctx| {
-    body!(ctx, "response");
+    ctx.send("response");
     true
 })
 
 // 支持 move 闭包（捕获外部变量）
 exe!(move |ctx| {
     let data = captured_value;
-    body!(ctx, format!("{}", data));
+    ctx.send(format!("{}", data));
     true
 })
 
@@ -241,7 +245,7 @@ exe!(move |ctx| {
 exe!(|ctx, data| {
     async move {
         // 异步逻辑
-        body!(ctx, "ok");
+        ctx.send("ok");
         true
     }
 }, |pre_ctx| {
@@ -275,7 +279,7 @@ route!(router, get!("/path", handler));
 route!(router, get!("/path", handler, [mw1, mw2]));
 
 // 参数快捷宏
-let handler = exe!(|ctx| { body!(ctx, "ok"); true });
+let handler = exe!(|ctx| { ctx.send("ok"); true });
 ```
 
 ---

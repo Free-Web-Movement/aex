@@ -5,7 +5,7 @@ use aex::http::router::{NodeType, Router as HttpRouter};
 use aex::http::types::Executor;
 use aex::server::HTTPServer;
 use aex::tcp::types::{Command, RawCodec};
-use aex::{body, exe};
+use aex::exe;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
@@ -19,7 +19,7 @@ async fn main() -> anyhow::Result<()> {
         let auth_header = meta.headers.get(&HeaderKey::Authorization);
 
         if auth_header.is_none() {
-            body!(ctx, r#"{"error":"Unauthorized"}"#);
+            ctx.send(r#"{"error":"Unauthorized"}"#);
             return false;
         }
         true
@@ -32,12 +32,12 @@ async fn main() -> anyhow::Result<()> {
     });
 
     let home: Arc<Executor> = exe!(|ctx| {
-        body!(ctx, "Welcome to AEX!");
+        ctx.send("Welcome to AEX!");
         true
     });
 
     let users: Arc<Executor> = exe!(|ctx| {
-        body!(ctx, r#"["user1", "user2", "user3"]"#);
+        ctx.send(r#"["user1", "user2", "user3"]"#);
         true
     });
 
@@ -49,12 +49,12 @@ async fn main() -> anyhow::Result<()> {
             .and_then(|d| d.get("id"))
             .map(|v| v.as_str())
             .unwrap_or("unknown");
-        body!(ctx, format!(r#"{{"id":"{}"}}"#, id));
+        ctx.send(format!(r#"{{"id":"{}"}}"#, id));
         true
     });
 
     let health: Arc<Executor> = exe!(|ctx| {
-        body!(ctx, r#"{"status":"healthy"}"#);
+        ctx.send(r#"{"status":"healthy"}"#);
         true
     });
 

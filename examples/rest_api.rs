@@ -5,7 +5,7 @@ use aex::http::router::{NodeType, Router as HttpRouter};
 use aex::http::types::Executor;
 use aex::server::HTTPServer;
 use aex::tcp::types::{Command, RawCodec};
-use aex::{body, exe, get, post, put, delete, route};
+use aex::{exe, get, post, put, delete, route};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
@@ -43,13 +43,13 @@ async fn main() -> anyhow::Result<()> {
         let auth_header = meta.headers.get(&HeaderKey::Authorization);
 
         if auth_header.is_none() {
-            body!(ctx, r#"{"error":"Unauthorized","message":"Missing Authorization header"}"#);
+            ctx.send(r#"{"error":"Unauthorized","message":"Missing Authorization header"}"#);
             return false;
         }
 
         let token = auth_header.unwrap();
         if !token.starts_with("Bearer ") {
-            body!(ctx, r#"{"error":"Unauthorized","message":"Invalid token format"}"#);
+            ctx.send(r#"{"error":"Unauthorized","message":"Invalid token format"}"#);
             return false;
         }
 
@@ -67,7 +67,7 @@ async fn main() -> anyhow::Result<()> {
         "/api/users",
         exe!(|ctx| {
             let users: Vec<_> = USERS.lock().unwrap().values().cloned().collect();
-            body!(ctx, serde_json::to_string(&users).unwrap());
+            ctx.send(serde_json::to_string(&users).unwrap());
             true
         }),
         vec![logger.clone()]
@@ -86,9 +86,9 @@ async fn main() -> anyhow::Result<()> {
 
             let users = USERS.lock().unwrap();
             if let Some(user) = users.get(id) {
-                body!(ctx, serde_json::to_string(user).unwrap());
+                ctx.send(serde_json::to_string(user).unwrap());
             } else {
-                body!(ctx, r#"{"error":"Not Found","message":"User not found"}"#);
+                ctx.send(r#"{"error":"Not Found","message":"User not found"}"#);
             }
             true
         }),
@@ -102,7 +102,7 @@ async fn main() -> anyhow::Result<()> {
         let user: serde_json::Value = match serde_json::from_str(&body_str) {
             Ok(u) => u,
             Err(_) => {
-                body!(ctx, r#"{"error":"Bad Request","message":"Invalid JSON"}"#);
+                ctx.send(r#"{"error":"Bad Request","message":"Invalid JSON"}"#);
                 return false;
             }
         };
@@ -127,7 +127,7 @@ async fn main() -> anyhow::Result<()> {
             "status": "created",
             "data": user_with_id
         });
-        body!(ctx, serde_json::to_string(&response).unwrap());
+        ctx.send(serde_json::to_string(&response).unwrap());
         true
     });
 
@@ -152,7 +152,7 @@ async fn main() -> anyhow::Result<()> {
             let update: serde_json::Value = match serde_json::from_str(&body_str) {
                 Ok(u) => u,
                 Err(_) => {
-                    body!(ctx, r#"{"error":"Bad Request"}"#);
+                    ctx.send(r#"{"error":"Bad Request"}"#);
                     return false;
                 }
             };
@@ -165,9 +165,9 @@ async fn main() -> anyhow::Result<()> {
                 if let Some(email) = update.get("email") {
                     user["email"] = email.clone();
                 }
-                body!(ctx, serde_json::to_string(user).unwrap());
+                ctx.send(serde_json::to_string(user).unwrap());
             } else {
-                body!(ctx, r#"{"error":"Not Found"}"#);
+                ctx.send(r#"{"error":"Not Found"}"#);
             }
             true
         }),
@@ -187,9 +187,9 @@ async fn main() -> anyhow::Result<()> {
 
             let mut users = USERS.lock().unwrap();
             if users.remove(id).is_some() {
-                body!(ctx, r#"{"status":"deleted"}"#);
+                ctx.send(r#"{"status":"deleted"}"#);
             } else {
-                body!(ctx, r#"{"error":"Not Found"}"#);
+                ctx.send(r#"{"error":"Not Found"}"#);
             }
             true
         }),
@@ -199,7 +199,7 @@ async fn main() -> anyhow::Result<()> {
     route!(router, get!(
         "/health",
         exe!(|ctx| {
-            body!(ctx, r#"{"status":"healthy"}"#);
+            ctx.send(r#"{"status":"healthy"}"#);
             true
         })
     ));

@@ -1,12 +1,10 @@
-use aex::connection::context::TypeMapExt;
-use aex::http::meta::HttpMetadata;
 use aex::http::router::{NodeType, Router as HttpRouter};
 use aex::http::middlewares::websocket::WebSocket;
 use aex::http::types::Executor;
 use aex::http::websocket::WSFrame;
 use aex::server::HTTPServer;
 use aex::tcp::types::{Command, RawCodec};
-use aex::{body, exe, get, route};
+use aex::{exe, get, route};
 use std::net::SocketAddr;
 use std::sync::Arc;
 
@@ -46,7 +44,7 @@ async fn main() -> anyhow::Result<()> {
     route!(router, get!(
         "/",
         exe!(|ctx| {
-            body!(ctx, "WebSocket server. Connect to /ws");
+            ctx.send("WebSocket server. Connect to /ws");
             true
         })
     ));

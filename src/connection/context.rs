@@ -18,6 +18,8 @@ use tokio::io::AsyncBufRead;
 use tokio::io::AsyncWrite;
 
 use crate::connection::global::GlobalContext;
+use crate::http::meta::HttpMetadata;
+use crate::http::protocol::header::HeaderKey;
 use crate::http::req::Request;
 use crate::http::res::Response;
 
@@ -130,5 +132,24 @@ impl Context {
         self.local
             .get(&key)
             .and_then(|boxed_val| boxed_val.downcast_ref::<T>().cloned())
+    }
+
+    /// Send a response body, replacing body! macro.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// ctx.send("Hello, World!");
+    /// ctx.send(format!("User: {}", name));
+    /// ctx.send(r#"{"status":"ok"}"#);
+    /// ```
+    pub fn send(&self, content: impl Into<String>) {
+        let mut meta = self.local.get_value::<HttpMetadata>().unwrap();
+        let bytes: Vec<u8> = content.into().into_bytes();
+        let len = bytes.len();
+
+        meta.headers.insert(HeaderKey::ContentLength, len.to_string());
+        meta.body = bytes;
+        self.local.set_value::<HttpMetadata>(meta);
     }
 }

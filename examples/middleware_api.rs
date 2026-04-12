@@ -5,7 +5,7 @@ use aex::http::router::{NodeType, Router as HttpRouter};
 use aex::http::types::Executor;
 use aex::server::HTTPServer;
 use aex::tcp::types::{Command, RawCodec};
-use aex::{body, exe, get, post, route};
+use aex::{exe, get, post, route};
 use std::net::SocketAddr;
 use std::sync::Arc;
 
@@ -15,13 +15,13 @@ fn auth_middleware() -> Arc<Executor> {
         let auth_header = meta.headers.get(&HeaderKey::Authorization);
 
         if auth_header.is_none() {
-            body!(ctx, "Unauthorized: Missing Authorization header");
+            ctx.send("Unauthorized: Missing Authorization header");
             return false;
         }
 
         let token = auth_header.unwrap();
         if !token.starts_with("Bearer ") {
-            body!(ctx, "Unauthorized: Invalid token format");
+            ctx.send("Unauthorized: Invalid token format");
             return false;
         }
 
@@ -49,7 +49,7 @@ async fn main() -> anyhow::Result<()> {
     route!(router, get!(
         "/api/users",
         exe!(|ctx| {
-            body!(ctx, r#"["user1", "user2", "user3"]"#);
+            ctx.send(r#"["user1", "user2", "user3"]"#);
             true
         }),
         vec![logger.clone()]
@@ -65,7 +65,7 @@ async fn main() -> anyhow::Result<()> {
                 .and_then(|d| d.get("id"))
                 .map(|v| v.as_str())
                 .unwrap_or("unknown");
-            body!(ctx, format!(r#"{{"id":"{}","name":"User {}"}}"#, id, id));
+            ctx.send(format!(r#"{{"id":"{}","name":"User {}"}}"#, id, id));
             true
         }),
         vec![auth.clone(), logger.clone()]
@@ -77,7 +77,7 @@ async fn main() -> anyhow::Result<()> {
             let meta = ctx.local.get_value::<HttpMetadata>().unwrap();
             let body = String::from_utf8_lossy(&meta.body);
             println!("Create user: {}", body);
-            body!(ctx, format!(r#"{{"status":"created","data":{}}}"#, body));
+            ctx.send(format!(r#"{{"status":"created","data":{}}}"#, body));
             true
         }),
         vec![auth.clone(), logger.clone()]
@@ -87,7 +87,7 @@ async fn main() -> anyhow::Result<()> {
         "/public/*",
         exe!(|ctx| {
             let meta = ctx.local.get_value::<HttpMetadata>().unwrap();
-            body!(ctx, format!(r#"{{"path":"{}"}}"#, meta.path));
+            ctx.send(format!(r#"{{"path":"{}"}}"#, meta.path));
             true
         })
     ));

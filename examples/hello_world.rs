@@ -1,9 +1,7 @@
-use aex::connection::context::TypeMapExt;
-use aex::http::meta::HttpMetadata;
 use aex::http::router::{NodeType, Router as HttpRouter};
 use aex::server::HTTPServer;
 use aex::tcp::types::{Command, RawCodec};
-use aex::{body, exe, get, route};
+use aex::{exe, get, route};
 use std::net::SocketAddr;
 use std::sync::Arc;
 
@@ -17,7 +15,7 @@ async fn main() -> anyhow::Result<()> {
         get!(
             "/",
             exe!(|ctx| {
-                body!(ctx, "Hello world!");
+                ctx.send("Hello world!");
                 true
             })
         )

@@ -24,11 +24,10 @@ use crate::connection::context::Context;
 /// # Example
 ///
 /// ```rust,ignore
-/// use aex::{body, exe};
+/// use aex::exe;
 ///
 /// let handler = exe!(|ctx| {
-///     // Access request data via ctx.local.get_value::<HttpMetadata>()
-///     body!(ctx, "Response body");
+///     ctx.send("Response body");
 ///     true  // Continue execution
 /// });
 /// ```
