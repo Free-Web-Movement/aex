@@ -31,7 +31,7 @@ async fn main() -> anyhow::Result<()> {
     let ws_middleware: Arc<Executor> = Arc::from(WebSocket::to_middleware(ws_handler));
 
     router.get("/", exe!(|ctx| {
-        ctx.send("WebSocket server. Connect to /ws");
+        ctx.send("WebSocket server. Connect to /ws", None);
         true
     })).register();
 

@@ -15,13 +15,13 @@ fn auth_middleware() -> Arc<Executor> {
         let auth_header = meta.headers.get(&HeaderKey::Authorization);
 
         if auth_header.is_none() {
-            ctx.send("Unauthorized: Missing Authorization header");
+            ctx.send("Unauthorized: Missing Authorization header", None);
             return false;
         }
 
         let token = auth_header.unwrap();
         if !token.starts_with("Bearer ") {
-            ctx.send("Unauthorized: Invalid token format");
+            ctx.send("Unauthorized: Invalid token format", None);
             return false;
         }
 
@@ -47,7 +47,7 @@ async fn main() -> anyhow::Result<()> {
     let logger = logging_middleware();
 
     router.get("/api/users", exe!(|ctx| {
-        ctx.send(r#"["user1", "user2", "user3"]"#);
+        ctx.send(r#"["user1", "user2", "user3"]"#, None);
         true
     })).middleware(logger.clone()).register();
 
@@ -59,7 +59,7 @@ async fn main() -> anyhow::Result<()> {
             .and_then(|d| d.get("id"))
             .map(|v| v.as_str())
             .unwrap_or("unknown");
-        ctx.send(format!(r#"{{"id":"{}","name":"User {}"}}"#, id, id));
+        ctx.send(format!(r#"{{"id":"{}","name":"User {}"}}"#, id, id), None);
         true
     })).middleware(auth.clone()).middleware(logger.clone()).register();
 
@@ -67,13 +67,13 @@ async fn main() -> anyhow::Result<()> {
         let meta = ctx.local.get_value::<HttpMetadata>().unwrap();
         let body = String::from_utf8_lossy(&meta.body);
         println!("Create user: {}", body);
-        ctx.send(format!(r#"{{"status":"created","data":{}}}"#, body));
+        ctx.send(format!(r#"{{"status":"created","data":{}}}"#, body), None);
         true
     })).middleware(auth.clone()).middleware(logger.clone()).register();
 
     router.get("/public/*", exe!(|ctx| {
         let meta = ctx.local.get_value::<HttpMetadata>().unwrap();
-        ctx.send(format!(r#"{{"path":"{}"}}"#, meta.path));
+        ctx.send(format!(r#"{{"path":"{}"}}"#, meta.path), None);
         true
     })).register();
 

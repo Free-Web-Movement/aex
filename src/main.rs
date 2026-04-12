@@ -1,8 +1,4 @@
-use aex::connection::context::TypeMapExt;
 use aex::connection::global::GlobalContext;
-use aex::http::meta::HttpMetadata;
-use aex::http::protocol::header::HeaderKey;
-use aex::http::protocol::media_type::SubMediaType;
 use aex::http::router::Router as HttpRouter;
 use aex::server::Server;
 use aex::tcp::router::Router as TcpRouter;
@@ -20,8 +16,7 @@ async fn main() -> anyhow::Result<()> {
     let mut http_router = HttpRouter::default();
 
     http_router.get("/", exe!(|ctx| {
-        let meta = ctx.local.get_value::<HttpMetadata>().unwrap();
-        ctx.send("Hello world!");
+        ctx.send("Hello world!", None);
         true
     })).register();
 

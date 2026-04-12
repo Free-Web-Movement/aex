@@ -19,7 +19,7 @@ async fn main() -> anyhow::Result<()> {
         let auth_header = meta.headers.get(&HeaderKey::Authorization);
 
         if auth_header.is_none() {
-            ctx.send(r#"{"error":"Unauthorized"}"#);
+            ctx.send(r#"{"error":"Unauthorized"}"#, None);
             return false;
         }
         true
@@ -32,12 +32,12 @@ async fn main() -> anyhow::Result<()> {
     });
 
     let home: Arc<Executor> = exe!(|ctx| {
-        ctx.send("Welcome to AEX!");
+        ctx.send("Welcome to AEX!", None);
         true
     });
 
     let users: Arc<Executor> = exe!(|ctx| {
-        ctx.send(r#"["user1", "user2", "user3"]"#);
+        ctx.send(r#"["user1", "user2", "user3"]"#, None);
         true
     });
 
@@ -49,12 +49,12 @@ async fn main() -> anyhow::Result<()> {
             .and_then(|d| d.get("id"))
             .map(|v| v.as_str())
             .unwrap_or("unknown");
-        ctx.send(format!(r#"{{"id":"{}"}}"#, id));
+        ctx.send(format!(r#"{{"id":"{}"}}"#, id), None);
         true
     });
 
     let health: Arc<Executor> = exe!(|ctx| {
-        ctx.send(r#"{"status":"healthy"}"#);
+        ctx.send(r#"{"status":"healthy"}"#, None);
         true
     });
 

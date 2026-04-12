@@ -11,7 +11,7 @@ async fn main() -> anyhow::Result<()> {
     let mut router = HttpRouter::new(NodeType::Static("root".into()));
 
     router.get("/", exe!(|ctx| {
-        ctx.send("Hello world!");
+        ctx.send("Hello world!", None);
         true
     })).register();
 

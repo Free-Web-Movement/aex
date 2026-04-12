@@ -43,7 +43,7 @@ async fn main() -> anyhow::Result<()> {
         let auth_header = meta.headers.get(&HeaderKey::Authorization);
 
         if auth_header.is_none() {
-            ctx.send(r#"{"error":"Unauthorized"}"#);
+            ctx.send(r#"{"error":"Unauthorized"}"#, None);
             return false;
         }
         true
@@ -57,7 +57,7 @@ async fn main() -> anyhow::Result<()> {
 
     router.get("/api/users", exe!(|ctx| {
         let users: Vec<_> = USERS.lock().unwrap().values().cloned().collect();
-        ctx.send(serde_json::to_string(&users).unwrap());
+        ctx.send(serde_json::to_string(&users).unwrap(), None);
         true
     })).middleware(logger.clone()).register();
 
@@ -71,9 +71,9 @@ async fn main() -> anyhow::Result<()> {
             .unwrap_or("");
         let users = USERS.lock().unwrap();
         if let Some(user) = users.get(id) {
-            ctx.send(serde_json::to_string(user).unwrap());
+            ctx.send(serde_json::to_string(user).unwrap(), None);
         } else {
-            ctx.send(r#"{"error":"Not Found"}"#);
+            ctx.send(r#"{"error":"Not Found"}"#, None);
         }
         true
     })).middleware(auth.clone()).middleware(logger.clone()).register();
@@ -84,7 +84,7 @@ async fn main() -> anyhow::Result<()> {
         let user: serde_json::Value = match serde_json::from_str(&body_str) {
             Ok(u) => u,
             Err(_) => {
-                ctx.send(r#"{"error":"Bad Request"}"#);
+                ctx.send(r#"{"error":"Bad Request"}"#, None);
                 return false;
             }
         };
@@ -101,7 +101,7 @@ async fn main() -> anyhow::Result<()> {
             user_with_id["id"].as_str().unwrap().to_string(), 
             user_with_id.clone()
         );
-        ctx.send(serde_json::to_string(&user_with_id).unwrap());
+        ctx.send(serde_json::to_string(&user_with_id).unwrap(), None);
         true
     })).middleware(auth.clone()).middleware(logger.clone()).register();
 
@@ -117,7 +117,7 @@ async fn main() -> anyhow::Result<()> {
         let update: serde_json::Value = match serde_json::from_str(&body_str) {
             Ok(u) => u,
             Err(_) => {
-                ctx.send(r#"{"error":"Bad Request"}"#);
+                ctx.send(r#"{"error":"Bad Request"}"#, None);
                 return false;
             }
         };
@@ -129,9 +129,9 @@ async fn main() -> anyhow::Result<()> {
             if let Some(email) = update.get("email") {
                 user["email"] = email.clone();
             }
-            ctx.send(serde_json::to_string(user).unwrap());
+            ctx.send(serde_json::to_string(user).unwrap(), None);
         } else {
-            ctx.send(r#"{"error":"Not Found"}"#);
+            ctx.send(r#"{"error":"Not Found"}"#, None);
         }
         true
     })).middleware(auth.clone()).middleware(logger.clone()).register();
@@ -146,15 +146,15 @@ async fn main() -> anyhow::Result<()> {
             .unwrap_or("");
         let mut users = USERS.lock().unwrap();
         if users.remove(id).is_some() {
-            ctx.send(r#"{"status":"deleted"}"#);
+            ctx.send(r#"{"status":"deleted"}"#, None);
         } else {
-            ctx.send(r#"{"error":"Not Found"}"#);
+            ctx.send(r#"{"error":"Not Found"}"#, None);
         }
         true
     })).middleware(auth.clone()).middleware(logger.clone()).register();
 
     router.get("/health", exe!(|ctx| {
-        ctx.send(r#"{"status":"healthy"}"#);
+        ctx.send(r#"{"status":"healthy"}"#, None);
         true
     })).register();
 

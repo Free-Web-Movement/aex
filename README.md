@@ -32,9 +32,6 @@ anyhow = "1"
 use aex::http::router::{NodeType, Router as HttpRouter};
 use aex::server::HTTPServer;
 use aex::tcp::types::{Command, RawCodec};
-use aex::http::router::{NodeType, Router as HttpRouter};
-use aex::server::HTTPServer;
-use aex::tcp::types::{Command, RawCodec};
 use aex::exe;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -45,7 +42,7 @@ async fn main() -> anyhow::Result<()> {
     let mut router = HttpRouter::new(NodeType::Static("root".into()));
 
     router.get("/", exe!(|ctx| {
-        ctx.send("Hello, World!");
+        ctx.send("Hello, World!", None);
         true
     })).register();
 
@@ -141,7 +138,7 @@ pub type Executor = dyn for<'a> Fn(&'a mut Context) -> BoxFuture<'a, bool> + Sen
 use aex::exe;
 
 let handler = exe!(|ctx| {
-    ctx.send("Response body");
+    ctx.send("Response body", None);
     true  // 继续执行
 });
 ```
@@ -154,9 +151,14 @@ Context 在请求生命周期内传递数据和发送响应：
 use aex::connection::context::TypeMapExt;
 use aex::http::meta::HttpMetadata;
 
-// 发送响应（推荐方式）
-ctx.send("Hello, World!");
-ctx.send(format!("User: {}", name));
+// 发送响应
+ctx.send("Hello", None);                            // text/plain, 200
+ctx.send("{}", Some(SubMediaType::Json));          // JSON, 200
+ctx.status(StatusCode::NotFound).send("Not found", None);  // 404
+ctx.status(StatusCode::Created).send("{}", Some(SubMediaType::Json)); // 201
+
+// 重定向
+ctx.redirect("/new-location");
 
 // 读取请求数据
 let meta = ctx.local.get_value::<HttpMetadata>().unwrap();
@@ -178,7 +180,7 @@ mw1 → mw2 → mw3 → handler
 use aex::exe;
 
 router.get("/protected", exe!(|ctx| {
-    ctx.send("Protected resource");
+    ctx.send("Protected resource", None);
     true
 })).middleware(auth_middleware).middleware(logging_middleware).register();
 ```
@@ -206,7 +208,9 @@ let ws = WebSocket {
 
 let ws_middleware = WebSocket::to_middleware(ws);
 
-route!(router, get!("/ws", exe!(|_ctx| true), [ws_middleware]));
+router.get("/ws", exe!(|_ctx| true))
+    .middleware(ws_middleware)
+    .register();
 ```
 
 ---
@@ -220,14 +224,14 @@ route!(router, get!("/ws", exe!(|_ctx| true), [ws_middleware]));
 ```rust
 // 基础用法（同步执行）
 exe!(|ctx| {
-    ctx.send("response");
+    ctx.send("response", None);
     true
 })
 
 // 支持 move 闭包（捕获外部变量）
 exe!(move |ctx| {
     let data = captured_value;
-    ctx.send(format!("{}", data));
+    ctx.send(format!("{}", data), None);
     true
 })
 
@@ -235,7 +239,7 @@ exe!(move |ctx| {
 exe!(|ctx, data| {
     async move {
         // 异步逻辑
-        ctx.send("ok");
+        ctx.send("ok", None);
         true
     }
 }, |pre_ctx| {

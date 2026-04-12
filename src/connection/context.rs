@@ -20,6 +20,8 @@ use tokio::io::AsyncWrite;
 use crate::connection::global::GlobalContext;
 use crate::http::meta::HttpMetadata;
 use crate::http::protocol::header::HeaderKey;
+use crate::http::protocol::media_type::SubMediaType;
+use crate::http::protocol::status::StatusCode;
 use crate::http::req::Request;
 use crate::http::res::Response;
 
@@ -134,22 +136,41 @@ impl Context {
             .and_then(|boxed_val| boxed_val.downcast_ref::<T>().cloned())
     }
 
-    /// Send a response body, replacing body! macro.
+    /// Set HTTP status code, returns self for chaining.
+    pub fn status(&self, code: StatusCode) -> &Self {
+        let mut meta = self.local.get_value::<HttpMetadata>().unwrap();
+        meta.status = code;
+        self.local.set_value::<HttpMetadata>(meta);
+        self
+    }
+
+    /// Send a response body.
     ///
     /// # Example
     ///
     /// ```rust,ignore
-    /// ctx.send("Hello, World!");
-    /// ctx.send(format!("User: {}", name));
-    /// ctx.send(r#"{"status":"ok"}"#);
+    /// ctx.send("Hello", None);                           // text/plain, 200
+    /// ctx.send("{}", Some(SubMediaType::Json));        // JSON, 200
+    /// ctx.status(StatusCode::NotFound).send("Not Found", None); // 404
     /// ```
-    pub fn send(&self, content: impl Into<String>) {
+    pub fn send(&self, content: impl Into<String>, mime: Option<SubMediaType>) {
         let mut meta = self.local.get_value::<HttpMetadata>().unwrap();
         let bytes: Vec<u8> = content.into().into_bytes();
         let len = bytes.len();
 
+        let mime_str = mime.unwrap_or(SubMediaType::Plain);
+        meta.headers.insert(HeaderKey::ContentType, mime_str.as_str().to_string());
         meta.headers.insert(HeaderKey::ContentLength, len.to_string());
         meta.body = bytes;
+        self.local.set_value::<HttpMetadata>(meta);
+    }
+
+    /// Redirect to another URL (302 Found).
+    pub fn redirect(&self, location: &str) {
+        let mut meta = self.local.get_value::<HttpMetadata>().unwrap();
+        meta.status = StatusCode::Found;
+        meta.headers.insert(HeaderKey::Location, location.to_string());
+        meta.body = Vec::new();
         self.local.set_value::<HttpMetadata>(meta);
     }
 }
