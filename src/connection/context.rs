@@ -97,8 +97,8 @@ impl Context {
             .max(0) as u64
     }
 
-    /// 存入扩展实例 (Async)
-    pub async fn set<T: Send + Sync + 'static>(&self, data: T) {
+    /// 存入扩展实例
+    pub fn set<T: Send + Sync + 'static>(&self, data: T) {
         let key = TypeId::of::<T>();
         let value: Box<dyn Any + Send + Sync> = Box::new(data);
         self.local.insert(key, value);

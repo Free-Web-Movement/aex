@@ -130,13 +130,13 @@ impl Server {
                         };
 
                         let pipeline = ConnectionEntry::default_pipeline::<F, C>(
-                peer_addr,
-                true,
-                extractor.clone()
-            );
+                            peer_addr,
+                            true,
+                            extractor.clone()
+                        );
                         // --- D. 调用解耦后的 Pipeline 启动器 ---
                         // 使用 manager 的 token 作为父 token，保证生命周期受控
-                        let (conn_token, abort_handle) = ConnectionEntry::start::<F, C, _, _>(
+                        let (conn_token, abort_handle, ctx) = ConnectionEntry::start::<F, C, _, _>(
                             manager.cancel_token.clone(),
                             socket,
                             peer_addr,
@@ -146,7 +146,7 @@ impl Server {
 
                         // --- E. 登记到 ConnectionManager ---
                         // 这里可以直接把 start 返回的两个控制句柄存入 Entry 层
-                        manager.add(peer_addr, abort_handle, conn_token, true, None);
+                        manager.add(peer_addr, abort_handle, conn_token, true, Some(ctx));
                     }
                 }
         }

@@ -150,7 +150,7 @@ impl ConnectionEntry {
         addr: std::net::SocketAddr,
         global: Arc<GlobalContext>,
         f: FF,
-    ) -> (CancellationToken, tokio::task::AbortHandle)
+    ) -> (CancellationToken, tokio::task::AbortHandle, Arc<Mutex<Context>>)
     where
         F: TCPFrame,
         C: TCPCommand,
@@ -161,33 +161,31 @@ impl ConnectionEntry {
         let child_token = parent_token.child_token();
         let task_token = child_token.clone();
 
+        let (reader, writer) = socket.into_split();
+
+        let r_opt: Option<BoxReader> = Some(Box::new(BufReader::new(reader)));
+        let w_opt: Option<BoxWriter> = Some(Box::new(BufWriter::new(writer)));
+
+        let raw_ctx = Context::new(
+            r_opt,
+            w_opt,
+            global,
+            addr
+        );
+        raw_ctx.set(task_token.clone()); // Assuming set is now synchronous or handled properly
+        let ctx = Arc::new(Mutex::new(raw_ctx));
+
+        let ctx_cloned = ctx.clone();
         let join_handle = tokio::spawn(async move {
             tokio::select! {
                 // 监听子令牌或父令牌的取消信号
                 _ = task_token.cancelled() => {
-                    // println!("[AEX] Connection to {} closed by token.", addr);
                     Ok::<(), anyhow::Error>(())
                 }
 
                 res = async {
-                    let (reader, writer) = socket.into_split();
-
-                    let r_opt: Option<BoxReader> = Some(Box::new(BufReader::new(reader)));
-                    let w_opt: Option<BoxWriter> = Some(Box::new(BufWriter::new(writer)));
-
-                    let raw_ctx = Context::new(
-                        r_opt,
-                        w_opt,
-                        global,
-                        addr
-                    );
-                    raw_ctx.set(task_token.clone()).await;
-                    let ctx = Arc::new(Mutex::new(raw_ctx));
-
-
-
                     // 执行业务逻辑
-                    f(ctx).await?;
+                    f(ctx_cloned).await?;
 
                     Ok(())
                 } => {
@@ -200,7 +198,7 @@ impl ConnectionEntry {
         });
 
         // 2. 返回子令牌和句柄，外部 Entry 可以直接存入这两个值
-        (child_token, join_handle.abort_handle())
+        (child_token, join_handle.abort_handle(), ctx)
     }
 }
 

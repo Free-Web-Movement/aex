@@ -179,7 +179,7 @@ impl ConnectionManager {
 
         // 4. 使用统一的启动器
         // 传入 manager 的 token 作为父级，获取该连接独有的 token 和 handle
-        let (conn_token, abort_handle) = ConnectionEntry::start::<F, C, _, _>(
+        let (conn_token, abort_handle, ctx) = ConnectionEntry::start::<F, C, _, _>(
             self.cancel_token.clone(),
             socket,
             addr,
@@ -194,7 +194,7 @@ impl ConnectionManager {
         );
 
         // 5. 登记到管理池 (is_server = false)
-        self.add(addr, abort_handle, conn_token, false, None);
+        self.add(addr, abort_handle, conn_token, false, Some(ctx));
 
         Ok(())
     }
@@ -207,11 +207,11 @@ impl ConnectionManager {
         is_client: bool,
         context: Option<Arc<Mutex<Context>>>, // writer: Option<Arc<Mutex<Option<BoxWriter>>>>,
     ) {
-        let ip = addr.ip();
-        if ip.is_loopback() {
+        if addr.ip().is_loopback() {
             return;
         }
 
+        let ip = addr.ip();
         let scope = NetworkScope::from_ip(&ip);
         let key = (ip, scope);
 

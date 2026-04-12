@@ -291,7 +291,7 @@ mod tests {
 
         // 2. 测试基础类型存储 (String)
         let test_msg = "AexServerExtension".to_string();
-        ctx.set(test_msg.clone()).await;
+        ctx.set(test_msg.clone());
         let retrieved_msg = ctx.get::<String>().await;
         assert_eq!(retrieved_msg, Some(test_msg));
 
@@ -300,7 +300,7 @@ mod tests {
             id: 1024,
             role: "admin".to_string(),
         };
-        ctx.set(config.clone()).await;
+        ctx.set(config.clone());
         let retrieved_config = ctx.get::<UserConfig>().await;
         assert_eq!(retrieved_config, Some(config));
 
@@ -309,8 +309,8 @@ mod tests {
         assert!(non_existent.is_none());
 
         // 5. 测试类型覆盖（同一 TypeId 再次 set）
-        ctx.set(42u64).await;
-        ctx.set(99u64).await; // 覆盖旧值
+        ctx.set(42u64);
+        ctx.set(99u64); // 覆盖旧值
         assert_eq!(ctx.get::<u64>().await, Some(99u64));
     }
 

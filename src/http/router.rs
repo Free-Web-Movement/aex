@@ -263,16 +263,22 @@ impl Router {
     }
 
     pub async fn is_http(self: Arc<Self>, ctx: Arc<Mutex<Context>>) -> anyhow::Result<bool> {
-        // 1. 获取可变锁（注意这里需要 mut guard，因为我们要借用里面的 reader 进行读取）
-        let mut guard = ctx.lock().await;
+        // ⚡ 优化：临时取走 Reader 进行探测，避免在 I/O 等待时锁死 Context
+        let reader = {
+            let mut guard = ctx.lock().await;
+            guard.reader.take()
+        };
 
-        // 2. 使用 as_mut() 进入 Option 内部并获取可变引用
-        if let Some(inner_reader) = guard.reader.as_mut() {
-            // 此时 inner_reader 的类型是 &mut Box<dyn AsyncBufRead...>
-            // 直接传入即可，不需要再加 &mut
-            if HttpMethod::is_http_connection(inner_reader).await? {
-                // 在调用 handle 之前释放锁，防止 handle 内部尝试获取同一个锁导致死锁
-                drop(guard);
+        if let Some(mut inner_reader) = reader {
+            let is_http = HttpMethod::is_http_connection(&mut inner_reader).await?;
+            
+            // 将 Reader 放回 Context
+            {
+                let mut guard = ctx.lock().await;
+                guard.reader = Some(inner_reader);
+            }
+
+            if is_http {
                 self.handle(ctx).await?;
                 return Ok(true);
             }
@@ -280,7 +286,7 @@ impl Router {
             return Ok(false);
         }
 
-        Ok(false) // 如果不是 HTTP，返回 false 以便后续 P2P 逻辑继续
+        Ok(false)
     }
 }
 

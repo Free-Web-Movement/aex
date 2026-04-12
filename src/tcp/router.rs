@@ -111,46 +111,60 @@ impl Router {
         let mut session_buf: Vec<u8> = Vec::with_capacity(4096);
         let mut buf = vec![0u8; 1024];
 
-        loop {
-            // ⚡ 修复点 1：解包 Option 拿到里面的 Box (它才实现了 AsyncBufRead)
-            // 使用 as_deref_mut() 拿到 &mut (dyn AsyncBufRead + ...)
+        // 💡 核心优化：在 I/O 时不锁定 Context，解决 P2P 双向传递锁死问题
+        let reader = {
+            let mut guard = ctx.lock().await;
+            guard.reader.take()
+        };
 
-            let n = {
-                let mut guard = ctx.lock().await;
-                match &mut guard.reader.as_deref_mut() {
-                    Some(r) => r.read(&mut buf).await?,
-                    None => {
-                        eprintln!("Reader taken and not returned!");
-                        break;
-                    }
+        if reader.is_none() {
+            return Ok(());
+        }
+        let mut r = reader.unwrap();
+
+        loop {
+            // 在不锁定 Context 的情况下进行异步读取
+            let n = match r.read(&mut buf).await {
+                std::result::Result::Ok(n) => n,
+                std::result::Result::Err(e) => {
+                    let mut guard = ctx.lock().await;
+                    guard.reader = Some(r);
+                    return Err(e.into());
                 }
             };
+
             if n == 0 {
                 break;
             }
             session_buf.extend_from_slice(&buf[..n]);
+
+            // 正确处理粘包与半包
             while !session_buf.is_empty() {
-                use std::result::Result::Ok;
-                match <F as Codec>::decode(&session_buf) {
-                    Ok(frame) => {
+                match <F as Codec>::decode_with_len(&session_buf) {
+                    std::result::Result::Ok((frame, consumed)) => {
                         let should_continue = self
                             .handle_frame::<F, C>(ctx.clone(), frame, extractor.clone())
                             .await?;
 
-                        session_buf.clear();
-                        {
-                            let guard = ctx.lock().await;
-                            let reader = &guard.reader;
-                            if !should_continue || reader.is_none() {
-                                eprintln!("Handler terminated connection or kept the stream");
-                                return Ok(());
-                            }
+                        session_buf.drain(0..consumed);
+
+                        if !should_continue {
+                            let mut guard = ctx.lock().await;
+                            guard.reader = Some(r);
+                            return std::result::Result::Ok(());
                         }
                     }
-                    Err(_) => break,
+                    std::result::Result::Err(_) => {
+                        // 等待更多数据
+                        break;
+                    }
                 }
             }
         }
-        Ok(())
+
+        // 归还 Reader
+        let mut guard = ctx.lock().await;
+        guard.reader = Some(r);
+        std::result::Result::Ok(())
     }
 }

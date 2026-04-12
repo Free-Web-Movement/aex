@@ -22,11 +22,17 @@ pub trait Codec: Serialize + for<'de> Deserialize<'de> + Encode + Decode<()> + S
         encode_to_vec(self, frame_config()).expect("serialize failed")
     }
 
+    /// 反序列化并返回消耗的字节数
+    fn decode_with_len(data: &[u8]) -> Result<(Self, usize)> {
+        // bincode 2.0 返回 (Object, read_length)
+        let (decoded, len): (Self, usize) = decode_from_slice(data, frame_config())
+            .map_err(|e| anyhow::anyhow!("decode failed: {}", e))?;
+        Ok((decoded, len))
+    }
+
     /// 反序列化
     fn decode(data: &[u8]) -> Result<Self> {
-        // bincode 2.0 返回 (Object, read_length)
-        let (decoded, _): (Self, usize) = decode_from_slice(data, frame_config())
-            .map_err(|e| anyhow::anyhow!("decode failed: {}", e))?;
+        let (decoded, _): (Self, usize) = Self::decode_with_len(data)?;
         Ok(decoded)
     }
 }
