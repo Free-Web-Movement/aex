@@ -8,6 +8,10 @@ repository = "https://github.com/Free-Web-Movement/aex"
 keywords = ["rust", "web", "http", "server", "router"]
 authors = ["Eric <calidion@gmail.com>"]
 
+[features]
+default = ["router-cache"]
+router-cache = []
+
 [dependencies]
 tokio = { version = "1.40", features = ["full"] }
 anyhow = "1.0"
@@ -33,6 +37,8 @@ x25519-dalek = { version = "2.0", features = ["static_secrets", "getrandom"] }
 dirs-next = "2.0.0"
 derivative = "2.2.0"
 tracing = "0.1.44"
+ahash = "0.7.8"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [profile.release]
 opt-level = "z"
@@ -48,3 +54,5 @@ path = "src/main.rs"
 reqwest = { version = "0.13.2", features = ["json", "blocking"] }
 tokio = { version = "1", features = ["full", "test-util"] }
 serde = { version = "1.0", features = ["derive"] }
+actix-web = "4"
+axum = "0.7"

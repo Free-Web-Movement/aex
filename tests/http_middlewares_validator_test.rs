@@ -1,4 +1,5 @@
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
+use ahash::AHashMap;
 
 use aex::{
     connection::context::TypeMapExt,
@@ -25,7 +26,7 @@ async fn test_to_validator_integration_full() {
     let mut hr = Router::new(NodeType::Static("root".into()));
 
     // --- 1. 定义 Schema (覆盖所有 Source 和主要类型) ---
-    let mut dsl_map = std::collections::HashMap::new();
+    let mut dsl_map = AHashMap::new();
     dsl_map.insert("params".to_string(), "id:int[1,100]".to_string()); // params 分支
     dsl_map.insert("query".to_string(), "active:bool, f:float".to_string()); // query + bool/float 分支
     dsl_map.insert("body".to_string(), "tags:array<string>".to_string()); // body + array 分支
@@ -373,7 +374,7 @@ async fn test_validator_edge_cases_and_fallback() {
 
 #[tokio::test]
 async fn test_validator_boolean_strict_error_integration() {
-    use std::collections::HashMap;
+    use ahash::AHashMap;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpStream;
 
@@ -383,7 +384,7 @@ async fn test_validator_boolean_strict_error_integration() {
     drop(listener);
 
     // --- 🚀 修正点：根据 Parser 的报错修改 DSL 语法 ---
-    let mut dsl_map = HashMap::new();
+    let mut dsl_map = AHashMap::new();
     // 之前报错 "Expected LParen"，说明语法需要括号
     dsl_map.insert("query".to_string(), "(is_active:bool)".to_string());
 
@@ -428,7 +429,7 @@ async fn test_validator_boolean_strict_error_integration() {
 
 #[tokio::test]
 async fn test_validator_integer_strict_error_integration() {
-    use std::collections::HashMap;
+    use ahash::AHashMap;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpStream;
 
@@ -440,7 +441,7 @@ async fn test_validator_integer_strict_error_integration() {
 
     // 2. 构造 DSL：要求 query 中的 'age' 必须是 int
     // 语法使用你确认正确的：(变量名:类型)
-    let mut dsl_map = HashMap::new();
+    let mut dsl_map = AHashMap::new();
     dsl_map.insert("query".to_string(), "(age:int)".to_string());
 
     let mut hr = Router::new(NodeType::Static("root".into()));
@@ -501,7 +502,7 @@ async fn test_validator_integer_strict_error_integration() {
 
 #[tokio::test]
 async fn test_validator_float_strict_error_integration() {
-    use std::collections::HashMap;
+    use ahash::AHashMap;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpStream;
 
@@ -513,7 +514,7 @@ async fn test_validator_float_strict_error_integration() {
 
     // 2. 构造 DSL：要求 query 中的 'price' 必须是 float
     // 语法：(变量名:类型)
-    let mut dsl_map = HashMap::new();
+    let mut dsl_map = AHashMap::new();
     dsl_map.insert("query".to_string(), "(price:float)".to_string());
 
     let mut hr = Router::new(NodeType::Static("root".into()));
@@ -574,7 +575,7 @@ async fn test_validator_float_strict_error_integration() {
 
 #[tokio::test]
 async fn test_validator_float_auto_completion_promotion() {
-    use std::collections::HashMap;
+    use ahash::AHashMap;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpStream;
 
@@ -584,7 +585,7 @@ async fn test_validator_float_auto_completion_promotion() {
     drop(listener);
 
     // 1. DSL: 规定 val 为 float 类型
-    let mut dsl_map = HashMap::new();
+    let mut dsl_map = AHashMap::new();
     dsl_map.insert("query".to_string(), "(val:float)".to_string());
 
     let mut hr = Router::new(NodeType::Static("root".into()));
@@ -645,7 +646,7 @@ async fn test_validator_float_auto_completion_promotion() {
 
 #[tokio::test]
 async fn test_validator_value_to_string_fallback() {
-    use std::collections::HashMap;
+    use ahash::AHashMap;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpStream;
 
@@ -655,7 +656,7 @@ async fn test_validator_value_to_string_fallback() {
     drop(listener);
 
     // 1. DSL: 正常配置
-    let mut dsl_map = HashMap::new();
+    let mut dsl_map = AHashMap::new();
     dsl_map.insert("query".to_string(), "(tag:string)".to_string());
 
     let mut hr = Router::new(NodeType::Static("root".into()));
@@ -730,7 +731,7 @@ fn test_value_to_string_all_variants() {
     // --- 🚀 重点：测试 _ => "".to_string() 分支 ---
     // 传入一个 Array 或 Object，这两个在 match 中没有对应的分支，会落入 _
     let array_val = Value::Array(vec![Value::Int(1)]);
-    let object_val = Value::Object(HashMap::new());
+    let object_val = Value::Object(std::collections::HashMap::new());
 
     assert_eq!(
         value_to_string(array_val),
@@ -746,7 +747,7 @@ fn test_value_to_string_all_variants() {
 
 #[tokio::test]
 async fn test_validator_params_none_fallback() {
-    use std::collections::HashMap;
+    use ahash::AHashMap;
 
     // 1. 设置地址与路由
     let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
@@ -754,7 +755,7 @@ async fn test_validator_params_none_fallback() {
     let actual_addr = listener.local_addr().unwrap();
     drop(listener);
 
-    let mut dsl_map = HashMap::new();
+    let mut dsl_map = AHashMap::new();
     dsl_map.insert("query".to_string(), "(id:int)".to_string());
 
     let mut hr = Router::new(NodeType::Static("root".into()));

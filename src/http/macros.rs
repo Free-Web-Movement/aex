@@ -86,12 +86,12 @@ macro_rules! exe {
 macro_rules! validator {
     ($($key:ident => $dsl:expr),* $(,)?) => {
         {
-        use std::collections::HashMap;
+        use ahash::AHashMap;
         use std::sync::Arc;
         use $crate::http::middlewares::validator::to_validator;
         use $crate::http::types::Executor;
 
-        let mut dsl_map: HashMap<String, String> = HashMap::new();
+        let mut dsl_map: AHashMap<String, String> = AHashMap::new();
 
         $(
             dsl_map.insert(stringify!($key).to_string(), $dsl.to_string());

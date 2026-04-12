@@ -7,7 +7,7 @@ mod tests {
         connection::context::TypeMap,
         http::{meta::HttpMetadata, req::Request},
     };
-    use std::collections::HashMap;
+    use ahash::AHashMap;
     use std::io::Cursor;
     use std::sync::Arc;
     use tokio::io::BufReader;
@@ -97,7 +97,7 @@ mod tests {
         meta.method = HttpMethod::POST;
 
         let mut params = Params::new("/?q=rust".to_string());
-        let mut data = HashMap::new();
+        let mut data = AHashMap::new();
         data.insert("id".to_string(), "123".to_string());
         params.data = Some(data);
         params.set_form("name=bob");

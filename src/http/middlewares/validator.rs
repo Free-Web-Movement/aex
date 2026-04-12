@@ -1,4 +1,5 @@
-use std::{collections::HashMap, sync::Arc};
+use ahash::AHashMap;
+use std::sync::Arc;
 use zz_validator::{
     ast::{FieldRule, FieldType, Value},
     parser::Parser,
@@ -49,7 +50,8 @@ fn to_value_optimized<'a, I>(iter_provider: I, rules: &[FieldRule]) -> Result<Va
 where
     I: Fn(&str) -> Option<Vec<&'a str>>,
 {
-    let mut obj = HashMap::with_capacity(rules.len());
+    let mut obj: std::collections::HashMap<String, Value> =
+        std::collections::HashMap::with_capacity(rules.len());
 
     for rule in rules {
         let field_name = &rule.field;
@@ -97,7 +99,7 @@ pub fn value_to_string(v: Value) -> String {
     }
 }
 
-pub fn to_validator(dsl_map: HashMap<String, String>) -> Arc<Executor> {
+pub fn to_validator(dsl_map: AHashMap<String, String>) -> Arc<Executor> {
     // 1️⃣ 注册期：预解析规则
     let mut compiled_vec = Vec::new();
     for (source, dsl) in dsl_map {
@@ -201,7 +203,7 @@ pub fn to_validator(dsl_map: HashMap<String, String>) -> Arc<Executor> {
                                 }
                             }
                             "body" => {
-                                let form_map = params.form.get_or_insert_with(HashMap::new);
+                                let form_map = params.form.get_or_insert_with(AHashMap::new);
                                 for (k, v) in obj {
                                     form_map.insert(
                                         k,
@@ -215,7 +217,7 @@ pub fn to_validator(dsl_map: HashMap<String, String>) -> Arc<Executor> {
                                 }
                             }
                             "params" => {
-                                let data_map = params.data.get_or_insert_with(HashMap::new);
+                                let data_map = params.data.get_or_insert_with(AHashMap::new);
                                 for (k, v) in obj {
                                     data_map.insert(k, value_to_string(v));
                                 }

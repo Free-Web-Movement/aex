@@ -22,10 +22,11 @@
 //! router.post("/api/users", create_handler).middleware(auth).register();
 //! ```
 
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::result::Result::Ok;
+use ahash::AHashMap;
 
 use tokio::{io::AsyncReadExt, sync::Mutex};
 
@@ -33,7 +34,7 @@ use crate::{
     connection::context::{Context, TypeMapExt},
     http::{
         meta::HttpMetadata,
-        params::Params,
+        params::{Params, SmallParams},
         protocol::{media_type::SubMediaType, method::HttpMethod, status::StatusCode},
         types::Executor,
     },
@@ -45,9 +46,25 @@ pub enum NodeType {
     /// Static path segment (e.g., "users")
     Static(String),
     /// Parameter segment (e.g., ":id" captures "123")
-    Param(String),
+    /// Using Box<str> for smaller memory footprint and faster cloning
+    Param(Box<str>),
     /// Wildcard segment (* matches all remaining)
     Wildcard,
+}
+
+impl NodeType {
+    #[inline]
+    pub fn is_param(&self) -> bool {
+        matches!(self, NodeType::Param(_))
+    }
+    #[inline]
+    pub fn is_static(&self) -> bool {
+        matches!(self, NodeType::Static(_))
+    }
+    #[inline]
+    pub fn is_wildcard(&self) -> bool {
+        matches!(self, NodeType::Wildcard)
+    }
 }
 
 /// Builder for fluent route registration.
@@ -99,12 +116,12 @@ impl<'a> RouteBuilder<'a> {
             
             if segments.is_empty() {
                 if router.handlers.is_none() {
-                    router.handlers = Some(HashMap::new());
+                    router.handlers = Some(AHashMap::with_capacity(8));
                 }
                 router.handlers.as_mut().unwrap().insert(method_key.clone(), self.handler.clone());
                 if !self.middlewares.is_empty() {
                     if router.middlewares.is_none() {
-                        router.middlewares = Some(HashMap::new());
+                        router.middlewares = Some(AHashMap::with_capacity(4));
                     }
                     router.middlewares.as_mut().unwrap().insert(method_key, self.middlewares.clone());
                 }
@@ -125,7 +142,7 @@ impl<'a> RouteBuilder<'a> {
                     Router::new(if key == "*" {
                         NodeType::Wildcard
                     } else if key == ":" {
-                        NodeType::Param(seg[1..].to_string())
+                        NodeType::Param(seg[1..].into())
                     } else {
                         NodeType::Static(seg.to_string())
                     })
@@ -134,13 +151,13 @@ impl<'a> RouteBuilder<'a> {
             }
 
             if current.handlers.is_none() {
-                current.handlers = Some(HashMap::new());
+                current.handlers = Some(AHashMap::with_capacity(8));
             }
             current.handlers.as_mut().unwrap().insert(method_key.clone(), self.handler.clone());
 
             if !self.middlewares.is_empty() {
                 if current.middlewares.is_none() {
-                    current.middlewares = Some(HashMap::new());
+                    current.middlewares = Some(AHashMap::with_capacity(4));
                 }
                 current.middlewares.as_mut().unwrap().insert(method_key, self.middlewares.clone());
             }
@@ -151,9 +168,13 @@ impl<'a> RouteBuilder<'a> {
 /// Trie tree router for HTTP path matching.
 pub struct Router {
     pub node_type: NodeType,
-    pub children: HashMap<String, Router>,
-    pub middlewares: Option<HashMap<String, Vec<Arc<Executor>>>>,
-    pub handlers: Option<HashMap<String, Arc<Executor>>>,
+    pub children: AHashMap<String, Router>,
+    pub middlewares: Option<AHashMap<String, Vec<Arc<Executor>>>>,
+    pub handlers: Option<AHashMap<String, Arc<Executor>>>,
+    #[cfg(feature = "router-cache")]
+    param_key: Option<String>,
+    #[cfg(feature = "router-cache")]
+    wildcard_key: Option<String>,
 }
 
 impl Router {
@@ -161,10 +182,73 @@ impl Router {
     pub fn new(node_type: NodeType) -> Self {
         Self {
             node_type,
-            children: HashMap::new(),
+            children: AHashMap::with_capacity(4),
             middlewares: None,
             handlers: None,
+            #[cfg(feature = "router-cache")]
+            param_key: None,
+            #[cfg(feature = "router-cache")]
+            wildcard_key: None,
         }
+    }
+
+    #[cfg(feature = "router-cache")]
+    pub fn finalize(&mut self) {
+        for (key, child) in &mut self.children {
+            match &child.node_type {
+                NodeType::Param(_) => {
+                    self.param_key = Some(key.clone());
+                }
+                NodeType::Wildcard => {
+                    self.wildcard_key = Some(key.clone());
+                }
+                NodeType::Static(_) => {}
+            }
+            child.finalize();
+        }
+    }
+
+    #[inline]
+    pub fn match_route_fast<'a>(&'a self, segs: &'a [&str]) -> Option<&'a Router> {
+        let mut current: &Router = self;
+        
+        for seg in segs {
+            let seg_str: &str = seg;
+            match current.children.get(seg_str) {
+                Some(node) if node.node_type.is_static() => {
+                    current = node;
+                }
+                _ => {
+                    #[cfg(feature = "router-cache")]
+                    {
+                        if let Some(ref param_key) = current.param_key {
+                            if let Some(node) = current.children.get(param_key) {
+                                if !node.node_type.is_param() {
+                                    return None;
+                                }
+                                current = node;
+                                continue;
+                            }
+                        }
+                    }
+                    #[cfg(not(feature = "router-cache"))]
+                    {
+                        if let Some(node) = current.children.get(":") {
+                            if node.node_type.is_param() {
+                                current = node;
+                                continue;
+                            }
+                        }
+                    }
+                    
+                    if let Some(node) = current.children.get("*") {
+                        return Some(node);
+                    }
+                    return None;
+                }
+            }
+        }
+        Some(current)
     }
 
     /// Fluent route registration: GET method.
@@ -244,7 +328,7 @@ impl Router {
                 Router::new(if key == "*" {
                     NodeType::Wildcard
                 } else if key == ":" {
-                    NodeType::Param(seg[1..].to_string())
+                    NodeType::Param(seg[1..].into())
                 } else {
                     NodeType::Static(seg.to_string())
                 })
@@ -257,7 +341,7 @@ impl Router {
 
         // 设置处理器
         if node.handlers.is_none() {
-            node.handlers = Some(HashMap::new());
+            node.handlers = Some(AHashMap::with_capacity(8));
         }
         node.handlers
             .as_mut()
@@ -267,17 +351,18 @@ impl Router {
         // 设置中间件
         if let Some(mws) = middlewares {
             if node.middlewares.is_none() {
-                node.middlewares = Some(HashMap::new());
+                node.middlewares = Some(AHashMap::with_capacity(4));
             }
             node.middlewares.as_mut().unwrap().insert(method_key, mws);
         }
     }
 
     /// 匹配路径
+    #[inline]
     pub fn match_route<'a>(
         &'a self,
         segs: &[&str],
-        params: &mut HashMap<String, String>,
+        params: &mut SmallParams,
     ) -> Option<&'a Router> {
         if segs.is_empty() {
             return Some(self);
@@ -286,26 +371,25 @@ impl Router {
         let seg = segs[0];
         let rest = &segs[1..];
 
-        // 1. 静态匹配
-        if let Some(child) = self.children.get(seg)
-            && let matched @ Some(_) = child.match_route(rest, params)
-        {
-            return matched;
+        if let Some(child) = self.children.get(seg) {
+            if let matched @ Some(_) = child.match_route(rest, params) {
+                return matched;
+            }
         }
 
-        // 2. 动态匹配
         if let Some(param_child) = self.children.get(":") {
             if let NodeType::Param(name) = &param_child.node_type {
-                params.insert(name.clone(), seg.to_string());
+                let key = String::from(name.as_ref());
+                let val = String::from(seg);
+                params.insert(key, val);
             }
             if let matched @ Some(_) = param_child.match_route(rest, params) {
                 return matched;
             }
         }
 
-        // 3. 通配符匹配
-        if let Some(wildcard_child) = self.children.get("*") {
-            return Some(wildcard_child);
+        if self.children.get("*").is_some() {
+            return self.children.get("*");
         }
 
         None
@@ -337,10 +421,8 @@ impl Router {
     // --------------------------------------
 
     pub async fn on_request(&self, ctx: &mut Context) -> bool {
-        // 1. 获取 Metadata
-        let meta = &mut ctx.local.get_value::<HttpMetadata>().unwrap(); // 注意这里直接从 local 获取并可变借用
+        let meta = &mut ctx.local.get_value::<HttpMetadata>().unwrap();
 
-        // 2. 准备路由匹配所需的 segments
         let pure_path = meta.path.split('?').next().unwrap_or("");
         let segments: Vec<&str> = pure_path
             .trim_start_matches('/')
@@ -348,17 +430,13 @@ impl Router {
             .filter(|s| !s.is_empty())
             .collect();
 
-        let mut path_params = HashMap::new();
+        let mut path_params = SmallParams::with_capacity(segments.len().min(8));
 
-        // 3. 执行 Trie 树匹配
         if let Some(node) = self.match_route(&segments, &mut path_params) {
-            // 4. 构造并填充 Params
             let mut params = Params::new(meta.path.clone());
 
-            // Trie 树已经帮我们解析好了 data (Path Params)
-            // 只有在 HashMap 不为空时才注入，保持数据清洁
             if !path_params.is_empty() {
-                params.data = Some(path_params);
+                params.data = Some(unsafe { path_params.into_map_unchecked() });
             }
 
             // 5. 处理 Form Body (如果是 x-www-form-urlencoded)
