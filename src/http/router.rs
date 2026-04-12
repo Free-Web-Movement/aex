@@ -14,18 +14,12 @@
 //!
 //! ```rust,ignore
 //! use aex::http::router::{NodeType, Router as HttpRouter};
-//! use aex::{exe, get, post};
+//! use aex::exe;
 //!
 //! let mut router = HttpRouter::new(NodeType::Static("root".into()));
 //!
 //! router.get("/api/users", handler).register();
 //! router.post("/api/users", create_handler).middleware(auth).register();
-//! ```
-//!
-//! ## Macro API (Legacy)
-//!
-//! ```rust,ignore
-//! route!(router, get!("/path", handler, [mw1, mw2]));
 //! ```
 
 use std::{collections::HashMap, sync::Arc};

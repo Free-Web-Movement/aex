@@ -3,13 +3,12 @@ use aex::connection::global::GlobalContext;
 use aex::http::meta::HttpMetadata;
 use aex::http::protocol::header::HeaderKey;
 use aex::http::protocol::media_type::SubMediaType;
-use aex::http::protocol::status::StatusCode;
 use aex::http::router::Router as HttpRouter;
 use aex::server::Server;
 use aex::tcp::router::Router as TcpRouter;
 use aex::tcp::types::{Command, RawCodec};
 use aex::udp::router::Router as UdpRouter;
-use aex::{exe, get, route};
+use aex::exe;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::UdpSocket;
@@ -18,32 +17,16 @@ use tokio::net::UdpSocket;
 async fn main() -> anyhow::Result<()> {
     let addr: SocketAddr = "0.0.0.0:8080".parse()?;
 
-    // --- 1. HTTP 路由配置 ---
     let mut http_router = HttpRouter::default();
 
-    route!(
-        http_router,
-        get!(
-            "/",
-            exe!(|ctx| {
-                let meta = &mut ctx.local.get_value::<HttpMetadata>().unwrap();
-                meta.status = StatusCode::Ok;
-                meta.headers.insert(
-                    HeaderKey::ContentType,
-                    SubMediaType::Plain.as_str().to_string(),
-                );
-                meta.body = "Hello world!".to_string().into_bytes().to_vec();
-                // false = 不继续 middleware（如果你还保留这个语义）
-                true
-            })
-        )
-    );
+    http_router.get("/", exe!(|ctx| {
+        let meta = ctx.local.get_value::<HttpMetadata>().unwrap();
+        ctx.send("Hello world!");
+        true
+    })).register();
 
-    // --- 2. TCP 路由配置 (使用 RawCodec) ---
-    // 提取器：取二进制前4字节作为 ID
     let mut tcp_router = TcpRouter::new();
 
-    // 注册 TCP 指令 1001
     tcp_router.on::<RawCodec, RawCodec>(
         1001,
         Box::new(|_ctx, _frame: RawCodec, cmd: RawCodec| {
@@ -56,10 +39,8 @@ async fn main() -> anyhow::Result<()> {
         vec![],
     );
 
-    // --- 3. UDP 路由配置 (使用 RawCodec) ---
     let mut udp_router = UdpRouter::new();
 
-    // 注册 UDP 指令 2002
     udp_router.on::<RawCodec, RawCodec, _, _>(
         2002,
         |_global: Arc<GlobalContext>,
@@ -68,15 +49,12 @@ async fn main() -> anyhow::Result<()> {
          peer,
          socket: Arc<UdpSocket>| async move {
             println!("[UDP] Received 2002 from {}, data: {:?}", peer, payload);
-            // UDP 回包示例
             let response = b"UDP ACK".to_vec();
             let _ = socket.send_to(&response, peer).await;
             Ok(true)
         },
     );
 
-    // --- 4. 组装并启动服务器 ---
-    // 借力于 HTTPServer 类型别名或直接使用 Server
     Server::new(addr, None)
         .http(http_router)
         .tcp(tcp_router)

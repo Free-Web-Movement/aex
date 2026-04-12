@@ -10,16 +10,14 @@ mod tests {
     };
 
     use aex::{
-        all,
         connection::context::{Context, TypeMapExt},
-        exe, get,
+        exe,
         http::{
             meta::HttpMetadata,
             protocol::{header::HeaderKey, status::StatusCode},
             router::{NodeType, Router},
             types::{Executor, to_executor},
         },
-        route,
         server::{HTTPServer, Server},
         tcp::types::{Command, RawCodec},
     };
@@ -767,13 +765,13 @@ mod tests {
             true
         });
 
-        // --- 3. 使用 route! 配合不同方法宏注册 ---
+        // --- 3. 使用 fluent API 注册 ---
 
         // 注册通配符方法路由到 /api/*
-        route!(hr, all!("/api/all", handler.clone(), vec![mw_info.clone()]));
+        hr.all("/api/all", handler.clone()).middleware(mw_info.clone()).register();
 
         // 注册特定 GET 路由
-        route!(hr, get!("/api/specific", handler, vec![mw_info]));
+        hr.get("/api/specific", handler).middleware(mw_info).register();
 
         // --- 4. 启动服务器 ---
         let server = HTTPServer::new(actual_addr, None).http(hr).clone();
@@ -847,8 +845,8 @@ mod tests {
         });
 
         // --- 3. 注册路由 ---
-        route!(hr, all!("/api/all", handler.clone(), vec![mw_info.clone()]));
-        route!(hr, get!("/api/specific", handler, vec![mw_info]));
+        hr.all("/api/all", handler.clone()).middleware(mw_info.clone()).register();
+        hr.get("/api/specific", handler).middleware(mw_info).register();
 
         // --- 4. 启动服务器 ---
         let server = HTTPServer::new(actual_addr, None).http(hr).clone();

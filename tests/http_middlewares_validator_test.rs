@@ -2,13 +2,12 @@ use std::{collections::HashMap, sync::Arc};
 
 use aex::{
     connection::context::TypeMapExt,
-    exe, get,
+    exe,
     http::{
         meta::HttpMetadata,
         middlewares::validator::{to_validator, value_to_string},
         router::{NodeType, Router},
     },
-    post, route,
     server::HTTPServer,
     tcp::types::{Command, RawCodec},
     v,
@@ -44,7 +43,7 @@ async fn test_to_validator_integration_full() {
     });
 
     // 路由中的 :id 必须对应 DSL 里的 id
-    route!(hr, post!("/check/:id", handler, vec![mw_validator]));
+    hr.post("/check/:id", handler).middleware(mw_validator).register();
 
     let server = HTTPServer::new(actual_addr, None).http(hr).clone();
     tokio::spawn(async move {
@@ -121,7 +120,7 @@ async fn test_v_macro_integration_full() {
         true
     });
 
-    route!(hr, post!("/check/:id", handler, vec![mw_validator]));
+    hr.post("/check/:id", handler).middleware(mw_validator).register();
 
     let server = HTTPServer::new(actual_addr, None).http(hr).clone();
     tokio::spawn(async move {
@@ -205,7 +204,7 @@ async fn test_validator_to_handler_data_flow() {
     });
 
     // 路由绑定：:id 对应 params 规则
-    route!(hr, post!("/user/:id", handler, vec![mw_validator]));
+    hr.post("/user/:id", handler).middleware(mw_validator).register();
 
     let server = HTTPServer::new(actual_addr, None).http(hr).clone();
     tokio::spawn(async move {
@@ -262,7 +261,7 @@ async fn test_validator_conversion_logic_hardcore() {
         true
     });
 
-    route!(hr, get!("/test", handler, vec![mw_validator]));
+    hr.get("/test", handler).middleware(mw_validator).register();
 
     let server = HTTPServer::new(actual_addr, None).http(hr).clone();
     tokio::spawn(async move {
@@ -327,7 +326,7 @@ async fn test_validator_edge_cases_and_fallback() {
         true
     });
 
-    route!(hr, get!("/edge", handler, vec![mw_validator]));
+    hr.get("/edge", handler).middleware(mw_validator).register();
 
     let server = HTTPServer::new(actual_addr, None).http(hr).clone();
     tokio::spawn(async move {

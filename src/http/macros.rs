@@ -1,138 +1,19 @@
 //! # HTTP Macros
 //!
-//! Macros for defining routes and handlers.
+//! Macros for defining HTTP handlers.
 //!
 //! ## Usage
 //!
 //! ```rust,ignore
-//! use aex::{body, exe, get, post, route};
+//! use aex::exe;
 //!
-//! // Simple route
-//! route!(router, get!("/path", exe!(|ctx| {
-//!     body!(ctx, "response");
+//! let handler = exe!(|ctx| {
+//!     ctx.send("response");
 //!     true
-//! })));
-//!
-//! // With middleware
-//! route!(router, post!("/api/users", handler, [auth_mw, log_mw]));
+//! });
 //! ```
 
 // for `.boxed()`
-
-// -----------------------------
-// Internal method macro generator
-// -----------------------------
-#[macro_export]
-macro_rules! make_method_macro {
-    ($method_str:expr, $path:expr, $handler:expr $(, $middleware:expr)?) => {
-        {
-            use std::sync::Arc;
-            use $crate::http::types::{Executor};
-
-            // 修正：假设 $handler 已经是 Arc<Executor> 类型
-            let handler_arc: Arc<Executor> = $handler;
-
-            // 修正：中间件列表处理，支持直接传入 Vec<Arc<Executor>>
-            let mw_arc_opt: Option<Vec<Arc<Executor>>> = None $(.or(Some(
-                $middleware // 这里直接使用传入的 Vec，因为 exe! 已经包好了 Arc
-            )))?;
-
-            ($method_str, $path, handler_arc, mw_arc_opt)
-        }
-    };
-}
-
-// -----------------------------
-// HTTP 方法宏
-// -----------------------------
-#[macro_export]
-macro_rules! get {
-    ($path:expr, $handler:expr $(, $middleware:expr)?) => {
-        $crate::make_method_macro!("GET", $path, $handler $(, $middleware)?)
-    };
-}
-
-#[macro_export]
-macro_rules! post {
-    ($path:expr, $handler:expr $(, $middleware:expr)?) => {
-        $crate::make_method_macro!("POST", $path, $handler $(, $middleware)?)
-    };
-}
-
-#[macro_export]
-macro_rules! put {
-    ($path:expr, $handler:expr $(, $middleware:expr)?) => {
-        $crate::make_method_macro!("PUT", $path, $handler $(, $middleware)?)
-    };
-}
-
-#[macro_export]
-macro_rules! delete {
-    ($path:expr, $handler:expr $(, $middleware:expr)?) => {
-        $crate::make_method_macro!("DELETE", $path, $handler $(, $middleware)?)
-    };
-}
-
-#[macro_export]
-macro_rules! patch {
-    ($path:expr, $handler:expr $(, $middleware:expr)?) => {
-        $crate::make_method_macro!("PATCH", $path, $handler $(, $middleware)?)
-    };
-}
-
-#[macro_export]
-macro_rules! options {
-    ($path:expr, $handler:expr $(, $middleware:expr)?) => {
-        $crate::make_method_macro!("OPTIONS", $path, $handler $(, $middleware)?)
-    };
-}
-
-#[macro_export]
-macro_rules! head {
-    ($path:expr, $handler:expr $(, $middleware:expr)?) => {
-        $crate::make_method_macro!("HEAD", $path, $handler $(, $middleware)?)
-    };
-}
-
-#[macro_export]
-macro_rules! trace {
-    ($path:expr, $handler:expr $(, $middleware:expr)?) => {
-        $crate::make_method_macro!("TRACE", $path, $handler $(, $middleware)?)
-    };
-}
-
-#[macro_export]
-macro_rules! connect {
-    ($path:expr, $handler:expr $(, $middleware:expr)?) => {
-        $crate::make_method_macro!("CONNECT", $path, $handler $(, $middleware)?)
-    };
-}
-
-// -----------------------------
-// 全局 all! 宏
-// -----------------------------
-#[macro_export]
-macro_rules! all {
-    ($path:expr, $handler:expr $(, $middleware:expr)?) => {
-        $crate::make_method_macro!("*", $path, $handler $(, $middleware)?)
-    };
-}
-
-// -----------------------------
-// route! 宏
-// -----------------------------
-#[macro_export]
-macro_rules! route {
-    ($root:expr, $method_macro:expr) => {{
-        let (method, path, handler, middleware) = $method_macro;
-        $root.insert(
-            path,
-            if method == "*" { None } else { Some(method) },
-            handler,
-            middleware,
-        );
-    }};
-}
 
 #[macro_export]
 macro_rules! exe {

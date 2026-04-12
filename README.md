@@ -32,7 +32,10 @@ anyhow = "1"
 use aex::http::router::{NodeType, Router as HttpRouter};
 use aex::server::HTTPServer;
 use aex::tcp::types::{Command, RawCodec};
-use aex::{body, exe, get, route};
+use aex::http::router::{NodeType, Router as HttpRouter};
+use aex::server::HTTPServer;
+use aex::tcp::types::{Command, RawCodec};
+use aex::exe;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
@@ -41,10 +44,10 @@ async fn main() -> anyhow::Result<()> {
     let addr: SocketAddr = "0.0.0.0:8080".parse()?;
     let mut router = HttpRouter::new(NodeType::Static("root".into()));
 
-    route!(router, get!("/", exe!(|ctx| {
+    router.get("/", exe!(|ctx| {
         ctx.send("Hello, World!");
         true
-    })));
+    })).register();
 
     HTTPServer::new(addr, None)
         .http(router)
@@ -123,15 +126,6 @@ router.patch("/path", handler).register();
 router.all("/path", handler).register();  // 匹配所有方法
 ```
 
-#### 宏式 API（兼容）
-
-```rust
-use aex::{get, post, route};
-
-route!(router, get!("/path", handler));
-route!(router, post!("/path", handler, [mw1, mw2]));
-```
-
 ### 2. Executor - 执行器
 
 Executor 是 AEX 的核心抽象，类型签名为：
@@ -181,16 +175,12 @@ mw1 → mw2 → mw3 → handler
 ```
 
 ```rust
-use aex::{body, exe, get, route};
+use aex::exe;
 
-route!(router, get!(
-    "/protected",
-    exe!(|ctx| {
-        ctx.send("Protected resource");
-        true
-    }),
-    [auth_middleware, logging_middleware]
-));
+router.get("/protected", exe!(|ctx| {
+    ctx.send("Protected resource");
+    true
+})).middleware(auth_middleware).middleware(logging_middleware).register();
 ```
 
 ### 5. WebSocket - WebSocket 支持
@@ -199,7 +189,7 @@ WebSocket 作为中间件实现，共享 HTTP 上下文：
 
 ```rust
 use aex::http::websocket::{BinaryHandler, TextHandler, WebSocket};
-use aex::{get, route};
+use aex::exe;
 
 let text_handler: TextHandler = Arc::new(|ws, ctx, text| {
     Box::pin(async move {
@@ -252,34 +242,6 @@ exe!(|ctx, data| {
     // 同步预处理
     true
 })
-```
-
-### HTTP 方法宏
-
-| 宏 | 方法 | 说明 |
-|----|------|------|
-| `get!` | GET | 获取资源 |
-| `post!` | POST | 创建资源 |
-| `put!` | PUT | 更新资源 |
-| `delete!` | DELETE | 删除资源 |
-| `patch!` | PATCH | 部分更新 |
-| `options!` | OPTIONS | 选项 |
-| `head!` | HEAD | 头部信息 |
-| `trace!` | TRACE | 追踪 |
-| `connect!` | CONNECT | 连接 |
-| `all!` | * | 任意方法 |
-
-### 路由宏
-
-```rust
-// 基本用法
-route!(router, get!("/path", handler));
-
-// 带中间件
-route!(router, get!("/path", handler, [mw1, mw2]));
-
-// 参数快捷宏
-let handler = exe!(|ctx| { ctx.send("ok"); true });
 ```
 
 ---

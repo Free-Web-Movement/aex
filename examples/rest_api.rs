@@ -5,7 +5,7 @@ use aex::http::router::{NodeType, Router as HttpRouter};
 use aex::http::types::Executor;
 use aex::server::HTTPServer;
 use aex::tcp::types::{Command, RawCodec};
-use aex::{exe, get, post, put, delete, route};
+use aex::exe;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
@@ -43,17 +43,9 @@ async fn main() -> anyhow::Result<()> {
         let auth_header = meta.headers.get(&HeaderKey::Authorization);
 
         if auth_header.is_none() {
-            ctx.send(r#"{"error":"Unauthorized","message":"Missing Authorization header"}"#);
+            ctx.send(r#"{"error":"Unauthorized"}"#);
             return false;
         }
-
-        let token = auth_header.unwrap();
-        if !token.starts_with("Bearer ") {
-            ctx.send(r#"{"error":"Unauthorized","message":"Invalid token format"}"#);
-            return false;
-        }
-
-        ctx.local.set_value::<String>("user_123".to_string());
         true
     });
 
@@ -63,157 +55,110 @@ async fn main() -> anyhow::Result<()> {
         true
     });
 
-    route!(router, get!(
-        "/api/users",
-        exe!(|ctx| {
-            let users: Vec<_> = USERS.lock().unwrap().values().cloned().collect();
-            ctx.send(serde_json::to_string(&users).unwrap());
-            true
-        }),
-        vec![logger.clone()]
-    ));
+    router.get("/api/users", exe!(|ctx| {
+        let users: Vec<_> = USERS.lock().unwrap().values().cloned().collect();
+        ctx.send(serde_json::to_string(&users).unwrap());
+        true
+    })).middleware(logger.clone()).register();
 
-    route!(router, get!(
-        "/api/users/:id",
-        exe!(|ctx| {
-            let meta = ctx.local.get_value::<HttpMetadata>().unwrap();
-            let id = meta.params
-                .as_ref()
-                .and_then(|p| p.data.as_ref())
-                .and_then(|d| d.get("id"))
-                .map(|v| v.as_str())
-                .unwrap_or("");
+    router.get("/api/users/:id", exe!(|ctx| {
+        let meta = ctx.local.get_value::<HttpMetadata>().unwrap();
+        let id = meta.params
+            .as_ref()
+            .and_then(|p| p.data.as_ref())
+            .and_then(|d| d.get("id"))
+            .map(|v| v.as_str())
+            .unwrap_or("");
+        let users = USERS.lock().unwrap();
+        if let Some(user) = users.get(id) {
+            ctx.send(serde_json::to_string(user).unwrap());
+        } else {
+            ctx.send(r#"{"error":"Not Found"}"#);
+        }
+        true
+    })).middleware(auth.clone()).middleware(logger.clone()).register();
 
-            let users = USERS.lock().unwrap();
-            if let Some(user) = users.get(id) {
-                ctx.send(serde_json::to_string(user).unwrap());
-            } else {
-                ctx.send(r#"{"error":"Not Found","message":"User not found"}"#);
-            }
-            true
-        }),
-        vec![auth.clone(), logger.clone()]
-    ));
-
-    let create_handler: Arc<Executor> = exe!(move |ctx| {
+    router.post("/api/users", exe!(move |ctx| {
         let meta = ctx.local.get_value::<HttpMetadata>().unwrap();
         let body_str = String::from_utf8_lossy(&meta.body);
-        
         let user: serde_json::Value = match serde_json::from_str(&body_str) {
             Ok(u) => u,
             Err(_) => {
-                ctx.send(r#"{"error":"Bad Request","message":"Invalid JSON"}"#);
+                ctx.send(r#"{"error":"Bad Request"}"#);
                 return false;
             }
         };
-
         let id = user.get("id")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
             .unwrap_or_else(|| uuid_v4());
-
         let user_with_id = serde_json::json!({
             "id": id,
             "name": user.get("name").and_then(|v| v.as_str()).unwrap_or(""),
             "email": user.get("email").and_then(|v| v.as_str()).unwrap_or(""),
         });
-
         USERS.lock().unwrap().insert(
             user_with_id["id"].as_str().unwrap().to_string(), 
             user_with_id.clone()
         );
-        
-        let response = serde_json::json!({
-            "status": "created",
-            "data": user_with_id
-        });
-        ctx.send(serde_json::to_string(&response).unwrap());
+        ctx.send(serde_json::to_string(&user_with_id).unwrap());
         true
-    });
+    })).middleware(auth.clone()).middleware(logger.clone()).register();
 
-    route!(router, post!(
-        "/api/users",
-        create_handler,
-        vec![auth.clone(), logger.clone()]
-    ));
-
-    route!(router, put!(
-        "/api/users/:id",
-        exe!(|ctx| {
-            let meta = ctx.local.get_value::<HttpMetadata>().unwrap();
-            let id = meta.params
-                .as_ref()
-                .and_then(|p| p.data.as_ref())
-                .and_then(|d| d.get("id"))
-                .map(|v| v.as_str())
-                .unwrap_or("");
-
-            let body_str = String::from_utf8_lossy(&meta.body);
-            let update: serde_json::Value = match serde_json::from_str(&body_str) {
-                Ok(u) => u,
-                Err(_) => {
-                    ctx.send(r#"{"error":"Bad Request"}"#);
-                    return false;
-                }
-            };
-
-            let mut users = USERS.lock().unwrap();
-            if let Some(user) = users.get_mut(id) {
-                if let Some(name) = update.get("name") {
-                    user["name"] = name.clone();
-                }
-                if let Some(email) = update.get("email") {
-                    user["email"] = email.clone();
-                }
-                ctx.send(serde_json::to_string(user).unwrap());
-            } else {
-                ctx.send(r#"{"error":"Not Found"}"#);
+    router.put("/api/users/:id", exe!(|ctx| {
+        let meta = ctx.local.get_value::<HttpMetadata>().unwrap();
+        let id = meta.params
+            .as_ref()
+            .and_then(|p| p.data.as_ref())
+            .and_then(|d| d.get("id"))
+            .map(|v| v.as_str())
+            .unwrap_or("");
+        let body_str = String::from_utf8_lossy(&meta.body);
+        let update: serde_json::Value = match serde_json::from_str(&body_str) {
+            Ok(u) => u,
+            Err(_) => {
+                ctx.send(r#"{"error":"Bad Request"}"#);
+                return false;
             }
-            true
-        }),
-        vec![auth.clone(), logger.clone()]
-    ));
-
-    route!(router, delete!(
-        "/api/users/:id",
-        exe!(|ctx| {
-            let meta = ctx.local.get_value::<HttpMetadata>().unwrap();
-            let id = meta.params
-                .as_ref()
-                .and_then(|p| p.data.as_ref())
-                .and_then(|d| d.get("id"))
-                .map(|v| v.as_str())
-                .unwrap_or("");
-
-            let mut users = USERS.lock().unwrap();
-            if users.remove(id).is_some() {
-                ctx.send(r#"{"status":"deleted"}"#);
-            } else {
-                ctx.send(r#"{"error":"Not Found"}"#);
+        };
+        let mut users = USERS.lock().unwrap();
+        if let Some(user) = users.get_mut(id) {
+            if let Some(name) = update.get("name") {
+                user["name"] = name.clone();
             }
-            true
-        }),
-        vec![auth.clone(), logger.clone()]
-    ));
+            if let Some(email) = update.get("email") {
+                user["email"] = email.clone();
+            }
+            ctx.send(serde_json::to_string(user).unwrap());
+        } else {
+            ctx.send(r#"{"error":"Not Found"}"#);
+        }
+        true
+    })).middleware(auth.clone()).middleware(logger.clone()).register();
 
-    route!(router, get!(
-        "/health",
-        exe!(|ctx| {
-            ctx.send(r#"{"status":"healthy"}"#);
-            true
-        })
-    ));
+    router.delete("/api/users/:id", exe!(|ctx| {
+        let meta = ctx.local.get_value::<HttpMetadata>().unwrap();
+        let id = meta.params
+            .as_ref()
+            .and_then(|p| p.data.as_ref())
+            .and_then(|d| d.get("id"))
+            .map(|v| v.as_str())
+            .unwrap_or("");
+        let mut users = USERS.lock().unwrap();
+        if users.remove(id).is_some() {
+            ctx.send(r#"{"status":"deleted"}"#);
+        } else {
+            ctx.send(r#"{"error":"Not Found"}"#);
+        }
+        true
+    })).middleware(auth.clone()).middleware(logger.clone()).register();
+
+    router.get("/health", exe!(|ctx| {
+        ctx.send(r#"{"status":"healthy"}"#);
+        true
+    })).register();
 
     println!("REST API Server running at http://{}", addr);
-    println!("\nEndpoints:");
-    println!("  GET    /health           - Health check (no auth)");
-    println!("  GET    /api/users        - List users (no auth)");
-    println!("  GET    /api/users/:id    - Get user by ID (auth required)");
-    println!("  POST   /api/users        - Create user (auth required)");
-    println!("  PUT    /api/users/:id    - Update user (auth required)");
-    println!("  DELETE /api/users/:id    - Delete user (auth required)");
-    println!("\nExample:");
-    println!("  curl http://{}/api/users", addr);
 
     HTTPServer::new(addr, None)
         .http(router)

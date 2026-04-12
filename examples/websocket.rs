@@ -4,7 +4,7 @@ use aex::http::types::Executor;
 use aex::http::websocket::WSFrame;
 use aex::server::HTTPServer;
 use aex::tcp::types::{Command, RawCodec};
-use aex::{exe, get, route};
+use aex::exe;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
@@ -18,20 +18,9 @@ async fn main() -> anyhow::Result<()> {
             match frame {
                 WSFrame::Text(text) => {
                     println!("Received text: {}", text);
-                    let response = if text.contains("ping") {
-                        WSFrame::Text("pong".to_string())
-                    } else if text.contains("echo") {
-                        WSFrame::Text(text.replace("echo", "echoed"))
-                    } else {
-                        WSFrame::Text(format!("Echo: {}", text))
-                    };
-                    println!("Sending response: {:?}", response);
                 }
                 WSFrame::Binary(data) => {
                     println!("Received {} bytes", data.len());
-                }
-                WSFrame::Ping(payload) => {
-                    println!("Ping received: {:?}", payload);
                 }
                 _ => {}
             }
@@ -41,23 +30,17 @@ async fn main() -> anyhow::Result<()> {
 
     let ws_middleware: Arc<Executor> = Arc::from(WebSocket::to_middleware(ws_handler));
 
-    route!(router, get!(
-        "/",
-        exe!(|ctx| {
-            ctx.send("WebSocket server. Connect to /ws");
-            true
-        })
-    ));
+    router.get("/", exe!(|ctx| {
+        ctx.send("WebSocket server. Connect to /ws");
+        true
+    })).register();
 
-    route!(router, get!(
-        "/ws",
-        exe!(|_ctx| { true }),
-        vec![ws_middleware]
-    ));
+    router.get("/ws", exe!(|_ctx| { true }))
+        .middleware(ws_middleware)
+        .register();
 
     println!("Server running at http://{}", addr);
     println!("WebSocket endpoint: ws://{}/ws", addr);
-    println!("Test with: wscat -c ws://127.0.0.1:8080/ws");
 
     HTTPServer::new(addr, None)
         .http(router)

@@ -16,7 +16,7 @@
 //! use aex::http::router::{NodeType, Router as HttpRouter};
 //! use aex::server::HTTPServer;
 //! use aex::tcp::types::{Command, RawCodec};
-//! use aex::{exe, get, route};
+//! use aex::exe;
 //! use std::net::SocketAddr;
 //! use std::sync::Arc;
 //!
@@ -25,10 +25,10 @@
 //!     let addr: SocketAddr = "0.0.0.0:8080".parse()?;
 //!     let mut router = HttpRouter::new(NodeType::Static("root".into()));
 //!
-//!     route!(router, get!("/", exe!(|ctx| {
+//!     router.get("/", exe!(|ctx| {
 //!         ctx.send("Hello, World!");
 //!         true
-//!     })));
+//!     })).register();
 //!
 //!     HTTPServer::new(addr, None)
 //!         .http(router)
