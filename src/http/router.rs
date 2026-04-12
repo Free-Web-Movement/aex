@@ -23,6 +23,8 @@
 //! ```
 
 use std::{collections::HashMap, sync::Arc};
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::result::Result::Ok;
 
 use tokio::{io::AsyncReadExt, sync::Mutex};
@@ -58,21 +60,18 @@ pub enum NodeType {
 ///     .middleware(logging)
 ///     .register();
 /// ```
-pub struct RouteBuilder {
-    router: *mut Router,
+pub struct RouteBuilder<'a> {
+    router: Rc<RefCell<&'a mut Router>>,
     method: &'static str,
     path: String,
     handler: Arc<Executor>,
     middlewares: Vec<Arc<Executor>>,
 }
 
-unsafe impl Send for RouteBuilder {}
-unsafe impl Sync for RouteBuilder {}
-
-impl RouteBuilder {
-    fn new(router: &mut Router, method: &'static str, path: String, handler: Arc<Executor>) -> Self {
+impl<'a> RouteBuilder<'a> {
+    fn new(router: &'a mut Router, method: &'static str, path: String, handler: Arc<Executor>) -> Self {
         Self {
-            router,
+            router: Rc::new(RefCell::new(router)),
             method,
             path,
             handler,
@@ -88,48 +87,63 @@ impl RouteBuilder {
 
     /// Register the route with the router.
     pub fn register(self) {
-        let router = unsafe { &mut *self.router };
         let segments: Vec<&str> = self.path
             .split('/')
             .filter(|s| !s.is_empty())
             .collect();
-        let mut node = router;
-
-        for seg in &segments {
-            let key = if *seg == "*" {
-                "*".to_string()
-            } else if seg.starts_with(':') {
-                ":".to_string()
-            } else {
-                seg.to_string()
-            };
-
-            node = node.children.entry(key.clone()).or_insert_with(|| {
-                Router::new(if key == "*" {
-                    NodeType::Wildcard
-                } else if key == ":" {
-                    NodeType::Param(seg[1..].to_string())
-                } else {
-                    NodeType::Static(seg.to_string())
-                })
-            });
-        }
-
+        
         let method_key = self.method.to_uppercase();
-
-        if node.handlers.is_none() {
-            node.handlers = Some(HashMap::new());
-        }
-        node.handlers
-            .as_mut()
-            .unwrap()
-            .insert(method_key.clone(), self.handler);
-
-        if !self.middlewares.is_empty() {
-            if node.middlewares.is_none() {
-                node.middlewares = Some(HashMap::new());
+        
+        {
+            let mut router = self.router.borrow_mut();
+            
+            if segments.is_empty() {
+                if router.handlers.is_none() {
+                    router.handlers = Some(HashMap::new());
+                }
+                router.handlers.as_mut().unwrap().insert(method_key.clone(), self.handler.clone());
+                if !self.middlewares.is_empty() {
+                    if router.middlewares.is_none() {
+                        router.middlewares = Some(HashMap::new());
+                    }
+                    router.middlewares.as_mut().unwrap().insert(method_key, self.middlewares.clone());
+                }
+                return;
             }
-            node.middlewares.as_mut().unwrap().insert(method_key, self.middlewares);
+
+            let mut current: &mut Router = &mut *router;
+            for seg in &segments {
+                let key = if *seg == "*" {
+                    "*".to_string()
+                } else if seg.starts_with(':') {
+                    ":".to_string()
+                } else {
+                    seg.to_string()
+                };
+
+                let entry = current.children.entry(key.clone()).or_insert_with(|| {
+                    Router::new(if key == "*" {
+                        NodeType::Wildcard
+                    } else if key == ":" {
+                        NodeType::Param(seg[1..].to_string())
+                    } else {
+                        NodeType::Static(seg.to_string())
+                    })
+                });
+                current = entry;
+            }
+
+            if current.handlers.is_none() {
+                current.handlers = Some(HashMap::new());
+            }
+            current.handlers.as_mut().unwrap().insert(method_key.clone(), self.handler.clone());
+
+            if !self.middlewares.is_empty() {
+                if current.middlewares.is_none() {
+                    current.middlewares = Some(HashMap::new());
+                }
+                current.middlewares.as_mut().unwrap().insert(method_key, self.middlewares.clone());
+            }
         }
     }
 }
