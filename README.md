@@ -97,20 +97,39 @@ async fn main() -> anyhow::Result<()> {
 | 参数 | `/api/users/:id` | 捕获 URL 参数 |
 | 通配符 | `/api/*` | 匹配剩余路径 |
 
+#### 流畅式 API（推荐）
+
 ```rust
 use aex::http::router::{NodeType, Router as HttpRouter};
-use aex::{get, post, route};
+use aex::{exe};
 
 let mut router = HttpRouter::new(NodeType::Static("root".into()));
 
-// 静态路由
-route!(router, get!("/api/users", handler));
+// 简单路由
+router.get("/api/users", handler).register();
 
-// 参数路由
-route!(router, get!("/api/users/:id", handler));
+// 带中间件
+router.post("/api/users", create_handler)
+    .middleware(auth)
+    .middleware(logging)
+    .register();
 
-// 通配符路由
-route!(router, get!("/*", fallback_handler));
+// 支持所有 HTTP 方法
+router.get("/path", handler).register();
+router.post("/path", handler).register();
+router.put("/path", handler).register();
+router.delete("/path", handler).register();
+router.patch("/path", handler).register();
+router.all("/path", handler).register();  // 匹配所有方法
+```
+
+#### 宏式 API（兼容）
+
+```rust
+use aex::{get, post, route};
+
+route!(router, get!("/path", handler));
+route!(router, post!("/path", handler, [mw1, mw2]));
 ```
 
 ### 2. Executor - 执行器

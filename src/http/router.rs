@@ -10,24 +10,28 @@
 //! | Param | `/api/users/:id` | Captures URL segment |
 //! | Wildcard | `/api/*` | Matches remaining path
 //!
-//! ## Example
+//! ## Fluent API (Recommended)
 //!
 //! ```rust,ignore
 //! use aex::http::router::{NodeType, Router as HttpRouter};
-//! use aex::{get, post, route};
+//! use aex::{exe, get, post};
 //!
 //! let mut router = HttpRouter::new(NodeType::Static("root".into()));
 //!
-//! route!(router, get!("/api/users", users_handler));
-//! route!(router, get!("/api/users/:id", user_handler));
-//! route!(router, post!("/api/users", create_handler));
+//! router.get("/api/users", handler).register();
+//! router.post("/api/users", create_handler).middleware(auth).register();
+//! ```
+//!
+//! ## Macro API (Legacy)
+//!
+//! ```rust,ignore
+//! route!(router, get!("/path", handler, [mw1, mw2]));
 //! ```
 
 use std::{collections::HashMap, sync::Arc};
+use std::result::Result::Ok;
 
 use tokio::{io::AsyncReadExt, sync::Mutex};
-
-use std::result::Result::Ok;
 
 use crate::{
     connection::context::{Context, TypeMapExt},
@@ -50,6 +54,92 @@ pub enum NodeType {
     Wildcard,
 }
 
+/// Builder for fluent route registration.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// router.get("/api/users", handler)
+///     .middleware(auth)
+///     .middleware(logging)
+///     .register();
+/// ```
+pub struct RouteBuilder {
+    router: *mut Router,
+    method: &'static str,
+    path: String,
+    handler: Arc<Executor>,
+    middlewares: Vec<Arc<Executor>>,
+}
+
+unsafe impl Send for RouteBuilder {}
+unsafe impl Sync for RouteBuilder {}
+
+impl RouteBuilder {
+    fn new(router: &mut Router, method: &'static str, path: String, handler: Arc<Executor>) -> Self {
+        Self {
+            router,
+            method,
+            path,
+            handler,
+            middlewares: Vec::new(),
+        }
+    }
+
+    /// Add middleware to the route. Middlewares are executed before the handler.
+    pub fn middleware(mut self, mw: Arc<Executor>) -> Self {
+        self.middlewares.push(mw);
+        self
+    }
+
+    /// Register the route with the router.
+    pub fn register(self) {
+        let router = unsafe { &mut *self.router };
+        let segments: Vec<&str> = self.path
+            .split('/')
+            .filter(|s| !s.is_empty())
+            .collect();
+        let mut node = router;
+
+        for seg in &segments {
+            let key = if *seg == "*" {
+                "*".to_string()
+            } else if seg.starts_with(':') {
+                ":".to_string()
+            } else {
+                seg.to_string()
+            };
+
+            node = node.children.entry(key.clone()).or_insert_with(|| {
+                Router::new(if key == "*" {
+                    NodeType::Wildcard
+                } else if key == ":" {
+                    NodeType::Param(seg[1..].to_string())
+                } else {
+                    NodeType::Static(seg.to_string())
+                })
+            });
+        }
+
+        let method_key = self.method.to_uppercase();
+
+        if node.handlers.is_none() {
+            node.handlers = Some(HashMap::new());
+        }
+        node.handlers
+            .as_mut()
+            .unwrap()
+            .insert(method_key.clone(), self.handler);
+
+        if !self.middlewares.is_empty() {
+            if node.middlewares.is_none() {
+                node.middlewares = Some(HashMap::new());
+            }
+            node.middlewares.as_mut().unwrap().insert(method_key, self.middlewares);
+        }
+    }
+}
+
 /// Trie tree router for HTTP path matching.
 pub struct Router {
     pub node_type: NodeType,
@@ -67,6 +157,54 @@ impl Router {
             middlewares: None,
             handlers: None,
         }
+    }
+
+    /// Fluent route registration: GET method.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// router.get("/api/users", handler)
+    ///     .middleware(auth)
+    ///     .register();
+    /// ```
+    pub fn get(&mut self, path: &str, handler: Arc<Executor>) -> RouteBuilder {
+        RouteBuilder::new(self, "GET", path.to_string(), handler)
+    }
+
+    /// Fluent route registration: POST method.
+    pub fn post(&mut self, path: &str, handler: Arc<Executor>) -> RouteBuilder {
+        RouteBuilder::new(self, "POST", path.to_string(), handler)
+    }
+
+    /// Fluent route registration: PUT method.
+    pub fn put(&mut self, path: &str, handler: Arc<Executor>) -> RouteBuilder {
+        RouteBuilder::new(self, "PUT", path.to_string(), handler)
+    }
+
+    /// Fluent route registration: DELETE method.
+    pub fn delete(&mut self, path: &str, handler: Arc<Executor>) -> RouteBuilder {
+        RouteBuilder::new(self, "DELETE", path.to_string(), handler)
+    }
+
+    /// Fluent route registration: PATCH method.
+    pub fn patch(&mut self, path: &str, handler: Arc<Executor>) -> RouteBuilder {
+        RouteBuilder::new(self, "PATCH", path.to_string(), handler)
+    }
+
+    /// Fluent route registration: OPTIONS method.
+    pub fn options(&mut self, path: &str, handler: Arc<Executor>) -> RouteBuilder {
+        RouteBuilder::new(self, "OPTIONS", path.to_string(), handler)
+    }
+
+    /// Fluent route registration: HEAD method.
+    pub fn head(&mut self, path: &str, handler: Arc<Executor>) -> RouteBuilder {
+        RouteBuilder::new(self, "HEAD", path.to_string(), handler)
+    }
+
+    /// Fluent route registration: matches all HTTP methods.
+    pub fn all(&mut self, path: &str, handler: Arc<Executor>) -> RouteBuilder {
+        RouteBuilder::new(self, "*", path.to_string(), handler)
     }
 
     /// 插入路由
