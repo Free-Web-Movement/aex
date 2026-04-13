@@ -75,6 +75,30 @@ pub enum StatusCode {
 }
 
 impl StatusCode {
+    #[inline]
+    pub fn to_http_status(&self) -> http::StatusCode {
+        match self {
+            StatusCode::Ok => http::StatusCode::OK,
+            StatusCode::Created => http::StatusCode::CREATED,
+            StatusCode::Accepted => http::StatusCode::ACCEPTED,
+            StatusCode::NoContent => http::StatusCode::NO_CONTENT,
+            StatusCode::BadRequest => http::StatusCode::BAD_REQUEST,
+            StatusCode::Unauthorized => http::StatusCode::UNAUTHORIZED,
+            StatusCode::Forbidden => http::StatusCode::FORBIDDEN,
+            StatusCode::NotFound => http::StatusCode::NOT_FOUND,
+            StatusCode::MethodNotAllowed => http::StatusCode::METHOD_NOT_ALLOWED,
+            StatusCode::RequestTimeout => http::StatusCode::REQUEST_TIMEOUT,
+            StatusCode::Conflict => http::StatusCode::CONFLICT,
+            StatusCode::Gone => http::StatusCode::GONE,
+            StatusCode::InternalServerError => http::StatusCode::INTERNAL_SERVER_ERROR,
+            StatusCode::NotImplemented => http::StatusCode::NOT_IMPLEMENTED,
+            StatusCode::BadGateway => http::StatusCode::BAD_GATEWAY,
+            StatusCode::ServiceUnavailable => http::StatusCode::SERVICE_UNAVAILABLE,
+            StatusCode::GatewayTimeout => http::StatusCode::GATEWAY_TIMEOUT,
+            _ => http::StatusCode::OK,
+        }
+    }
+
     /// 从 u16 转 StatusCode 枚举
     pub fn from_u16(code: u16) -> Option<Self> {
         match code {

@@ -3,31 +3,23 @@
 //! This module provides HTTP/2 support as a codec that can be integrated
 //! into the existing TCP pipeline architecture.
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use bytes::Bytes;
-use http::{Response, StatusCode, header};
+use http::Response;
 use h2::server;
 use tokio::net::TcpStream;
 use tokio_util::sync::CancellationToken;
 
-use crate::http::router::Router as HttpRouter;
+use crate::connection::context::Context;
 use crate::connection::global::GlobalContext;
-
-/// HTTP/2 response body storage (set by handlers)
-pub static H2_RESPONSE_BODY: Mutex<String> = Mutex::new(String::new());
-
-/// HTTP/2 minimal context for handler compatibility
-#[derive(Default)]
-pub struct H2Context {
-    pub path: String,
-    pub body: String,
-}
-
-impl H2Context {
-    pub fn send(&mut self, content: &str, _mime: Option<crate::http::protocol::media_type::SubMediaType>) {
-        *H2_RESPONSE_BODY.lock().unwrap() = content.to_string();
-    }
-}
+use crate::http::meta::HttpMetadata;
+use crate::http::middlewares::websocket::WebSocket;
+use crate::http::protocol::content_type::ContentType;
+use crate::http::protocol::header::HeaderKey;
+use crate::http::protocol::method::HttpMethod;
+use crate::http::protocol::status::StatusCode as AexStatusCode;
+use crate::http::protocol::version::HttpVersion;
+use crate::http::router::Router as HttpRouter;
 
 /// HTTP/2 Codec that handles HTTP/2 connections
 /// and integrates with the existing HTTP router
@@ -63,27 +55,78 @@ impl H2Codec {
                     match frame {
                         Some(Ok((request, mut responder))) => {
                             let path = request.uri().path().to_string();
-                            let method = request.method().as_str();
+                            let method_str = request.method().as_str();
                             
-                            tracing::info!("[H2] {} {}", method, path);
+                            tracing::info!("[H2] {} {}", method_str, path);
                             
-                            // Clear previous response
-                            *H2_RESPONSE_BODY.lock().unwrap() = String::new();
+                            // Parse HTTP method
+                            let http_method = HttpMethod::from_str(method_str).unwrap_or(HttpMethod::GET);
                             
-                            // 使用 router 检查路由是否存在
-                            let route_found = self.router.has_route(method, &path);
+                            // Build HttpMetadata from HTTP/2 request headers
+                            let mut meta = HttpMetadata::new();
+                            meta.method = http_method;
+                            meta.path = path.clone();
+                            meta.version = HttpVersion::Http20;
                             
-                            let body = if route_found {
-                                format!("[H2] Route found: {} {}", method, path)
-                            } else {
-                                "404 Not Found".to_string()
+                            // Copy headers from HTTP/2 request
+                            for (name, value) in request.headers() {
+                                if let Some(header_key) = HeaderKey::from_str(name.as_str()) {
+                                    if let Ok(val) = value.to_str() {
+                                        meta.headers.insert(header_key, val.to_string());
+                                    }
+                                }
+                            }
+                            
+                            // Parse content type
+                            if let Some(ct) = meta.headers.get(&HeaderKey::ContentType) {
+                                meta.content_type = ContentType::parse(ct);
+                            }
+                            
+                            // Check for WebSocket upgrade request (RFC8441 for HTTP/2)
+                            let is_ws = WebSocket::check(http_method, &meta.headers);
+                            
+                            // Create Context - for HTTP/2 we need to handle stream specially
+                            // Currently, HTTP/2 WebSocket support is detected but requires
+                            // additional h2 stream handling for full support
+                            let mut ctx = Context::new(None, None, self.global.clone(), peer_addr);
+                            ctx.set(meta);
+                            
+                            // Execute router
+                            let _route_found = self.router.on_request(&mut ctx).await;
+                            
+                            // Check if WebSocket upgrade was performed by middleware
+                            let ws_upgraded = {
+                                let meta = ctx.local.get_ref::<HttpMetadata>().unwrap();
+                                meta.is_websocket
                             };
                             
-                            let status = if route_found { StatusCode::OK } else { StatusCode::NOT_FOUND };
+                            // Note: Full HTTP/2 WebSocket support requires using h2's stream interface
+                            // For now, we detect the upgrade request. Full implementation would need
+                            // to use the h2 send_stream for WebSocket frames.
+                            if is_ws || ws_upgraded {
+                                tracing::info!("[H2] WebSocket upgrade requested (HTTP/2 WS support coming soon)");
+                            }
                             
-                            let resp: Response<()> = Response::builder()
-                                .status(status)
-                                .header(header::CONTENT_TYPE, "text/plain")
+                            // Build response
+                            let (status, body, headers) = {
+                                let meta = ctx.local.get_ref::<HttpMetadata>().unwrap();
+                                let status = meta.status.to_http_status();
+                                let body = String::from_utf8_lossy(&meta.body).to_string();
+                                let headers = meta.headers.clone();
+                                (status, body, headers)
+                            };
+                            
+                            // Build HTTP/2 response
+                            let mut resp_builder = Response::builder().status(status);
+                            
+                            // Copy headers to HTTP/2 response
+                            for (key, val) in headers.iter() {
+                                if let Ok(h2_name) = http::header::HeaderName::from_bytes(key.as_str().as_bytes()) {
+                                    resp_builder = resp_builder.header(h2_name, val.as_str());
+                                }
+                            }
+                            
+                            let resp: Response<()> = resp_builder
                                 .body(())
                                 .map_err(|e| anyhow::anyhow!("build response failed: {}", e))?;
 

@@ -6,25 +6,14 @@ use std::ops::Deref;
 
 macro_rules! define_header_keys {
     ($($name:ident => $string:expr),* $(,)?) => {
-        #[derive(Debug, Clone)] // 注意：去掉了 Eq, PartialEq, Hash 的 derive
+        #[derive(Debug, Clone)]
         pub enum HeaderKey {
             $($name,)*
             Custom(String),
         }
 
         impl HeaderKey {
-            pub fn from_str(s: &str) -> Option<Self> {
-                let s_trimmed = s.trim();
-                let s_lower = s_trimmed.to_ascii_lowercase();
-                match s_lower.as_str() {
-                    $(
-                        s if s == $string.to_ascii_lowercase() => Some(HeaderKey::$name),
-                    )*
-                    // 存储原始格式，不再强制小写
-                    _ => Some(HeaderKey::Custom(s_trimmed.to_string())),
-                }
-            }
-
+            #[inline]
             pub fn as_str(&self) -> &str {
                 match self {
                     $(
@@ -33,13 +22,24 @@ macro_rules! define_header_keys {
                     HeaderKey::Custom(s) => s.as_str(),
                 }
             }
+
+            #[inline]
+            pub fn from_str(s: &str) -> Option<Self> {
+                let s_trimmed = s.trim();
+                let s_lower = s_trimmed.to_ascii_lowercase();
+                match s_lower.as_str() {
+                    $(
+                        s if s == $string.to_ascii_lowercase() => Some(HeaderKey::$name),
+                    )*
+                    _ => Some(HeaderKey::Custom(s_trimmed.to_string())),
+                }
+            }
         }
 
         // --- 手动实现比较逻辑 ---
 
         impl PartialEq for HeaderKey {
             fn eq(&self, other: &Self) -> bool {
-                // 仅在比较时转为小写，不影响存储
                 self.as_str().to_ascii_lowercase() == other.as_str().to_ascii_lowercase()
             }
         }
@@ -48,7 +48,6 @@ macro_rules! define_header_keys {
 
         impl Hash for HeaderKey {
             fn hash<H: Hasher>(&self, state: &mut H) {
-                // 仅在计算哈希时转为小写，确保不同大小写的输入在 HashMap 中落在同一个槽位
                 self.as_str().to_ascii_lowercase().hash(state);
             }
         }
@@ -146,13 +145,13 @@ define_header_keys! {
 
 impl From<&str> for HeaderKey {
     fn from(s: &str) -> Self {
-        Self::from_str(s).unwrap()
+        Self::from_str(s).unwrap_or(HeaderKey::Custom(s.to_string()))
     }
 }
 
 impl From<String> for HeaderKey {
     fn from(s: String) -> Self {
-        Self::from_str(&s).unwrap()
+        Self::from_str(&s).unwrap_or(HeaderKey::Custom(s))
     }
 }
 
