@@ -39,6 +39,7 @@ derivative = "2.2.0"
 tracing = "0.1.44"
 ahash = "0.7.8"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+parking_lot = "0.12"
 
 [profile.release]
 opt-level = "z"
@@ -50,9 +51,19 @@ strip = true
 name = "http-server"
 path = "src/main.rs"
 
+[[example]]
+name = "comparison"
+path = "benches/comparison.rs"
+harness = false
+
 [dev-dependencies]
 reqwest = { version = "0.13.2", features = ["json", "blocking"] }
 tokio = { version = "1", features = ["full", "test-util"] }
 serde = { version = "1.0", features = ["derive"] }
 actix-web = "4"
 axum = "0.7"
+criterion = "0.5"
+
+[[bench]]
+name = "http_router"
+harness = false

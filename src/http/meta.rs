@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use ahash::AHashMap;
 
 use crate::http::{
     params::Params,
@@ -21,7 +21,7 @@ pub struct HttpMetadata {
     pub headers: Headers,
     pub content_type: ContentType,
     // pub length: usize,
-    pub cookies: HashMap<String, String>,
+    pub cookies: AHashMap<String, String>,
     pub is_websocket: bool,
     pub status: StatusCode, // 处理结果状态码，默认200
 
@@ -45,7 +45,7 @@ impl Default for HttpMetadata {
             // 假设 ContentType 有默认值（通常是 text/plain 或 application/octet-stream）
             content_type: ContentType::default(),
             // length: 0,
-            cookies: HashMap::new(),
+            cookies: AHashMap::with_capacity(4),
             is_websocket: false,
             status: StatusCode::Ok, // 默认 200 OK
             body: Vec::new(),

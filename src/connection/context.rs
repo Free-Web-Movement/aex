@@ -8,6 +8,7 @@
 //! - `global`: Shared state across all connections
 //! - `reader`/`writer`: I/O streams for the connection
 
+use ahash::AHashMap;
 use chrono::DateTime;
 use chrono::Utc;
 use std::any::Any;
@@ -27,23 +28,53 @@ use crate::http::res::Response;
 
 pub const SERVER_NAME: &str = "Aex/1.0";
 
-/// TypeMap for storing per-request or shared data using TypeId as keys.
-///
-/// # Example
-///
-/// ```rust,ignore
-/// ctx.local.set_value::<MyData>(my_data);
-/// let data = ctx.local.get_value::<MyData>();
-/// ```
-pub type TypeMap = dashmap::DashMap<std::any::TypeId, Box<dyn std::any::Any + Send + Sync>>;
+/// TypeMap for storing shared data using TypeId as keys. Concurrent version.
+pub type ConcurrentTypeMap = dashmap::DashMap<std::any::TypeId, Box<dyn std::any::Any + Send + Sync>>;
+pub type TypeMap = ConcurrentTypeMap;
 
-/// Extension trait for TypeMap to get/set values by type.
+/// Non-concurrent TypeMap for per-request storage.
+#[derive(Default)]
+pub struct LocalTypeMap {
+    inner: std::collections::HashMap<TypeId, Box<dyn Any + Send + Sync>>,
+}
+
+impl LocalTypeMap {
+    pub fn new() -> Self {
+        Self {
+            inner: std::collections::HashMap::with_capacity(8),
+        }
+    }
+
+    pub fn get_value<T: Clone + 'static>(&self) -> Option<T> {
+        self.inner
+            .get(&TypeId::of::<T>())
+            .and_then(|boxed_val| boxed_val.downcast_ref::<T>().cloned())
+    }
+
+    pub fn get_ref<T: 'static>(&self) -> Option<&T> {
+        self.inner
+            .get(&TypeId::of::<T>())
+            .and_then(|boxed_val| boxed_val.downcast_ref::<T>())
+    }
+
+    pub fn get_mut<T: 'static>(&mut self) -> Option<&mut T> {
+        self.inner
+            .get_mut(&TypeId::of::<T>())
+            .and_then(|boxed_val| boxed_val.downcast_mut::<T>())
+    }
+
+    pub fn set_value<T: Send + Sync + 'static>(&mut self, val: T) {
+        self.inner.insert(TypeId::of::<T>(), Box::new(val));
+    }
+}
+
+/// Extension trait for ConcurrentTypeMap to get/set values by type.
 pub trait TypeMapExt {
     fn get_value<T: Clone + 'static>(&self) -> Option<T>;
     fn set_value<T: Send + Sync + 'static>(&self, val: T);
 }
 
-impl TypeMapExt for TypeMap {
+impl TypeMapExt for ConcurrentTypeMap {
     fn get_value<T: Clone + 'static>(&self) -> Option<T> {
         self.get(&TypeId::of::<T>())
             .and_then(|r| r.value().downcast_ref::<T>().cloned())
@@ -61,26 +92,16 @@ pub type BoxReader = Box<AexReader>;
 pub type BoxWriter = Box<AexWriter>;
 
 /// Per-request context containing connection info, I/O, and data storage.
-///
-/// # Fields
-///
-/// - `addr`: Remote socket address
-/// - `accepted`: Connection acceptance timestamp
-/// - `reader`: Input stream (for reading request data)
-/// - `writer`: Output stream (for writing response data)
-/// - `global`: Shared global context
-/// - `local`: Per-request TypeMap storage
 pub struct Context {
     pub addr: SocketAddr,
     pub accepted: DateTime<Utc>,
     pub reader: Option<BoxReader>,
     pub writer: Option<BoxWriter>,
     pub global: Arc<GlobalContext>,
-    pub local: Arc<TypeMap>,
+    pub local: LocalTypeMap,
 }
 
 impl Context {
-    // ⚡ 构造函数：接受外部已经包装好的 Option 引用
     pub fn new(
         reader: Option<BoxReader>,
         writer: Option<BoxWriter>,
@@ -92,7 +113,7 @@ impl Context {
             reader,
             writer,
             global,
-            local: Arc::new(TypeMap::default()),
+            local: LocalTypeMap::new(),
             addr,
         }
     }
@@ -100,9 +121,8 @@ impl Context {
     /// 获取 Request 视图
     pub fn req(&mut self) -> Request<'_> {
         Request {
-            // ⚡ 这里透传 &mut Option，Request 内部决定是 read 还是 take()
             reader: &mut self.reader,
-            local: self.local.clone(),
+            local: &mut self.local,
         }
     }
 
@@ -110,7 +130,7 @@ impl Context {
     pub fn res(&mut self) -> Response<'_> {
         Response {
             writer: &mut self.writer,
-            local: self.local.clone(),
+            local: &mut self.local,
         }
     }
 
@@ -122,55 +142,43 @@ impl Context {
     }
 
     /// 存入扩展实例
-    pub fn set<T: Send + Sync + 'static>(&self, data: T) {
-        let key = TypeId::of::<T>();
-        let value: Box<dyn Any + Send + Sync> = Box::new(data);
-        self.local.insert(key, value);
+    pub fn set<T: Send + Sync + 'static>(&mut self, data: T) {
+        self.local.set_value(data);
     }
 
-    /// 获取扩展实例的克隆 (Async)
-    pub async fn get<T: Clone + Send + Sync + 'static>(&self) -> Option<T> {
-        let key = TypeId::of::<T>();
-        self.local
-            .get(&key)
-            .and_then(|boxed_val| boxed_val.downcast_ref::<T>().cloned())
+    /// 获取扩展实例的克隆
+    pub fn get<T: Clone + Send + Sync + 'static>(&self) -> Option<T> {
+        self.local.get_value::<T>()
     }
 
     /// Set HTTP status code, returns self for chaining.
-    pub fn status(&self, code: StatusCode) -> &Self {
-        let mut meta = self.local.get_value::<HttpMetadata>().unwrap();
-        meta.status = code;
-        self.local.set_value::<HttpMetadata>(meta);
+    pub fn status(&mut self, code: StatusCode) -> &mut Self {
+        if let Some(meta) = self.local.get_mut::<HttpMetadata>() {
+            meta.status = code;
+        }
         self
     }
 
     /// Send a response body.
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// ctx.send("Hello", None);                           // text/plain, 200
-    /// ctx.send("{}", Some(SubMediaType::Json));        // JSON, 200
-    /// ctx.status(StatusCode::NotFound).send("Not Found", None); // 404
-    /// ```
-    pub fn send(&self, content: impl Into<String>, mime: Option<SubMediaType>) {
-        let mut meta = self.local.get_value::<HttpMetadata>().unwrap();
-        let bytes: Vec<u8> = content.into().into_bytes();
-        let len = bytes.len();
+    pub fn send(&mut self, content: impl Into<String>, mime: Option<SubMediaType>) {
+        if let Some(meta) = self.local.get_mut::<HttpMetadata>() {
+            let bytes: Vec<u8> = content.into().into_bytes();
+            let len = bytes.len();
 
-        let mime_str = mime.unwrap_or(SubMediaType::Plain);
-        meta.headers.insert(HeaderKey::ContentType, mime_str.as_str().to_string());
-        meta.headers.insert(HeaderKey::ContentLength, len.to_string());
-        meta.body = bytes;
-        self.local.set_value::<HttpMetadata>(meta);
+            let mime_str = mime.unwrap_or(SubMediaType::Plain);
+            meta.headers.insert(HeaderKey::ContentType, mime_str.as_str().to_string());
+            meta.headers.insert(HeaderKey::ContentLength, len.to_string());
+            meta.body = bytes;
+        }
     }
 
     /// Redirect to another URL (302 Found).
-    pub fn redirect(&self, location: &str) {
-        let mut meta = self.local.get_value::<HttpMetadata>().unwrap();
-        meta.status = StatusCode::Found;
-        meta.headers.insert(HeaderKey::Location, location.to_string());
-        meta.body = Vec::new();
-        self.local.set_value::<HttpMetadata>(meta);
+    pub fn redirect(&mut self, location: &str) {
+        if let Some(meta) = self.local.get_mut::<HttpMetadata>() {
+            meta.status = StatusCode::Found;
+            meta.headers.insert(HeaderKey::Location, location.to_string());
+            meta.body = Vec::new();
+        }
     }
 }
+

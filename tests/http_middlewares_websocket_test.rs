@@ -4,16 +4,17 @@ mod websocket_tests {
         connection::{context::Context, global::GlobalContext},
         http::{
             middlewares::websocket::WebSocket,
-            protocol::{header::HeaderKey, method::HttpMethod},
+            protocol::{header::{HeaderKey, Headers}, method::HttpMethod},
             websocket::{WSCodec, WSFrame},
         },
         tcp::types::{Command, Frame},
     };
     use bytes::BytesMut;
     use futures::{SinkExt, StreamExt};
-    use std::{collections::HashMap, net::SocketAddr, sync::Arc};
+    use std::{net::SocketAddr, sync::Arc};
     use tokio::io::{BufReader, duplex};
     use tokio_util::codec::{Decoder, Encoder, Framed};
+    use ahash::AHashMap;
 
     // 辅助工具：模拟客户端发送带 Mask 的 WebSocket 帧
     fn create_masked_frame(opcode: u8, payload: &[u8]) -> Vec<u8> {
@@ -37,14 +38,15 @@ mod websocket_tests {
         frame
     }
 
-    // --- 1. 握手逻辑测试 (保持不变，因为握手依然是 Raw IO) ---
+    // --- 1. 握手逻辑测试 ---
     #[test]
     fn test_check_handshake_logic() {
-        let mut headers = HashMap::new();
+        let mut headers = AHashMap::new();
         headers.insert(HeaderKey::Upgrade, "websocket".to_string());
         headers.insert(HeaderKey::Connection, "Upgrade".to_string());
-        assert!(WebSocket::check(HttpMethod::GET, &headers));
-        assert!(!WebSocket::check(HttpMethod::POST, &headers));
+        let headers_ref = Headers::from(headers);
+        assert!(WebSocket::check(HttpMethod::GET, &headers_ref));
+        assert!(!WebSocket::check(HttpMethod::POST, &headers_ref));
     }
 
     // --- 2. Codec 编解码测试 (核心更新) ---

@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
+    use ahash::AHashMap;
 
     use aex::http::protocol::header::{HeaderKey, Headers};
 
@@ -285,7 +285,7 @@ mod tests {
     #[test]
     fn test_from_conversions() {
         // 1. 测试从 HashMap 转换为 Headers
-        let mut map = HashMap::new();
+        let mut map = AHashMap::new();
         map.insert(HeaderKey::Authorization, "Bearer token123".to_string());
 
         let headers = Headers::from(map);
@@ -295,9 +295,8 @@ mod tests {
             "Bearer token123"
         );
 
-        // 2. 测试从 Headers 转回 HashMap
-        // 这在需要调用只接受 HashMap 的第三方库时非常有用
-        let raw_map: HashMap<HeaderKey, String> = headers.into();
+        // 2. 测试从 Headers 转回 AHashMap
+        let raw_map: AHashMap<HeaderKey, String> = headers.into();
         assert_eq!(raw_map.len(), 1);
 
         // 验证转回后的 Map 依然保持其 Key 的属性

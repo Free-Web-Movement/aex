@@ -1,4 +1,5 @@
 use ahash::AHashMap;
+use std::collections::HashMap;
 use std::sync::Arc;
 use zz_validator::{
     ast::{FieldRule, FieldType, Value},
@@ -7,7 +8,6 @@ use zz_validator::{
 };
 
 use crate::{
-    connection::context::TypeMapExt,
     exe,
     http::{meta::HttpMetadata, protocol::status::StatusCode, types::Executor},
 };
@@ -50,8 +50,7 @@ fn to_value_optimized<'a, I>(iter_provider: I, rules: &[FieldRule]) -> Result<Va
 where
     I: Fn(&str) -> Option<Vec<&'a str>>,
 {
-    let mut obj: std::collections::HashMap<String, Value> =
-        std::collections::HashMap::with_capacity(rules.len());
+    let mut obj: HashMap<String, Value> = HashMap::with_capacity(rules.len());
 
     for rule in rules {
         let field_name = &rule.field;
@@ -109,7 +108,7 @@ pub fn to_validator(dsl_map: AHashMap<String, String>) -> Arc<Executor> {
                     compiled_vec.push((source, rules));
                 }
                 Err(e) => {
-                    eprintln!("❌ DSL Parse Error [{}]: {:?}", source, e);
+                    tracing::error!("DSL Parse Error [{}]: {:?}", source, e);
                 }
             }
         }
@@ -120,17 +119,15 @@ pub fn to_validator(dsl_map: AHashMap<String, String>) -> Arc<Executor> {
     exe!(|ctx, data| { data }, |ctx| {
         let compiled = compiled.clone();
 
-        // 获取 Metadata，注意：我们需要在校验结束后将其写回
-        let mut meta = ctx
+        // 获取 Metadata 原地修改
+        let meta = ctx
             .local
-            .get_value::<HttpMetadata>()
+            .get_mut::<HttpMetadata>()
             .expect("HttpMetadata missing");
 
-        // 拿到 Params 的副本进行操作
-        let mut params = meta
-            .params
-            .clone()
-            .expect("AEX FATAL: HttpMetadata.params container must be pre-initialized by the protocol layer");
+        // 拿到 Params 的副本进行操作 (由于 Params 内部有 HashMap，我们仍需要克隆它进行校验，
+        // 但我们可以避免克隆整个 HttpMetadata)
+        let mut params = meta.params.clone().expect("AEX FATAL: HttpMetadata.params container must be pre-initialized by the protocol layer");
         let mut res = true;
 
         for (source, rules) in compiled.as_ref() {
@@ -174,7 +171,6 @@ pub fn to_validator(dsl_map: AHashMap<String, String>) -> Arc<Executor> {
             match value_result {
                 Ok(mut value) => {
                     // 执行 zz-validator 校验
-                    // 这一步非常关键，它会处理 default 值并验证 logic
                     if let Err(e) = validate_object(&mut value, rules) {
                         let mut err_msg = String::with_capacity(64);
                         err_msg.push_str(source);
@@ -227,7 +223,6 @@ pub fn to_validator(dsl_map: AHashMap<String, String>) -> Arc<Executor> {
                     }
                 }
                 Err(conv_err) => {
-                    // 捕获 convert_by_type 抛出的严格错误（无 to_owned 路径）
                     let mut err_msg = String::with_capacity(64);
                     err_msg.push_str(source);
                     err_msg.push_str(" conversion error: ");
@@ -241,12 +236,10 @@ pub fn to_validator(dsl_map: AHashMap<String, String>) -> Arc<Executor> {
             }
         }
 
-        // 4️⃣ 统一写回 Metadata
-        // 无论成功还是失败（错误信息和状态码），都必须 set_value 才能生效
+        // 4️⃣ 统一写回 Params
         if res {
             meta.params = Some(params);
         }
-        ctx.local.set_value(meta);
 
         res
     })

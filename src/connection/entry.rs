@@ -166,13 +166,13 @@ impl ConnectionEntry {
         let r_opt: Option<BoxReader> = Some(Box::new(BufReader::new(reader)));
         let w_opt: Option<BoxWriter> = Some(Box::new(BufWriter::new(writer)));
 
-        let raw_ctx = Context::new(
+        let mut raw_ctx = Context::new(
             r_opt,
             w_opt,
             global,
             addr
         );
-        raw_ctx.set(task_token.clone()); // Assuming set is now synchronous or handled properly
+        raw_ctx.set(task_token.clone()); 
         let ctx = Arc::new(Mutex::new(raw_ctx));
 
         let ctx_cloned = ctx.clone();
@@ -190,7 +190,7 @@ impl ConnectionEntry {
                     Ok(())
                 } => {
                     if let Err(e) = &res {
-                         eprintln!("[AEX] Pipeline error for {}: {}", addr, e);
+                         tracing::warn!("Pipeline error for {}: {}", addr, e);
                     }
                     res
                 }

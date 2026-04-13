@@ -1,10 +1,12 @@
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::time::Duration;
+
+use ahash::AHashMap;
 
 use anyhow::{Context, bail};
 use tokio::{io::AsyncBufReadExt, time::timeout};
 
 use crate::{
-    connection::context::{BoxReader, TypeMap, TypeMapExt},
+    connection::context::{BoxReader, LocalTypeMap},
     http::{
         meta::HttpMetadata,
         middlewares::websocket::WebSocket,
@@ -24,7 +26,7 @@ pub const TIME_LIMIT: i32 = 500;
 
 pub struct Request<'a> {
     pub reader: &'a mut Option<BoxReader>,
-    pub local: Arc<TypeMap>,
+    pub local: &'a mut LocalTypeMap,
 }
 
 impl<'a> Request<'a> {
@@ -42,15 +44,8 @@ impl<'a> Request<'a> {
         let method = HttpMethod::from_str(method_str).context("Unknown method")?;
 
         // 2. 解析所有 Headers
-        let headers = self.parse_headers_from_reader().await?;
-
-        // 3. 提取特定字段 (移植旧逻辑)
-
-        // 3.1 Content-Length
-        // let length = headers
-        //     .get(&HeaderKey::ContentLength)
-        //     .and_then(|s| s.trim().parse::<usize>().ok())
-        //     .unwrap_or(0);
+        let headers_map = self.parse_headers_from_reader().await?;
+        let headers = Headers::from(headers_map);
 
         // 3.2 Content-Type & Multipart Boundary
         let content_type = headers
@@ -96,7 +91,6 @@ impl<'a> Request<'a> {
             transfer_encoding,
             multipart_boundary,
             content_type,
-            // length,
             cookies,
             is_websocket: WebSocket::check(method, &headers),
             params: None,
@@ -110,8 +104,8 @@ impl<'a> Request<'a> {
     }
 
     /// 移植旧的 Cookie 解析逻辑
-    fn parse_cookies_raw(&self, header_value: &str) -> HashMap<String, String> {
-        let mut map = HashMap::new();
+    fn parse_cookies_raw(&self, header_value: &str) -> AHashMap<String, String> {
+        let mut map = AHashMap::with_capacity(4);
         for pair in header_value.split(';') {
             let pair = pair.trim();
             if pair.is_empty() {
@@ -128,7 +122,6 @@ impl<'a> Request<'a> {
     async fn read_line_with_limit(&mut self) -> anyhow::Result<Vec<u8>> {
         let mut buf = Vec::with_capacity(MAX_CAPACITY as usize);
 
-        // ⚡ 穿透 Option 和 Box 拿到 dyn AsyncBufRead
         if let Some(r) = self.reader.as_deref_mut() {
             let n = timeout(
                 Duration::from_millis(TIME_LIMIT as u64),
@@ -146,11 +139,13 @@ impl<'a> Request<'a> {
         }
     }
 
-    async fn parse_headers_from_reader(&mut self) -> anyhow::Result<HashMap<HeaderKey, String>> {
-        let mut map = HashMap::new();
+    async fn parse_headers_from_reader(&mut self) -> anyhow::Result<AHashMap<HeaderKey, String>> {
+        let mut map = AHashMap::with_capacity(16);
         loop {
             let line_bytes = self.read_line_with_limit().await?;
-            let line = std::str::from_utf8(&line_bytes)?.trim_end_matches("\r\n");
+            let line = std::str::from_utf8(&line_bytes)?;
+            let line = line.trim_end_matches(|c| c == '\r' || c == '\n');
+            
             if line.is_empty() {
                 break;
             }
@@ -165,16 +160,14 @@ impl<'a> Request<'a> {
 
     // --- 业务 Getter ---
     pub fn method(&self) -> HttpMethod {
-        self.local.get_value::<HttpMetadata>().unwrap().method
+        self.local.get_value::<HttpMetadata>().map(|m| m.method).unwrap_or(HttpMethod::GET)
     }
 
     /// 快速获取所有的 Params
     pub fn params(&self) -> Option<Params> {
         self.local
             .get_value::<HttpMetadata>()
-            .unwrap()
-            .params
-            .clone()
+            .and_then(|m| m.params)
     }
 
     /// 获取特定的 Path 参数 (e.g., /user/:id)
@@ -198,10 +191,8 @@ impl<'a> Request<'a> {
     }
 
     /// 创建一个新的 Request 实例
-    /// @param reader: 实现异步读的流（如 TcpStream 的 ReadHalf）
-    /// @param local: 用于存储解析结果的 TypeMap
-    /// @param peer_addr: 远程节点的物理地址
-    pub fn new(reader: &'a mut Option<BoxReader>, local: Arc<TypeMap>) -> Self {
+    pub fn new(reader: &'a mut Option<BoxReader>, local: &'a mut LocalTypeMap) -> Self {
         Self { reader, local }
     }
 }
+

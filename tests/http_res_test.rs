@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
     use aex::{
-        connection::context::{BoxWriter, TypeMap, TypeMapExt},
+        connection::context::{BoxWriter, LocalTypeMap},
         http::{
             meta::HttpMetadata,
             protocol::{
@@ -12,7 +12,7 @@ mod tests {
             res::Response,
         },
     };
-    use std::{collections::HashMap, sync::Arc};
+    use ahash::AHashMap;
 
     #[tokio::test]
     async fn test_send_full_response_manual() {
@@ -23,21 +23,22 @@ mod tests {
         // 这样就满足了 'static 的要求，因为 Box 现在拥有数据，而不是借用数据
         let mut writer: Option<BoxWriter> = Some(Box::new(Cursor::new(Vec::new())));
 
-        let local = Arc::new(TypeMap::new());
+        let mut local = LocalTypeMap::new();
 
         {
             let mut response = Response {
                 writer: &mut writer,
-                local: local.clone(),
+                local: &mut local,
             };
 
-            let mut headers = HashMap::new();
+            let mut headers = AHashMap::new();
             headers.insert(HeaderKey::ContentType, "text/plain".to_string());
             let body = b"hello world";
+            let headers_ref = Headers::from(headers);
 
             // 2. 执行发送
             response
-                .send(&headers, body, StatusCode::Created, HttpVersion::Http11)
+                .send(&headers_ref, body, StatusCode::Created, HttpVersion::Http11)
                 .await
                 .expect("Failed to send response");
         }
@@ -84,10 +85,10 @@ mod tests {
         // 1. 准备底层数据
         // 我们需要 Cursor 来拥有 Vec，从而满足 Box 的 'static 要求
         let mut writer_opt: Option<BoxWriter> = Some(Box::new(Cursor::new(Vec::new())));
-        let local = Arc::new(TypeMap::new());
+        let mut local = LocalTypeMap::new();
 
         // 2. 构造元数据 (保持不变)
-        let mut headers_map = HashMap::new();
+        let mut headers_map = AHashMap::new();
         headers_map.insert(HeaderKey::Server, "RustServer/1.0".to_string());
         let meta = HttpMetadata {
             // ... 你的字段赋值 ...
@@ -103,7 +104,7 @@ mod tests {
         {
             let mut response = Response {
                 writer: &mut writer_opt,
-                local: local.clone(),
+                local: &mut local,
             };
             let result = response.send_response().await;
             assert!(result.is_ok());

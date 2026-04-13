@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use ahash::AHashMap;
 use std::fmt;
 use std::hash::Hash;
 use std::hash::Hasher;
@@ -144,6 +144,18 @@ define_header_keys! {
     UpgradeInsecureRequests => "Upgrade-Insecure-Requests",
 }
 
+impl From<&str> for HeaderKey {
+    fn from(s: &str) -> Self {
+        Self::from_str(s).unwrap()
+    }
+}
+
+impl From<String> for HeaderKey {
+    fn from(s: String) -> Self {
+        Self::from_str(&s).unwrap()
+    }
+}
+
 impl fmt::Display for HeaderKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.as_str())
@@ -151,11 +163,11 @@ impl fmt::Display for HeaderKey {
 }
 
 #[derive(Debug, Clone)]
-pub struct Headers(HashMap<HeaderKey, String>);
+pub struct Headers(AHashMap<HeaderKey, String>);
 
 impl Headers {
     pub fn new() -> Self {
-        Self(HashMap::new())
+        Self(AHashMap::with_capacity(16))
     }
 
     /// 链式调用：插入 Header 并返回自身所有权
@@ -187,29 +199,44 @@ impl Headers {
 
 // 技巧：实现 Deref 使得 Headers 可以像 HashMap 一样被迭代或读取
 impl Deref for Headers {
-    type Target = HashMap<HeaderKey, String>;
+    type Target = AHashMap<HeaderKey, String>;
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
 
-impl From<HashMap<HeaderKey, String>> for Headers {
-    /// 将现有的 HashMap 转换为 Headers
-    fn from(map: HashMap<HeaderKey, String>) -> Self {
+impl From<AHashMap<HeaderKey, String>> for Headers {
+    fn from(map: AHashMap<HeaderKey, String>) -> Self {
         Self(map)
     }
 }
 
-impl From<Headers> for HashMap<HeaderKey, String> {
-    /// 如果需要将 Headers 转回原始 HashMap（例如为了某些库的兼容性）
+impl From<Headers> for AHashMap<HeaderKey, String> {
     fn from(headers: Headers) -> Self {
         headers.0
     }
 }
 
-// 进阶：支持从数组/迭代器直接创建，这在测试中非常有用
 impl FromIterator<(HeaderKey, String)> for Headers {
     fn from_iter<I: IntoIterator<Item = (HeaderKey, String)>>(iter: I) -> Self {
-        Self(HashMap::from_iter(iter))
+        Self(AHashMap::from_iter(iter))
+    }
+}
+
+impl<'a> IntoIterator for &'a Headers {
+    type Item = (&'a HeaderKey, &'a String);
+    type IntoIter = <&'a AHashMap<HeaderKey, String> as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.iter()
+    }
+}
+
+impl IntoIterator for Headers {
+    type Item = (HeaderKey, String);
+    type IntoIter = <AHashMap<HeaderKey, String> as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
     }
 }

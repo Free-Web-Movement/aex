@@ -49,7 +49,7 @@ impl Storage {
     {
         let file = self.real_path(k);
         if !file.exists() {
-            eprintln!("Address file does not exist.");
+            tracing::debug!("Address file does not exist.");
             return Ok(None);
         }
 

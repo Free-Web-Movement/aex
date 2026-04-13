@@ -207,11 +207,13 @@ impl ConnectionManager {
         is_client: bool,
         context: Option<Arc<Mutex<Context>>>, // writer: Option<Arc<Mutex<Option<BoxWriter>>>>,
     ) {
-        if addr.ip().is_loopback() {
+        let ip = addr.ip();
+        
+        // 跳过 loopback 地址
+        if ip.is_loopback() {
             return;
         }
-
-        let ip = addr.ip();
+        
         let scope = NetworkScope::from_ip(&ip);
         let key = (ip, scope);
 

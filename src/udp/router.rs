@@ -87,7 +87,7 @@ impl Router {
                         key = (extractor_ctx)(&c_val);
                         final_cmd = Some(c_val);
                     } else {
-                        eprintln!("[UDP Error] Flat frame downcast to Command failed");
+                        tracing::warn!("Flat frame downcast to Command failed");
                         return;
                     }
                 } else {
@@ -108,7 +108,7 @@ impl Router {
                         if let Some(handler) = any_handler.downcast_ref::<Box<UdpHandler<F, C>>>() {
                             if let Err(e) = handler(global, frame, cmd, peer_addr, socket_ctx).await
                             {
-                                eprintln!("[UDP Handler Error]: {:?}", e);
+                                tracing::error!("UDP Handler Error: {:?}", e);
                             }
                         }
                     }

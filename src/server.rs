@@ -163,7 +163,6 @@ impl Server {
             tokio::select! {
                     // A. 响应总闸信号
                     _ = loop_token.cancelled() => {
-                        println!("[AEX] TCP server main loop received stop signal.");
                         break;
                     }
 
@@ -172,7 +171,7 @@ impl Server {
                         let (socket, peer_addr) = match accept_res {
                             Ok(res) => res,
                             Err(e) => {
-                                eprintln!("[AEX] Accept error: {}", e);
+                                tracing::warn!("Accept error: {}", e);
                                 continue;
                             }
                         };
@@ -198,8 +197,6 @@ impl Server {
                     }
                 }
         }
-
-        println!("[AEX] TCP server has exited clean.");
         Ok(())
     }
 
@@ -231,15 +228,11 @@ impl Server {
                 }
                 res = rt.handle::<F, C>(globals, socket, extractor) => {
                     if let Err(e) = res {
-                        eprintln!("[AEX] UDP Router Execution Error: {}", e);
+                        tracing::error!("UDP Router error: {}", e);
                     }
                 }
             }
-        } else {
-            println!("[AEX] UDP start failed: No router configured.");
         }
-
-        println!("[AEX] UDP server has exited clean.");
         Ok(())
     }
 

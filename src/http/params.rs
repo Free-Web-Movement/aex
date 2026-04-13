@@ -10,8 +10,18 @@ pub struct SmallParams {
 
 impl Default for SmallParams {
     fn default() -> Self {
+        const EMPTY: String = String::new();
         Self {
-            entries: unsafe { std::mem::zeroed() },
+            entries: [
+                (EMPTY, EMPTY),
+                (EMPTY, EMPTY),
+                (EMPTY, EMPTY),
+                (EMPTY, EMPTY),
+                (EMPTY, EMPTY),
+                (EMPTY, EMPTY),
+                (EMPTY, EMPTY),
+                (EMPTY, EMPTY),
+            ],
             len: 0,
         }
     }
@@ -66,15 +76,18 @@ impl SmallParams {
         let mut map = AHashMap::with_capacity(self.len);
         let mut i = 0usize;
         while i < self.len {
-            let k = std::ptr::read(&self.entries[i].0 as *const String);
-            let v = std::ptr::read(&self.entries[i].1 as *const String);
-            map.insert(k, v);
+            unsafe {
+                let k = std::ptr::read(&self.entries[i].0 as *const String);
+                let v = std::ptr::read(&self.entries[i].1 as *const String);
+                map.insert(k, v);
+            }
             i += 1;
         }
         std::mem::forget(self);
         map
     }
 }
+
 
 impl From<SmallParams> for AHashMap<String, String> {
     fn from(small: SmallParams) -> Self {

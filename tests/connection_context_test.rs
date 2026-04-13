@@ -120,7 +120,7 @@ mod tests {
 
         let writer: Option<Box<dyn AsyncWrite + Send + Unpin + Sync>> = Some(Box::new(writer_data));
 
-        let ctx = Context::new(reader, writer, global.clone(), addr);
+        let mut ctx = Context::new(reader, writer, global.clone(), addr);
 
         ctx.local.set_value(99 as usize);
 
@@ -287,12 +287,12 @@ mod tests {
         let global = Arc::new(GlobalContext::new("127.0.0.1:8080".parse().unwrap(), None));
         let addr = "127.0.0.1:1234".parse().unwrap();
 
-        let ctx = Context::new(reader_opt, writer_opt, global, addr);
+        let mut ctx = Context::new(reader_opt, writer_opt, global, addr);
 
         // 2. 测试基础类型存储 (String)
         let test_msg = "AexServerExtension".to_string();
         ctx.set(test_msg.clone());
-        let retrieved_msg = ctx.get::<String>().await;
+        let retrieved_msg = ctx.get::<String>();
         assert_eq!(retrieved_msg, Some(test_msg));
 
         // 3. 测试自定义结构体 (UserConfig)
@@ -301,17 +301,17 @@ mod tests {
             role: "admin".to_string(),
         };
         ctx.set(config.clone());
-        let retrieved_config = ctx.get::<UserConfig>().await;
+        let retrieved_config = ctx.get::<UserConfig>();
         assert_eq!(retrieved_config, Some(config));
 
         // 4. 测试“不存在”的类型
-        let non_existent = ctx.get::<u32>().await;
+        let non_existent = ctx.get::<u32>();
         assert!(non_existent.is_none());
 
         // 5. 测试类型覆盖（同一 TypeId 再次 set）
         ctx.set(42u64);
         ctx.set(99u64); // 覆盖旧值
-        assert_eq!(ctx.get::<u64>().await, Some(99u64));
+        assert_eq!(ctx.get::<u64>(), Some(99u64));
     }
 
     #[tokio::test]

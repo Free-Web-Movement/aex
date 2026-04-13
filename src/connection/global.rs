@@ -100,7 +100,7 @@ impl GlobalContext {
             .register(name, callback)
             .await
             .unwrap_or_else(|e| {
-                eprintln!("警告: 管道 {} 注册失败: {}", name, e);
+                tracing::warn!("Pipe registration failed: {}", name);
             });
         self
     }
@@ -114,7 +114,7 @@ impl GlobalContext {
             .subscribe(name, callback)
             .await
             .unwrap_or_else(|e| {
-                eprintln!("警告: 广播 {} 订阅失败: {}", name, e);
+                tracing::warn!("Broadcast subscription failed: {}", name);
             });
         self
     }

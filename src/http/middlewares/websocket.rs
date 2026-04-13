@@ -1,19 +1,17 @@
 use crate::{
-    connection::context::{Context, TypeMapExt},
+    connection::context::Context,
     http::{
         meta::HttpMetadata,
-        protocol::{header::HeaderKey, method::HttpMethod},
+        protocol::{header::HeaderKey, method::HttpMethod, header::Headers},
         types::Executor,
         websocket::{WSCodec, WSFrame, WebSocketHandler},
     },
-    // 假设这些是你定义的路径
 };
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use futures::{FutureExt, SinkExt, StreamExt};
 use sha1::{Digest, Sha1};
 use std::{
-    collections::HashMap,
     pin::Pin,
     sync::Arc,
     task::{Context as TaskContext, Poll},
@@ -80,7 +78,7 @@ impl WebSocket {
     }
 
     /// 判断请求是否是 WebSocket 握手
-    pub fn check(method: HttpMethod, headers: &HashMap<HeaderKey, String>) -> bool {
+    pub fn check(method: HttpMethod, headers: &Headers) -> bool {
         if method != HttpMethod::GET {
             return false;
         }
@@ -98,7 +96,7 @@ impl WebSocket {
     /// 完成 WebSocket 握手
     pub async fn handshake(
         writer: &mut (dyn AsyncWrite + Send + Unpin),
-        headers: &HashMap<HeaderKey, String>,
+        headers: &Headers,
     ) -> anyhow::Result<()> {
         let key = headers
             .get(&HeaderKey::SecWebSocketKey)
@@ -192,14 +190,14 @@ impl WebSocket {
                 {
                     let w = ctx.writer.as_deref_mut().unwrap();
                     if let Err(e) = Self::handshake(w, &meta.headers).await {
-                        eprintln!("WS Handshake Error: {:?}", e);
+                        tracing::warn!("WS Handshake Error: {:?}", e);
                         return false;
                     }
                 }
 
                 // 启动循环 (内部会接管 reader/writer)
                 if let Err(e) = Self::run(&ws, ctx).await {
-                    eprintln!("WS Connection Ended: {:?}", e);
+                    tracing::debug!("WS Connection Ended: {:?}", e);
                 }
 
                 false // 拦截，不继续执行后续 HTTP 中间件
