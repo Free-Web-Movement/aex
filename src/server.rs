@@ -76,9 +76,25 @@ impl Server {
         }
     }
 
-    /// Sets the HTTP router.
+    /// Sets the HTTP router (HTTP/1.1).
     pub fn http(&self, router: HttpRouter) -> &Self {
         self.globals.routers.set_value(Arc::new(router));
+        self
+    }
+
+    /// Enables HTTP/2 support using the same router as HTTP/1.1.
+    /// Call this AFTER calling http() to share the same routes.
+    pub fn http2(&self) -> &Self {
+        // Get the HTTP router that was already set
+        if let Some(http_router) = self.globals.routers.get_value::<Arc<HttpRouter>>() {
+            let global = self.globals.clone();
+            let h2_codec = Arc::new(crate::http2::H2Codec::new(
+                http_router,
+                global,
+            ));
+            // Store in dedicated field (not routers TypeMap)
+            *self.globals.h2_codec.write().unwrap() = Some(h2_codec);
+        }
         self
     }
 
@@ -175,6 +191,34 @@ impl Server {
                                 continue;
                             }
                         };
+
+                        // 检测 HTTP/2 连接 preface
+                        let is_h2 = {
+                            use tokio::io::AsyncReadExt;
+                            let mut buf = [0u8; 24];
+                            match socket.peek(&mut buf).await {
+                                Ok(n) if n >= 24 => {
+                                    buf.starts_with(b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n")
+                                }
+                                _ => false,
+                            }
+                        };
+
+                        if is_h2 {
+                            // HTTP/2 连接处理 - clone Arc before entering async
+                            let h2_codec_opt = global.h2_codec.read().unwrap().clone();
+                            if let Some(h2_codec) = h2_codec_opt {
+                                let token = manager.cancel_token.child_token();
+                                let socket = socket;
+                                let peer = peer_addr;
+                                tokio::spawn(async move {
+                                    if let Err(e) = h2_codec.handle(socket, peer, token).await {
+                                        tracing::warn!("HTTP/2 connection error: {}", e);
+                                    }
+                                });
+                                continue;
+                            }
+                        }
 
                         let pipeline = ConnectionEntry::default_pipeline::<F, C>(
                             peer_addr,

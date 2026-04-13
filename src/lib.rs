@@ -57,6 +57,7 @@ pub mod communicators;
 pub mod connection;
 pub mod crypto;
 pub mod http;
+pub mod http2;
 pub mod macros;
 pub mod server;
 pub mod storage;

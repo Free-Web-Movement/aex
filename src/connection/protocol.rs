@@ -6,6 +6,7 @@ pub enum Protocol {
     Tcp,
     Udp,
     Http,
+    Http2,
     Ws,             // WebSocket
     Custom(String), // 扩展接口
 }
@@ -17,6 +18,7 @@ impl Protocol {
             Protocol::Tcp => "tcp",
             Protocol::Udp => "udp",
             Protocol::Http => "http",
+            Protocol::Http2 => "http2",
             Protocol::Ws => "ws",
             Protocol::Custom(s) => s.as_str(),
         }
@@ -30,6 +32,7 @@ impl From<&str> for Protocol {
             "tcp" => Protocol::Tcp,
             "udp" => Protocol::Udp,
             "http" => Protocol::Http,
+            "http2" => Protocol::Http2,
             "ws" => Protocol::Ws,
             other => Protocol::Custom(other.to_string()),
         }

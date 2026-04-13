@@ -36,6 +36,8 @@ pub struct GlobalContext {
     /// 全局 TypeMap：允许灵活添加数据库连接池、全局配置等
     pub extensions: Arc<RwLock<TypeMap>>,
     pub routers: TypeMap,
+    /// HTTP/2 codec (stored separately to allow HTTP/1.1 and HTTP/2 to coexist)
+    pub h2_codec: std::sync::RwLock<Option<Arc<crate::http2::H2Codec>>>,
     pub exits: Mutex<HashMap<String, (CancellationToken, AbortHandle)>>,
 }
 
@@ -58,6 +60,7 @@ impl GlobalContext {
             paired_session_keys,
             extensions: Arc::new(RwLock::new(TypeMap::default())),
             routers: TypeMap::default(),
+            h2_codec: std::sync::RwLock::new(None),
             exits: Mutex::new(HashMap::new()),
         }
     }

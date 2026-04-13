@@ -6,6 +6,8 @@ use crate::tcp::types::{TCPCommand, TCPFrame};
 
 use crate::http::router::Router as HttpRouter;
 use crate::tcp::router::Router as TcpRouter;
+#[allow(unused_imports)]
+use crate::http2::H2Codec;
 use std::fmt;
 use std::net::SocketAddr;
 use std::pin::Pin;
@@ -127,7 +129,7 @@ impl ConnectionEntry {
                     gtx
                 };
 
-                // 2. 协议嗅探：HTTP
+                // 2. 协议嗅探：HTTP/1.1
                 if let Some(hr) = gtx.routers.get_value::<Arc<HttpRouter>>() {
                     if hr.clone().is_http(ctx.clone()).await? {
                         return Ok(());

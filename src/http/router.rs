@@ -344,6 +344,33 @@ impl Router {
         None
     }
 
+    /// 从路由树中查找处理器（供 HTTP/2 使用）
+    /// 返回: bool - 路由是否存在
+    pub fn has_route(&self, method: &str, path: &str) -> bool {
+        let pure_path = path.split('?').next().unwrap_or("");
+        
+        let segments: Vec<&str> = pure_path
+            .trim_start_matches('/')
+            .split('/')
+            .filter(|s| !s.is_empty())
+            .collect();
+
+        let mut params = crate::http::params::SmallParams::with_capacity(8.min(segments.len()));
+        
+        let node = match self.match_route(&segments, &mut params) {
+            Some(n) => n,
+            None => return false,
+        };
+        
+        let method_key = method.to_uppercase();
+        
+        // 检查是否有 handler
+        node.handlers
+            .as_ref()
+            .map(|h| h.contains_key(&method_key) || h.contains_key("*"))
+            .unwrap_or(false)
+    }
+
     // --------------------------------------
     // 执行路由
     // --------------------------------------
