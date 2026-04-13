@@ -6,26 +6,109 @@ use aex::http::router::{NodeType, Router as AexRouter};
 use aex::http::params::SmallParams;
 use aex::http::types::Executor;
 
-fn bench_aex_router_matching(c: &mut Criterion) {
+fn bench_static_route(c: &mut Criterion) {
     let mut router = AexRouter::new(NodeType::Static("root".into()));
     
     let handler: Arc<Executor> = Arc::new(|_ctx| Box::pin(async { true }));
     router.get("/api/users", handler.clone());
-    router.get("/api/users/:id", handler.clone());
-    router.get("/api/posts/:post_id/comments/:comment_id", handler.clone());
-    router.get("/static/*", handler.clone());
+    router.get("/api/posts", handler.clone());
+    router.get("/api/comments", handler.clone());
+    router.get("/static/app.js", handler.clone());
     
     let paths = vec![
         vec!["api", "users"],
-        vec!["api", "users", "123"],
-        vec!["api", "posts", "456", "comments"],
-        vec!["static", "js", "app.js"],
+        vec!["api", "posts"],
+        vec!["api", "comments"],
+        vec!["static", "app.js"],
     ];
     
-    c.bench_function("aex_router_match", |b| {
+    c.bench_function("static_route_4_paths", |b| {
         b.iter(|| {
             let mut params = SmallParams::default();
             for path in &paths {
+                black_box(router.match_route(path, &mut params));
+            }
+        });
+    });
+}
+
+fn bench_param_route(c: &mut Criterion) {
+    let mut router = AexRouter::new(NodeType::Static("root".into()));
+    
+    let handler: Arc<Executor> = Arc::new(|_ctx| Box::pin(async { true }));
+    router.get("/api/users/:id", handler.clone());
+    router.get("/api/posts/:post_id/comments/:comment_id", handler.clone());
+    
+    let paths = vec![
+        vec!["api", "users", "123"],
+        vec!["api", "posts", "456", "comments"],
+    ];
+    
+    c.bench_function("param_route_2_paths", |b| {
+        b.iter(|| {
+            let mut params = SmallParams::default();
+            for path in &paths {
+                black_box(router.match_route(path, &mut params));
+            }
+        });
+    });
+}
+
+fn bench_wildcard_route(c: &mut Criterion) {
+    let mut router = AexRouter::new(NodeType::Static("root".into()));
+    
+    let handler: Arc<Executor> = Arc::new(|_ctx| Box::pin(async { true }));
+    router.get("/static/*", handler.clone());
+    
+    let paths = vec![
+        vec!["static", "js", "app.js"],
+        vec!["static", "css", "style.css"],
+        vec!["static", "img", "logo.png"],
+    ];
+    
+    c.bench_function("wildcard_route", |b| {
+        b.iter(|| {
+            let mut params = SmallParams::default();
+            for path in &paths {
+                black_box(router.match_route(path, &mut params));
+            }
+        });
+    });
+}
+
+fn bench_mixed_route(c: &mut Criterion) {
+    let mut router = AexRouter::new(NodeType::Static("root".into()));
+    
+    let handler: Arc<Executor> = Arc::new(|_ctx| Box::pin(async { true }));
+    
+    router.get("/api/users", handler.clone());
+    router.get("/api/users/:id", handler.clone());
+    router.get("/api/posts/:post_id/comments/:comment_id", handler.clone());
+    router.get("/static/*", handler.clone());
+    router.get("/health", handler.clone());
+    
+    let static_paths = vec![vec!["api", "users"], vec!["health"]];
+    let param_paths = vec![vec!["api", "users", "123"]];
+    let multi_param_paths = vec![vec!["api", "posts", "456", "comments"]];
+    let wildcard_paths = vec![vec!["static", "js", "app.js"]];
+    
+    c.bench_function("mixed_route_all_types", |b| {
+        b.iter(|| {
+            let mut params = SmallParams::default();
+            
+            for path in &static_paths {
+                black_box(router.match_route(path, &mut params));
+            }
+            params.clear();
+            for path in &param_paths {
+                black_box(router.match_route(path, &mut params));
+            }
+            params.clear();
+            for path in &multi_param_paths {
+                black_box(router.match_route(path, &mut params));
+            }
+            params.clear();
+            for path in &wildcard_paths {
                 black_box(router.match_route(path, &mut params));
             }
         });
@@ -63,17 +146,11 @@ fn bench_hashmap_lookup(c: &mut Criterion) {
     });
 }
 
-fn bench_string_allocation(c: &mut Criterion) {
-    let path = "/api/users/123/profile";
-    
-    c.bench_function("string_to_string", |b| {
-        b.iter(|| black_box(path.to_string()));
-    });
-    
-    c.bench_function("string_from", |b| {
-        b.iter(|| black_box(String::from(path)));
-    });
-}
-
-criterion_group!(benches, bench_aex_router_matching, bench_hashmap_lookup, bench_string_allocation);
+criterion_group!(benches, 
+    bench_static_route, 
+    bench_param_route, 
+    bench_wildcard_route,
+    bench_mixed_route,
+    bench_hashmap_lookup
+);
 criterion_main!(benches);

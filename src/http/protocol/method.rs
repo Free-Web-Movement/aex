@@ -51,6 +51,7 @@ pub const HTTP_METHODS: [&str; 21] = [
 ];
 
 impl HttpMethod {
+    #[inline]
     pub fn from_str(s: &str) -> Option<Self> {
         match s.to_ascii_uppercase().as_str() {
             "GET" => Some(HttpMethod::GET),

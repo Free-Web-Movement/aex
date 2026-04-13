@@ -9,29 +9,13 @@ use futures::future::BoxFuture;
 use crate::connection::context::Context;
 
 /// Executor is the core type for handling requests and middleware.
-///
-/// # Signature
-///
-/// ```ignore
-/// Fn(&mut Context) -> BoxFuture<bool>
-/// ```
-///
-/// # Return Value
-///
-/// - `true`: Continue to the next executor in the chain
-/// - `false`: Stop execution, do not call subsequent executors
-///
-/// # Example
-///
-/// ```rust,ignore
-/// use aex::exe;
-///
-/// let handler = exe!(|ctx| {
-///     ctx.send("Response body");
-///     true  // Continue execution
-/// });
-/// ```
 pub type Executor = dyn for<'a> Fn(&'a mut Context) -> BoxFuture<'a, bool> + Send + Sync;
+
+/// Route handler type alias
+pub type RouteHandler = Arc<Executor>;
+
+/// Middleware chain type alias
+pub type MiddlewareChain = Vec<Arc<Executor>>;
 
 /// Helper function to convert a closure into an Executor.
 pub fn to_executor<F>(f: F) -> Arc<Executor>

@@ -99,7 +99,7 @@ impl GlobalContext {
         self.pipe
             .register(name, callback)
             .await
-            .unwrap_or_else(|e| {
+            .unwrap_or_else(|_e| {
                 tracing::warn!("Pipe registration failed: {}", name);
             });
         self
@@ -113,7 +113,7 @@ impl GlobalContext {
         self.spread
             .subscribe(name, callback)
             .await
-            .unwrap_or_else(|e| {
+            .unwrap_or_else(|_e| {
                 tracing::warn!("Broadcast subscription failed: {}", name);
             });
         self

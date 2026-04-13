@@ -22,9 +22,12 @@ macro_rules! exe {
         use futures::future::FutureExt;
         use std::sync::Arc;
         use $crate::connection::context::Context;
+
+        #[allow(unused_imports)]
         use $crate::http::types::Executor;
 
-        Arc::new(move |$ctx: &mut Context| async move { $body }.boxed())
+        let executor: std::sync::Arc<$crate::http::types::Executor> = Arc::new(move |$ctx: &mut Context| async move { $body }.boxed());
+        executor
     }};
 
     // 支持 move 闭包 + pre 处理
@@ -32,9 +35,11 @@ macro_rules! exe {
         use futures::future::FutureExt;
         use std::sync::Arc;
         use $crate::connection::context::Context;
+
+        #[allow(unused_imports)]
         use $crate::http::types::Executor;
 
-        Arc::new(move |$ctx: &mut Context| {
+        let executor: std::sync::Arc<$crate::http::types::Executor> = Arc::new(move |$ctx: &mut Context| {
             let $data = {
                 let $pre_ctx: &mut Context = &mut *$ctx;
                 $pre
@@ -44,7 +49,8 @@ macro_rules! exe {
                 $body
             }
             .boxed()
-        })
+        });
+        executor
     }};
 
     // 带有 pre 处理的分支
@@ -52,9 +58,11 @@ macro_rules! exe {
         use futures::future::FutureExt;
         use std::sync::Arc;
         use $crate::connection::context::Context;
+
+        #[allow(unused_imports)]
         use $crate::http::types::Executor;
 
-        let executor: Arc<Executor> = Arc::new(move |$ctx: &mut Context| {
+        let executor: std::sync::Arc<$crate::http::types::Executor> = Arc::new(move |$ctx: &mut Context| {
             let $data = {
                 let $pre_ctx: &mut Context = &mut *$ctx;
                 $pre
@@ -74,10 +82,11 @@ macro_rules! exe {
         use futures::future::FutureExt;
         use std::sync::Arc;
         use $crate::connection::context::Context;
+
+        #[allow(unused_imports)]
         use $crate::http::types::Executor;
 
-        let executor: Arc<Executor> =
-            Arc::new(move |$ctx: &mut Context| async move { $body }.boxed());
+        let executor: std::sync::Arc<$crate::http::types::Executor> = Arc::new(move |$ctx: &mut Context| async move { $body }.boxed());
         executor
     }};
 }
@@ -89,6 +98,8 @@ macro_rules! validator {
         use ahash::AHashMap;
         use std::sync::Arc;
         use $crate::http::middlewares::validator::to_validator;
+
+        #[allow(unused_imports)]
         use $crate::http::types::Executor;
 
         let mut dsl_map: AHashMap<String, String> = AHashMap::new();
@@ -97,7 +108,7 @@ macro_rules! validator {
             dsl_map.insert(stringify!($key).to_string(), $dsl.to_string());
         )*
 
-        let mw: Arc<Executor> = to_validator(dsl_map);
+        let mw: std::sync::Arc<$crate::http::types::Executor> = to_validator(dsl_map);
         mw
         }
     };

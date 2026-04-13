@@ -8,7 +8,6 @@
 //! - `global`: Shared state across all connections
 //! - `reader`/`writer`: I/O streams for the connection
 
-use ahash::AHashMap;
 use chrono::DateTime;
 use chrono::Utc;
 use std::any::Any;
@@ -29,7 +28,8 @@ use crate::http::res::Response;
 pub const SERVER_NAME: &str = "Aex/1.0";
 
 /// TypeMap for storing shared data using TypeId as keys. Concurrent version.
-pub type ConcurrentTypeMap = dashmap::DashMap<std::any::TypeId, Box<dyn std::any::Any + Send + Sync>>;
+pub type ConcurrentTypeMap =
+    dashmap::DashMap<std::any::TypeId, Box<dyn std::any::Any + Send + Sync>>;
 pub type TypeMap = ConcurrentTypeMap;
 
 /// Non-concurrent TypeMap for per-request storage.
@@ -166,8 +166,10 @@ impl Context {
             let len = bytes.len();
 
             let mime_str = mime.unwrap_or(SubMediaType::Plain);
-            meta.headers.insert(HeaderKey::ContentType, mime_str.as_str().to_string());
-            meta.headers.insert(HeaderKey::ContentLength, len.to_string());
+            meta.headers
+                .insert(HeaderKey::ContentType, mime_str.as_str().to_string());
+            meta.headers
+                .insert(HeaderKey::ContentLength, len.to_string());
             meta.body = bytes;
         }
     }
@@ -176,9 +178,9 @@ impl Context {
     pub fn redirect(&mut self, location: &str) {
         if let Some(meta) = self.local.get_mut::<HttpMetadata>() {
             meta.status = StatusCode::Found;
-            meta.headers.insert(HeaderKey::Location, location.to_string());
+            meta.headers
+                .insert(HeaderKey::Location, location.to_string());
             meta.body = Vec::new();
         }
     }
 }
-

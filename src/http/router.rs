@@ -12,13 +12,12 @@
 
 use ahash::AHashMap;
 use std::cell::RefCell;
-use std::ops::Deref;
 use std::rc::Rc;
 use std::sync::Arc;
 use tokio::io::AsyncReadExt;
 use tokio::sync::Mutex;
 
-use crate::connection::context::{Context, TypeMapExt};
+use crate::connection::context::Context;
 use crate::http::meta::HttpMetadata;
 use crate::http::params::{Params, SmallParams};
 use crate::http::protocol::media_type::SubMediaType;
