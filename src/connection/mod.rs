@@ -13,10 +13,14 @@
 //! - `status`: Connection status tracking
 //! - `protocol`: Protocol type definitions
 //! - `types`: Connection-related type definitions
+//! - `commands`: P2P handshake commands
 
+pub mod commands;
 pub mod context;
 pub mod entry;
 pub mod global;
+pub mod handshake;
+pub mod handshake_handler;
 pub mod manager;
 pub mod node;
 pub mod protocol;
