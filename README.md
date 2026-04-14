@@ -290,6 +290,147 @@ let peer_id = entry.get_peer_id().await;
 | 实时通信 | 心跳保活 |
 | 自动重连 | 状态机管理断线重连 |
 
+### 零信任加密
+
+使用 X25519 + ChaCha20-Poly1305 实现端到端加密：
+
+```rust
+use aex::crypto::zero_trust_session_key::SessionKey;
+use aex::connection::commands::{self, HelloCommand};
+
+// 生成会话密钥
+let mut session_key = SessionKey::new();
+session_key.establish(&peer_public_key)?;
+
+// 加密数据
+let data = hello.encode();
+let encrypted = session_key.encrypt(&data)?;
+
+// 解密数据
+let decrypted = session_key.decrypt(&encrypted[1..])?;  // 跳过 0x80 标志
+let hello = HelloCommand::decode(&decrypted)?;
+```
+
+### 重连管理器
+
+指数退避重连策略：
+
+```rust
+use aex::connection::retry::{RetryConfig, RetryManager};
+
+let config = RetryConfig::new(5)
+    .with_initial_delay(1000)    // 初始 1s
+    .with_max_delay(30000)      // 最大 30s
+    .with_backoff_factor(2.0);  // 指数退避
+
+let mut manager = RetryManager::new(config);
+loop {
+    match manager.next() {
+        RetryAction::Retry(delay) => {
+            tokio::time::sleep(delay).await;
+            // 重试连接
+        }
+        RetryAction::Stop => break,
+    }
+}
+```
+
+### 连接度量
+
+实时连接统计和监控：
+
+```rust
+use aex::connection::metrics::ConnectionMetrics;
+
+let metrics = ConnectionMetrics::new();
+
+metrics.record_sent(1024);
+metrics.record_received(2048);
+metrics.record_latency(50000);  // 50ms
+
+// 获取统计
+assert_eq!(metrics.bytes_sent(), 1024);
+assert_eq!(metrics.latency_avg_ns(), 50000);
+assert!(metrics.throughput_mbps() > 0.0);
+```
+
+### 消息队列
+
+离线消息缓冲和重发机制：
+
+```rust
+use aex::connection::message_queue::{MessageQueue, MessageQueueConfig, Message};
+
+let config = MessageQueueConfig::new(1000);
+let queue = MessageQueue::new(config);
+
+let msg = Message::new(CommandId::Ping, vec![]).with_ack(true);
+queue.enqueue(msg).await?;
+```
+
+### 多播支持
+
+组播消息分发：
+
+```rust
+use aex::connection::multicast::{MulticastManager, MulticastScope};
+
+let manager = MulticastManager::new();
+
+// 创建站点本地组
+let group = manager.create_group(SocketAddr::new(
+    Ipv4Addr::new(239, 255, 255, 254).into(), 
+    8080
+)).await;
+
+// 成员管理
+group.join(peer_addr).await;
+let members = group.members().await;
+```
+
+### 连接池限额
+
+连接数控制和保护：
+
+```rust
+use aex::connection::pool_limit::{ConnectionPoolLimits, ConnectionPoolConfig, PoolAllowResult};
+
+let config = ConnectionPoolConfig::new(1000)
+    .with_per_ip_limit(10)      // 每IP最多10连接
+    .with_subnet_limit(100)   // 每子网最多100连接
+    .with_idle_timeout(300);  // 空闲超时300秒
+
+let pool = ConnectionPoolLimits::new(config);
+
+// 检查是否允许连接
+let result = pool.can_connect(&addr, true).await;
+if result.is_allowed() {
+    pool.add_connection(addr, true).await;
+}
+
+// 获取统计
+let total = pool.total_connections().await;
+let removed = pool.cleanup_idle().await;
+```
+
+### P2P 功能列表
+
+| 功能 | 文件 | 状态 |
+|------|------|------|
+| CommandId (1-6) | `command_id.rs` | ✅ |
+| 握手协议 | `hello,welcome,ack,reject.rs` | ✅ |
+| 心跳协议 | `ping.rs` | ✅ |
+| 命令路由 | `router.rs` | ✅ |
+| 连接状态机 | `state_machine.rs` | ✅ |
+| 心跳管理 | `heartbeat.rs` | ✅ |
+| 重连管理 | `retry.rs` | ✅ |
+| 协议编解码 | `protocol_codec.rs` | ✅ |
+| 消息队列 | `message_queue.rs` | ✅ |
+| 连接度量 | `metrics.rs` | ✅ |
+| 多播支持 | `multicast.rs` | ✅ |
+| 连接池限额 | `pool_limit.rs` | ✅ |
+| 零信任加密 | `crypto/zero_trust_session_key.rs` | ✅ |
+
 ---
 
 ## 协议支持
