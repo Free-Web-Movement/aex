@@ -15,6 +15,7 @@
 //! - `types`: Connection-related type definitions
 //! - `commands`: P2P handshake commands
 //! - `heartbeat`: P2P heartbeat/keepalive
+//! - `state_machine`: Connection state machine
 
 pub mod commands;
 pub mod context;
@@ -27,5 +28,6 @@ pub mod manager;
 pub mod node;
 pub mod protocol;
 pub mod scope;
+pub mod state_machine;
 pub mod status;
 pub mod types;
