@@ -27,6 +27,85 @@ anyhow = "1"
 - **TypeMap 扩展** - 灵活的请求/响应数据存储
 - **端到端加密** - ChaCha20-Poly1305 会话加密
 - **IPC 通信器** - Pipe、Spreader、Event 模式
+- **P2P 框架** - 基于 IP 识别的去中心化网络
+
+---
+
+## P2P 框架
+
+Aex 内置基于 **IP 识别** 的 P2P 框架，支持去中心化网络通信。
+
+### 核心概念
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      P2P 节点                               │
+├─────────────────────────────────────────────────────────────┤
+│  Node {                                                    │
+│    id: Vec<u8>,      // 节点 ID，通常是公钥哈希             │
+│    version: u8,     // 协议版本                            │
+│    started_at: u64,  // 启动时间戳                          │
+│    port: u16,       // 监听端口                            │
+│    protocols: HashSet<Protocol>,  // 支持的协议列表          │
+│    ips: Vec<(NetworkScope, IpAddr)>,  // 网络地址列表     │
+│  }                                                         │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 网络 Scope
+
+自动识别节点属于内网还是外网：
+
+```rust
+pub enum NetworkScope {
+    Intranet, // 内网 (RFC1918, IPv6 LLA/ULA)
+    Extranet, // 外网 (公网 IP)
+}
+```
+
+自动分类规则：
+- **内网**: 127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, IPv6 LLA/ULA
+- **外网**: 其他公网 IP
+
+### 节点发现
+
+```rust
+use aex::connection::node::Node;
+
+// 从系统环境自动创建节点
+let node = Node::from_system(8080, id.clone(), 1);
+
+// 获取所有 IP 地址
+let all_ips = node.get_all();
+
+// 按 Scope 获取
+let intranet_ips = node.get_intranet_ips();
+let extranet_ips = node.get_extranet_ips();
+
+// 添加观察到的 IP
+node.add_observed_ip(NetworkScope::Extranet, "8.8.8.8".parse().unwrap());
+```
+
+### P2P 连接管理
+
+```rust
+use aex::connection::manager::ConnectionManager;
+
+// 添加 P2P 节点连接
+manager.add(peer_addr, abort_handle, token, is_server, Some(ctx));
+
+// 获取节点 ID
+let peer_id = entry.get_peer_id().await;
+```
+
+### 适用场景
+
+| 场景 | 说明 |
+|------|------|
+| 去中心化应用 | 基于 IP 识别，无中心服务器 |
+| 局域网服务发现 | 自动识别内网节点 |
+| 端到端加密 | 结合零信任会话密钥 |
+| 分布式计算 | P2P 节点协同工作 |
 
 ---
 

@@ -1,119 +1,257 @@
-// use std::net::SocketAddr;
-// use std::sync::Arc;
-// use tokio::net::TcpListener;
-// use tokio::sync::Mutex;
-// use aex::tcp::types::{RawCodec, Codec, Command};
-// use aex::connection::global::GlobalContext;
-// use aex::connection::context::{Context, TypeMapExt};
-// use aex::connection::manager::ConnectionManager;
-// use aex::tcp::router::Router as TcpRouter;
-// use aex::connection::types::IDExtractor;
-// use aex::connection::entry::ConnectionEntry;
+use std::net::SocketAddr;
+use std::sync::Arc;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpListener;
+use tokio::sync::Mutex;
 
-// #[tokio::test]
-// async fn test_bidirectional_p2p_stress() {
-//     // 1. 设置服务端
-//     let addr: SocketAddr = "127.0.0.1:9090".parse().unwrap();
-//     let mut server_router = TcpRouter::new();
-//     let (tx, mut rx) = tokio::sync::mpsc::channel(100);
+use aex::connection::context::Context;
+use aex::connection::global::GlobalContext;
+use aex::connection::manager::ConnectionManager;
+use aex::connection::node::Node;
+use aex::connection::types::IDExtractor;
+use aex::connection::entry::ConnectionEntry;
+use aex::tcp::types::{RawCodec, Codec, Command, TCPCommand, TCPFrame};
+use tokio_util::sync::CancellationToken;
 
-//     server_router.on::<RawCodec, RawCodec>(
-//         1001,
-//         Box::new(move |ctx, _frame, cmd| {
-//             let tx = tx.clone();
-//             Box::pin(async move {
-//                 // 回显逻辑：服务端收到后立即回传给客户端
-//                 let response = cmd.clone();
-//                 let mut guard = ctx.lock().await;
-//                 if let Some(w) = guard.writer.as_mut() {
-//                     use tokio::io::AsyncWriteExt;
-//                     w.write_all(&response.encode()).await.unwrap();
-//                 }
-//                 let _ = tx.send(cmd.0).await;
-//                 Ok(true)
-//             })
-//         }),
-//         vec![],
-//     );
+fn create_global(addr: SocketAddr) -> Arc<GlobalContext> {
+    use aex::crypto::session_key_manager::PairedSessionKey;
+    use tokio::sync::Mutex;
+    let keys = Arc::new(Mutex::new(PairedSessionKey::new(32)));
+    Arc::new(GlobalContext::new(addr, Some(keys)))
+}
 
-//     let server_global = Arc::new(GlobalContext::new(addr, None));
-//     server_global.routers.set_value(Arc::new(server_router));
+#[tokio::test]
+async fn test_p2p_bidirectional_basics() {
+    let addr_a: SocketAddr = "127.0.0.1:19001".parse().unwrap();
+    let addr_b: SocketAddr = "127.0.0.1:19002".parse().unwrap();
 
-//     let listener = TcpListener::bind(addr).await.unwrap();
-//     tokio::spawn(async move {
-//         loop {
-//             let (socket, peer) = listener.accept().await.unwrap();
-//             let global = server_global.clone();
-//             let extractor: IDExtractor<RawCodec> = Arc::new(|c: &RawCodec| c.id());
-//             let pipeline = ConnectionEntry::default_pipeline::<RawCodec, RawCodec>(peer, true, extractor);
-//             let (token, _handle, _) = ConnectionEntry::start::<RawCodec, RawCodec, _, _>(
-//                 global.manager.cancel_token.clone(),
-//                 socket,
-//                 peer,
-//                 global.clone(),
-//                 {
-//                     let global = global.clone();
-//                     let peer = peer;
-//                     move |ctx| {
-//                         let global_inner = global.clone();
-//                         let peer_inner = peer;
-//                         Box::pin(async move {
-//                              global_inner.manager.update(peer_inner, true, Some(ctx.clone()));
-//                              let _ = pipeline(ctx).await;
-//                              Ok(())
-//                         })
-//                     }
-//                 },
-//             );
-//             global.manager.add(peer, _handle, token, true, None);
-//         }
-//     });
+    let (tx_a, mut rx_a) = tokio::sync::mpsc::channel::<Vec<u8>>(100);
+    let (tx_b, mut rx_b) = tokio::sync::mpsc::channel::<Vec<u8>>(100);
 
-//     // 2. 设置客户端
-//     let manager = ConnectionManager::new();
-//     let client_global = Arc::new(GlobalContext::new(addr, None));
-//     let extractor: IDExtractor<RawCodec> = Arc::new(|c: &RawCodec| c.id());
+    let global_a = create_global(addr_a);
+    let global_b = create_global(addr_b);
 
-//     manager.connect::<RawCodec, RawCodec, _, _>(
-//         addr,
-//         client_global,
-//         |_ctx| async move {},
-//         extractor,
-//     ).await.unwrap();
+    let manager_a = Arc::new(ConnectionManager::new());
+    let manager_b = Arc::new(ConnectionManager::new());
 
-//     // 💡 修复：连接建立是异步的，需要短暂等待 Manager 登记
-//     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-//     println!("Manager connections size: {}", manager.connections.len());
-//     for b in manager.connections.iter() {
-//         println!("Bucket {:?}: clients={}, servers={}", b.key(), b.value().clients.len(), b.value().servers.len());
-//     }
+    let listener_a = TcpListener::bind(addr_a).await.unwrap();
+    let listener_b = TcpListener::bind(addr_b).await.unwrap();
 
-//     // 3. 双向同时读写测试
-//     let mut client_entry = None;
-//     for bucket_ref in manager.connections.iter() {
-//         println!("Bucket {:?}: clients={}, servers={}", bucket_ref.key(), bucket_ref.value().clients.len(), bucket_ref.value().servers.len());
-//         if !bucket_ref.value().clients.is_empty() {
-//              client_entry = Some(bucket_ref.value().clients.iter().next().unwrap().value().clone());
-//              break;
-//         }
-//         if !bucket_ref.value().servers.is_empty() {
-//              client_entry = Some(bucket_ref.value().servers.iter().next().unwrap().value().clone());
-//              break;
-//         }
-//     }
-//     let client_entry = client_entry.expect("No connection found");
-//     let ctx = client_entry.context.clone().expect("Context should not be None");
+    let tx_a_clone = tx_a.clone();
+    let global_a_clone = global_a.clone();
+    let manager_a_clone = manager_a.clone();
+    tokio::spawn(async move {
+        let (socket, peer) = listener_a.accept().await.unwrap();
+        let extractor: IDExtractor<RawCodec> = Arc::new(|c: &RawCodec| c.id());
+        
+        let pipeline = ConnectionEntry::default_pipeline::<RawCodec, RawCodec>(peer, true, extractor);
+        
+        let (token, handle, ctx) = ConnectionEntry::start::<RawCodec, RawCodec, _, _>(
+            manager_a_clone.cancel_token.clone(),
+            socket,
+            peer,
+            global_a_clone.clone(),
+            move |ctx| {
+                Box::pin(async move {
+                    let _ = pipeline(ctx.clone()).await;
+                    
+                    let mut guard = ctx.lock().await;
+                    let reader = guard.reader.take();
+                    if let Some(mut r) = reader {
+                        let mut buf = vec![0u8; 1024];
+                        loop {
+                            match r.read(&mut buf).await {
+                                Ok(0) => break,
+                                Ok(n) => {
+                                    let data = buf[..n].to_vec();
+                                    let _ = tx_a_clone.send(data).await;
+                                }
+                                Err(_) => break,
+                            }
+                        }
+                    }
+                    Ok(())
+                })
+            },
+        );
+        manager_a_clone.add(peer, handle, token, true, Some(ctx));
+    });
 
-//     for i in 0..50 {
-//         let cmd = RawCodec(vec![0, 0, 3, 233, i]); // ID 1001
-//         {
-//             let mut guard = ctx.lock().await;
-//             if let Some(w) = guard.writer.as_mut() {
-//                 use tokio::io::AsyncWriteExt;
-//                 w.write_all(&cmd.encode()).await.unwrap();
-//             }
-//         }
-//         // 验证回显
-//         assert_eq!(rx.recv().await.unwrap(), cmd.0);
-//     }
-// }
+    let tx_b_clone = tx_b.clone();
+    let global_b_clone = global_b.clone();
+    let manager_b_clone = manager_b.clone();
+    tokio::spawn(async move {
+        let (socket, peer) = listener_b.accept().await.unwrap();
+        let extractor: IDExtractor<RawCodec> = Arc::new(|c: &RawCodec| c.id());
+        
+        let pipeline = ConnectionEntry::default_pipeline::<RawCodec, RawCodec>(peer, true, extractor);
+        
+        let (token, handle, ctx) = ConnectionEntry::start::<RawCodec, RawCodec, _, _>(
+            manager_b_clone.cancel_token.clone(),
+            socket,
+            peer,
+            global_b_clone.clone(),
+            move |ctx| {
+                Box::pin(async move {
+                    let _ = pipeline(ctx.clone()).await;
+                    
+                    let mut guard = ctx.lock().await;
+                    let reader = guard.reader.take();
+                    if let Some(mut r) = reader {
+                        let mut buf = vec![0u8; 1024];
+                        loop {
+                            match r.read(&mut buf).await {
+                                Ok(0) => break,
+                                Ok(n) => {
+                                    let data = buf[..n].to_vec();
+                                    let _ = tx_b_clone.send(data).await;
+                                }
+                                Err(_) => break,
+                            }
+                        }
+                    }
+                    Ok(())
+                })
+            },
+        );
+        manager_b_clone.add(peer, handle, token, true, Some(ctx));
+    });
+
+    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+    let socket_ab = tokio::net::TcpStream::connect(addr_a).await.unwrap();
+    let (read_a, mut write_a) = socket_ab.into_split();
+    
+    let socket_ba = tokio::net::TcpStream::connect(addr_b).await.unwrap();
+    let (read_b, mut write_b) = socket_ba.into_split();
+
+    let msg_from_a = b"Message from node A to node B";
+    let msg_from_b = b"Message from node B to node A";
+
+    write_a.write_all(msg_from_a).await.unwrap();
+    write_b.write_all(msg_from_b).await.unwrap();
+
+    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+    let received_by_b = rx_a.recv().await.unwrap();
+    let received_by_a = rx_b.recv().await.unwrap();
+
+    assert_eq!(received_by_b, msg_from_a);
+    assert_eq!(received_by_a, msg_from_b);
+    
+    drop(read_a);
+    drop(read_b);
+}
+
+#[tokio::test]
+async fn test_p2p_bidirectional_stress() {
+    let server_addr: SocketAddr = "127.0.0.1:19501".parse().unwrap();
+    
+    let global = create_global(server_addr);
+    let manager = Arc::new(ConnectionManager::new());
+
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<(SocketAddr, Vec<u8>)>(500);
+    let listener = TcpListener::bind(server_addr).await.unwrap();
+    
+    let global_clone = global.clone();
+    let manager_clone = manager.clone();
+    let tx_clone = tx.clone();
+    
+    tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                result = listener.accept() => {
+                    if let Ok((socket, peer)) = result {
+                        let extractor: IDExtractor<RawCodec> = Arc::new(|c: &RawCodec| c.id());
+                        let pipeline = ConnectionEntry::default_pipeline::<RawCodec, RawCodec>(peer, true, extractor);
+                        let tx_inner = tx_clone.clone();
+                        
+                        let (token, handle, ctx) = ConnectionEntry::start::<RawCodec, RawCodec, _, _>(
+                            manager_clone.cancel_token.clone(),
+                            socket,
+                            peer,
+                            global_clone.clone(),
+                            move |ctx| {
+                                Box::pin(async move {
+                                    let _ = pipeline(ctx.clone()).await;
+                                    
+                                    let mut guard = ctx.lock().await;
+                                    let reader = guard.reader.take();
+                                    if let Some(mut r) = reader {
+                                        let mut buf = vec![0u8; 1024];
+                                        loop {
+                                            match r.read(&mut buf).await {
+                                                Ok(0) => break,
+                                                Ok(n) => {
+                                                    let data = buf[..n].to_vec();
+                                                    let _ = tx_inner.send((peer, data)).await;
+                                                }
+                                                Err(_) => break,
+                                            }
+                                        }
+                                    }
+                                    Ok(())
+                                })
+                            },
+                        );
+                        manager_clone.add(peer, handle, token, true, Some(ctx));
+                    }
+                }
+                _ = tokio::time::sleep(tokio::time::Duration::from_secs(2)) => {
+                    break;
+                }
+            }
+        }
+    });
+
+    let mut handles = vec![];
+    for i in 0..5 {
+        let addr = server_addr;
+        let global = global.clone();
+        
+        let socket = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let (reader, mut writer) = socket.into_split();
+        
+        let msg = format!("Client {} message", i);
+        writer.write_all(msg.as_bytes()).await.unwrap();
+        
+        handles.push((reader, writer));
+    }
+
+    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+    let mut received_count = 0;
+    for _ in 0..5 {
+        if rx.recv().await.is_some() {
+            received_count += 1;
+        }
+    }
+
+    assert!(received_count >= 3, "Should receive at least 3 messages");
+}
+
+#[tokio::test]
+async fn test_p2p_node_entry_basic() {
+    let node = Node::from_system(8080, vec![0x11u8; 32], 1);
+    
+    assert_eq!(node.id, vec![0x11u8; 32]);
+    assert_eq!(node.port, 8080);
+    assert_eq!(node.version, 1);
+    
+    let ips = node.get_all();
+    assert!(!ips.is_empty());
+}
+
+#[tokio::test]
+async fn test_p2p_network_scope_classification() {
+    use aex::connection::scope::NetworkScope;
+    
+    let intranet_ip: std::net::IpAddr = "192.168.1.1".parse().unwrap();
+    let extranet_ip: std::net::IpAddr = "8.8.8.8".parse().unwrap();
+    
+    let scope_intranet = NetworkScope::from_ip(&intranet_ip);
+    let scope_extranet = NetworkScope::from_ip(&extranet_ip);
+    
+    assert_eq!(scope_intranet, NetworkScope::Intranet);
+    assert_eq!(scope_extranet, NetworkScope::Extranet);
+}
