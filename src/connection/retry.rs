@@ -1,7 +1,5 @@
 use std::time::Duration;
 
-use tokio::sync::mpsc;
-
 pub struct RetryConfig {
     pub max_retries: u32,
     pub initial_delay_ms: u64,
@@ -35,7 +33,8 @@ impl RetryConfig {
     }
 
     pub fn calculate_delay(&self, attempt: u32) -> Duration {
-        let delay = (self.initial_delay_ms as f64 * self.backoff_factor.powi(attempt as i32)) as u64;
+        let delay =
+            (self.initial_delay_ms as f64 * self.backoff_factor.powi(attempt as i32)) as u64;
         let delay = delay.min(self.max_delay_ms);
         Duration::from_millis(delay)
     }
@@ -83,28 +82,3 @@ impl RetryManager {
         self.attempt < self.config.max_retries
     }
 }
-
-pub async fn with_retry<F, T, E>(
-    config: RetryConfig,
-    mut operation: F,
-) -> Result<T, E>
-where
-    F: FnMut() -> FutResult<T, E>,
-    FutResult<T, E>: std::future::Future<Output = Result<T, E>>,
-{
-    let mut manager = RetryManager::new(config);
-    loop {
-        match manager.next() {
-            RetryAction::Retry(delay) => {
-                tokio::time::sleep(delay).await;
-                match operation().await {
-                    Ok(result) => return Ok(result),
-                    Err(_) => continue,
-                }
-            }
-            RetryAction::Stop => return operation().await,
-        }
-    }
-}
-
-pub type FutResult<T, E> = std::pin::Pin<Box<dyn std::future::Future<Output = Result<T, E> + Send>>;
