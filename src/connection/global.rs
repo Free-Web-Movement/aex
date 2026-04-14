@@ -19,7 +19,10 @@ use crate::{
         pipe::{PipeCallback, PipeManager},
         spreader::{SpreadCallback, SpreadManager},
     },
-    connection::context::{SERVER_NAME, TypeMap},
+    connection::{
+        context::{SERVER_NAME, TypeMap},
+        heartbeat::{HeartbeatConfig, HeartbeatManager},
+    },
     crypto::session_key_manager::PairedSessionKey,
 };
 
@@ -33,6 +36,8 @@ pub struct GlobalContext {
     pub event: EventEmitter,
     pub name: String,
     pub paired_session_keys: Option<Arc<Mutex<PairedSessionKey>>>,
+    pub heartbeat_config: HeartbeatConfig,
+    pub heartbeat_manager: Option<HeartbeatManager>,
     /// 全局 TypeMap：允许灵活添加数据库连接池、全局配置等
     pub extensions: Arc<RwLock<TypeMap>>,
     pub routers: TypeMap,
@@ -48,7 +53,6 @@ impl GlobalContext {
     ) -> Self {
         Self {
             addr,
-            // 假设 Node 和 ConnectionManager 都有默认初始化方法
             local_node: Arc::new(RwLock::new(crate::connection::node::Node::from_addr(
                 addr, None, None,
             ))),
@@ -58,10 +62,29 @@ impl GlobalContext {
             event: EventEmitter::default(),
             name: SERVER_NAME.to_string(),
             paired_session_keys,
+            heartbeat_config: HeartbeatConfig::new(),
+            heartbeat_manager: None,
             extensions: Arc::new(RwLock::new(TypeMap::default())),
             routers: TypeMap::default(),
             h2_codec: std::sync::RwLock::new(None),
             exits: Mutex::new(HashMap::new()),
+        }
+    }
+
+    pub fn with_heartbeat_config(mut self, config: HeartbeatConfig) -> Self {
+        self.heartbeat_config = config;
+        self
+    }
+
+    pub fn init_heartbeat_manager(&mut self) {
+        let local_node = futures::executor::block_on(self.local_node.read()).clone();
+        self.heartbeat_manager = Some(HeartbeatManager::new(local_node).with_config(self.heartbeat_config.clone()));
+    }
+
+    pub fn start_heartbeat(&self, ctx: Arc<tokio::sync::Mutex<crate::connection::context::Context>>, peer_addr: SocketAddr, cancel_token: CancellationToken) {
+        if let Some(ref manager) = self.heartbeat_manager {
+            let manager = manager.clone();
+            manager.start_server_heartbeat(ctx, peer_addr, cancel_token);
         }
     }
 

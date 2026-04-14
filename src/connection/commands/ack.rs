@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-pub const CMD_ACK: u32 = 3;
+use super::command_id::CommandId;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AckCommand {
@@ -23,13 +23,13 @@ impl AckCommand {
         }
     }
 
-    pub fn id() -> u32 {
-        CMD_ACK
+    pub fn id() -> CommandId {
+        CommandId::Ack
     }
 
     pub fn encode(&self) -> Vec<u8> {
         let mut bytes = vec![];
-        bytes.extend_from_slice(&(CMD_ACK as u32).to_le_bytes());
+        bytes.extend_from_slice(&(CommandId::Ack.as_u32()).to_le_bytes());
         if let Ok(v) = serde_json::to_vec(self) {
             bytes.extend_from_slice(&v);
         }
@@ -41,7 +41,7 @@ impl AckCommand {
             return Err("data too short".to_string());
         }
         let id = u32::from_le_bytes(data[0..4].try_into().unwrap());
-        if id != CMD_ACK {
+        if id != CommandId::Ack.as_u32() {
             return Err("invalid command id".to_string());
         }
         serde_json::from_slice(&data[4..]).map_err(|e| e.to_string())

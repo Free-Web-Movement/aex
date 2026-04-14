@@ -14,6 +14,7 @@
 //! - `protocol`: Protocol type definitions
 //! - `types`: Connection-related type definitions
 //! - `commands`: P2P handshake commands
+//! - `heartbeat`: P2P heartbeat/keepalive
 
 pub mod commands;
 pub mod context;
@@ -21,6 +22,7 @@ pub mod entry;
 pub mod global;
 pub mod handshake;
 pub mod handshake_handler;
+pub mod heartbeat;
 pub mod manager;
 pub mod node;
 pub mod protocol;

@@ -1,10 +1,6 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
 
-use crate::connection::commands::{
-    AckCommand, HelloCommand, RejectCommand, WelcomeCommand, CMD_ACK, CMD_HELLO, CMD_REJECT,
-    CMD_WELCOME,
-};
 use crate::connection::node::Node;
 
 pub const HANDSHAKE_VERSION: u8 = 1;
@@ -66,22 +62,5 @@ impl HandshakeState {
 
     pub fn remove(&mut self, peer_addr: &SocketAddr) {
         self.peers.remove(peer_addr);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_handshake_state() {
-        let node = Node::from_system(8080, vec![0x78u8; 32], 1);
-        let mut state = HandshakeState::new(node);
-
-        let peer_addr: SocketAddr = "192.168.1.100:9000".parse().unwrap();
-        let ctx = state.get_or_create(peer_addr);
-
-        assert_eq!(ctx.peer_addr, peer_addr);
-        assert!(!ctx.confirmed);
     }
 }

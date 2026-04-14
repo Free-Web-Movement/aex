@@ -5,8 +5,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::Mutex;
 
 use aex::connection::commands::{
-    HelloCommand, WelcomeCommand, AckCommand, RejectCommand,
-    CMD_HELLO, CMD_WELCOME, CMD_ACK, CMD_REJECT,
+    HelloCommand, WelcomeCommand, AckCommand, RejectCommand, CommandId,
 };
 use aex::connection::node::Node;
 use aex::connection::handshake_handler::HandshakeHandler;
@@ -15,10 +14,10 @@ use aex::crypto::session_key_manager::PairedSessionKey;
 
 #[tokio::test]
 async fn test_hello_command_constants() {
-    assert_eq!(CMD_HELLO, 1);
-    assert_eq!(CMD_WELCOME, 2);
-    assert_eq!(CMD_ACK, 3);
-    assert_eq!(CMD_REJECT, 0xFF);
+    assert_eq!(CommandId::Hello.as_u32(), 1);
+    assert_eq!(CommandId::Welcome.as_u32(), 2);
+    assert_eq!(CommandId::Ack.as_u32(), 3);
+    assert_eq!(CommandId::Reject.as_u32(), 4);
 }
 
 #[tokio::test]
@@ -41,7 +40,7 @@ async fn test_hello_command_encode_decode() {
     assert!(encoded.len() > 4);
     
     let id = u32::from_le_bytes(encoded[0..4].try_into().unwrap());
-    assert_eq!(id, CMD_HELLO);
+    assert_eq!(id, CommandId::Hello.as_u32());
     
     let decoded = HelloCommand::decode(&encoded).unwrap();
     assert_eq!(decoded.version, 1);
@@ -105,7 +104,7 @@ async fn test_welcome_command_encode_decode() {
     
     let encoded = cmd.encode();
     let id = u32::from_le_bytes(encoded[0..4].try_into().unwrap());
-    assert_eq!(id, CMD_WELCOME);
+    assert_eq!(id, CommandId::Welcome.as_u32());
     
     let decoded = WelcomeCommand::decode(&encoded).unwrap();
     assert!(!decoded.accepted);
@@ -140,7 +139,7 @@ async fn test_ack_command_encode_decode() {
     
     let encoded = cmd.encode();
     let id = u32::from_le_bytes(encoded[0..4].try_into().unwrap());
-    assert_eq!(id, CMD_ACK);
+    assert_eq!(id, CommandId::Ack.as_u32());
     
     let decoded = AckCommand::decode(&encoded).unwrap();
     assert!(decoded.accepted);
@@ -159,7 +158,7 @@ async fn test_reject_command_encode_decode() {
     
     let encoded = cmd.encode();
     let id = u32::from_le_bytes(encoded[0..4].try_into().unwrap());
-    assert_eq!(id, CMD_REJECT);
+    assert_eq!(id, CommandId::Reject.as_u32());
     
     let decoded = RejectCommand::decode(&encoded).unwrap();
     assert_eq!(decoded.reason, "version mismatch");

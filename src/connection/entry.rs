@@ -1,5 +1,6 @@
 use crate::connection::context::{BoxReader, BoxWriter, Context, TypeMapExt};
 use crate::connection::global::GlobalContext;
+use crate::connection::heartbeat::{HeartbeatConfig, HeartbeatManager};
 use crate::connection::node::Node;
 use crate::connection::types::IDExtractor;
 use crate::tcp::types::{TCPCommand, TCPFrame};
@@ -107,6 +108,27 @@ impl ConnectionEntry {
     pub async fn get_peer_id(&self) -> Option<Vec<u8>> {
         let lock = self.node.read().await;
         lock.as_ref().map(|n| n.id.clone())
+    }
+
+    /// 启动心跳
+    pub fn start_heartbeat(&self, local_node: Node, config: HeartbeatConfig) {
+        let ctx = match &self.context {
+            Some(c) => c.clone(),
+            None => return,
+        };
+        
+        let heartbeat = HeartbeatManager::new(local_node).with_config(config);
+        heartbeat.start_server_heartbeat(ctx, self.addr, self.cancel_token.clone());
+    }
+
+    /// 启动心跳（使用全局配置）
+    pub async fn start_heartbeat_with_global(&self, global: &Arc<GlobalContext>) {
+        let config = global.heartbeat_config.clone();
+        let local_node = global.local_node.clone();
+        let guard = local_node.read().await;
+        let node = (*guard).clone();
+        drop(guard);
+        self.start_heartbeat(node, config);
     }
 
     pub fn default_pipeline<F, C>(

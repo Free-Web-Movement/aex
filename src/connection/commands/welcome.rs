@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-pub const CMD_WELCOME: u32 = 2;
+use super::command_id::CommandId;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WelcomeCommand {
@@ -37,13 +37,13 @@ impl WelcomeCommand {
         }
     }
 
-    pub fn id() -> u32 {
-        CMD_WELCOME
+    pub fn id() -> CommandId {
+        CommandId::Welcome
     }
 
     pub fn encode(&self) -> Vec<u8> {
         let mut bytes = vec![];
-        bytes.extend_from_slice(&(CMD_WELCOME as u32).to_le_bytes());
+        bytes.extend_from_slice(&(CommandId::Welcome.as_u32()).to_le_bytes());
         if let Ok(v) = serde_json::to_vec(self) {
             bytes.extend_from_slice(&v);
         }
@@ -55,7 +55,7 @@ impl WelcomeCommand {
             return Err("data too short".to_string());
         }
         let id = u32::from_le_bytes(data[0..4].try_into().unwrap());
-        if id != CMD_WELCOME {
+        if id != CommandId::Welcome.as_u32() {
             return Err("invalid command id".to_string());
         }
         serde_json::from_slice(&data[4..]).map_err(|e| e.to_string())

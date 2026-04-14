@@ -6,7 +6,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::Mutex;
 
 use crate::connection::commands::{
-    HelloCommand, WelcomeCommand, AckCommand, RejectCommand, CMD_HELLO, CMD_WELCOME, CMD_REJECT,
+    HelloCommand, WelcomeCommand, AckCommand, RejectCommand, CommandId,
 };
 use crate::connection::context::Context;
 use crate::connection::node::Node;
@@ -101,8 +101,8 @@ impl HandshakeHandler {
             
             let id = u32::from_le_bytes(data[0..4].try_into().unwrap());
             
-            match id {
-                CMD_HELLO => {
+            match CommandId::from_u32(id) {
+                Some(CommandId::Hello) => {
                     let hello = HelloCommand::decode(&data).map_err(|e| anyhow::anyhow!(e))?;
                     if !hello.is_valid() {
                         let reject = self.create_reject("version mismatch");
@@ -125,7 +125,7 @@ impl HandshakeHandler {
                     
                     return Ok(Some(hello.node));
                 }
-                CMD_REJECT => {
+                Some(CommandId::Reject) => {
                     let reject = RejectCommand::decode(&data).map_err(|e| anyhow::anyhow!(e))?;
                     if let Some(callback) = &self.on_rejected {
                         callback(reject.reason.clone(), peer_addr);
@@ -171,8 +171,8 @@ impl HandshakeHandler {
 
         let id = u32::from_le_bytes(data[0..4].try_into().unwrap());
 
-        match id {
-            CMD_WELCOME => {
+        match CommandId::from_u32(id) {
+            Some(CommandId::Welcome) => {
                 let welcome = WelcomeCommand::decode(&data).map_err(|e| anyhow::anyhow!(e))?;
                 if !welcome.accepted {
                     return Err(anyhow::anyhow!("connection rejected"));
@@ -184,7 +184,7 @@ impl HandshakeHandler {
 
                 Ok(welcome.node)
             }
-            CMD_REJECT => {
+            Some(CommandId::Reject) => {
                 let reject = RejectCommand::decode(&data).map_err(|e| anyhow::anyhow!(e))?;
                 Err(anyhow::anyhow!("rejected: {}", reject.reason))
             }
