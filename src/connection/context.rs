@@ -17,6 +17,9 @@ use std::sync::Arc;
 use tokio::io::AsyncBufRead;
 use tokio::io::AsyncWrite;
 
+use crate::tcp::router::Router as TcpRouter;
+use crate::udp::router::Router as UdpRouter;
+
 use crate::connection::global::GlobalContext;
 use crate::http::meta::HttpMetadata;
 use crate::http::protocol::header::HeaderKey;
@@ -68,6 +71,11 @@ impl LocalTypeMap {
     }
 }
 
+/// Router wrappers for type-safe storage
+pub struct HttpRouterKey;
+pub struct TcpRouterKey;
+pub struct UdpRouterKey;
+
 /// Extension trait for ConcurrentTypeMap to get/set values by type.
 pub trait TypeMapExt {
     fn get_value<T: Clone + 'static>(&self) -> Option<T>;
@@ -83,6 +91,24 @@ impl TypeMapExt for ConcurrentTypeMap {
     fn set_value<T: Send + Sync + 'static>(&self, val: T) {
         self.insert(TypeId::of::<T>(), Box::new(val));
     }
+}
+
+/// Get TCP router from global context
+pub fn get_tcp_router(global: &ConcurrentTypeMap) -> Option<Arc<crate::tcp::router::Router>> {
+    global.get(&TypeId::of::<TcpRouterKey>()).and_then(|r| {
+        r.value()
+            .downcast_ref::<Arc<crate::tcp::router::Router>>()
+            .cloned()
+    })
+}
+
+/// Get UDP router from global context
+pub fn get_udp_router(global: &ConcurrentTypeMap) -> Option<Arc<crate::udp::router::Router>> {
+    global.get(&TypeId::of::<UdpRouterKey>()).and_then(|r| {
+        r.value()
+            .downcast_ref::<Arc<crate::udp::router::Router>>()
+            .cloned()
+    })
 }
 
 pub type AexReader = dyn AsyncBufRead + Send + Sync + Unpin;

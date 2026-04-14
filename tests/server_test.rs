@@ -266,6 +266,94 @@ async fn test_server_communication_bus() {
 }
 
 #[tokio::test]
+async fn test_server_start_tcp_only() {
+    let addr: SocketAddr = "[::1]:0".parse().unwrap();
+    let mut server = HTTPServer::new(addr, None);
+    
+    let mut tr = TcpRouter::new();
+    tr.on::<RawCodec, RawCodec>(
+        10,
+        Box::new(|_, _, _| Box::pin(async move { Ok(true) }).boxed()),
+        vec![],
+    );
+    
+    let temp_listener = TcpListener::bind(addr).await.unwrap();
+    let actual_addr = temp_listener.local_addr().unwrap();
+    drop(temp_listener);
+    
+    server.addr = actual_addr;
+    let server = server.tcp(tr).clone();
+    let globals = server.globals.clone();
+    
+    tokio::spawn(async move {
+        if let Err(e) = server.start::<RawCodec, RawCodec>(Arc::new(|c| c.id())).await {
+            eprintln!("TCP server error: {}", e);
+        }
+    });
+    
+    sleep(Duration::from_millis(200)).await;
+    
+    let active_exits = globals.get_exits().await;
+    assert!(active_exits.contains(&"tcp".to_string()));
+}
+
+#[tokio::test]
+async fn test_server_start_udp_only() {
+    let addr: SocketAddr = "[::1]:0".parse().unwrap();
+    let mut server = HTTPServer::new(addr, None);
+    
+    let mut ur = UdpRouter::new();
+    ur.on::<RawCodec, RawCodec, _, _>(20, |_, _, _, _addr, _socket| async move { Ok(true) });
+    
+    let socket = UdpSocket::bind(addr).await.unwrap();
+    let actual_addr = socket.local_addr().unwrap();
+    drop(socket);
+    
+    server.addr = actual_addr;
+    let server = server.udp(ur).clone();
+    let globals = server.globals.clone();
+    
+    tokio::spawn(async move {
+        if let Err(e) = server.start::<RawCodec, RawCodec>(Arc::new(|c| c.id())).await {
+            eprintln!("UDP server error: {}", e);
+        }
+    });
+    
+    sleep(Duration::from_millis(200)).await;
+    
+    let active_exits = globals.get_exits().await;
+    assert!(active_exits.contains(&"udp".to_string()));
+}
+
+#[tokio::test]
+async fn test_server_http2_enable() {
+    let addr: SocketAddr = "[::1]:0".parse().unwrap();
+    let mut server = HTTPServer::new(addr, None);
+    
+    let mut hr = HttpRouter::new(NodeType::Static("root".into()));
+    hr.insert("/", Some("GET"), Arc::new(|_| async { true }.boxed()), None);
+    
+    let temp_listener = TcpListener::bind(addr).await.unwrap();
+    let actual_addr = temp_listener.local_addr().unwrap();
+    drop(temp_listener);
+    
+    server.addr = actual_addr;
+    server.http(hr);
+    server.http2();
+    
+    assert!(server.globals.h2_codec.read().unwrap().is_some());
+}
+
+#[tokio::test]
+async fn test_server_httpserver_alias() {
+    let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
+    let server = HTTPServer::new(addr, None);
+    
+    assert_eq!(server.addr, addr);
+    assert!(!server.globals.routers.get_value::<Arc<HttpRouter>>().is_some());
+}
+
+#[tokio::test]
 async fn test_local_shutdown() -> anyhow::Result<()> {
     let addr: SocketAddr = "[::1]:0".parse()?; // 使用 0 端口自动分配
     let server = Server::new(addr, None);

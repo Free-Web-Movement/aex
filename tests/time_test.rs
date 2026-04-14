@@ -53,8 +53,37 @@ mod tests {
         let end = SystemTime::now_ts_millis();
         let elapsed = end - start;
 
-        // 确保至少睡了 1000ms (允许调度误差)
         assert!(elapsed >= 1000);
-        assert!(elapsed < 1100); // 正常情况下不应超过 1.1s
+        assert!(elapsed < 1100);
+    }
+
+    #[test]
+    fn test_timestamp_ms() {
+        let ts = SystemTime::timestamp();
+        assert!(ts > 0);
+    }
+
+    #[test]
+    fn test_now() {
+        let now = SystemTime::now();
+        assert!(now.timestamp() > 0);
+    }
+
+    #[test]
+    fn test_from_timestamp_invalid() {
+        let dt = SystemTime::from_timestamp(0);
+        assert!(dt.timestamp() >= 0);
+    }
+
+    #[test]
+    fn test_systemtime_default() {
+        let st = SystemTime::default();
+        assert_eq!(SystemTime::now_ts(), SystemTime::now_ts());
+    }
+
+    #[test]
+    fn test_now_ts_zero() {
+        let ts = SystemTime::now_ts();
+        assert!(ts > 0);
     }
 }

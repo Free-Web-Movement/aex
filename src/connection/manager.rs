@@ -127,6 +127,7 @@ impl ConnectionManager {
         global: Arc<GlobalContext>,
         f: FF,
         extractor: IDExtractor<C>,
+        timeout_secs: Option<u64>,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
     where
         F: TCPFrame,
@@ -143,8 +144,16 @@ impl ConnectionManager {
             }
         }
 
-        // 2. 拨号：物理连接
-        let socket = tokio::net::TcpStream::connect(addr).await?;
+        // 2. 拨号：物理连接 (带超时)
+        let timeout = timeout_secs.unwrap_or(10);
+        let socket = match tokio::time::timeout(std::time::Duration::from_secs(timeout), tokio::net::TcpStream::connect(addr)).await {
+            Ok(Ok(socket)) => socket,
+            Ok(Err(e)) => return Err(Box::new(e)),
+            Err(_) => {
+                let err = std::io::Error::new(std::io::ErrorKind::TimedOut, "connection timeout");
+                return Err(Box::new(err));
+            }
+        };
 
         // let manager = self.clone();
         // let extractor_inner = extractor.clone();

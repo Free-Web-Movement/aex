@@ -159,7 +159,7 @@ impl ConnectionEntry {
                 }
 
                 // 3. 自定义 TCP 路由处理
-                if let Some(tr) = gtx.routers.get_value::<Arc<TcpRouter>>() {
+                if let Some(tr) = crate::connection::context::get_tcp_router(&gtx.routers) {
                     return tr.handle::<F, C>(ctx, extractor).await;
                 }
 

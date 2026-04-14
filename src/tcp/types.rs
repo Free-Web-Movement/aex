@@ -3,14 +3,16 @@ use bincode;
 use serde::{Deserialize, Serialize};
 
 /// C: 业务指令/数据对象 (Command/Message)
-use bincode::{Decode, Encode, config, decode_from_slice, encode_to_vec};
+use bincode::{config, decode_from_slice, encode_to_vec, Decode, Encode};
+
+const MAX_FRAME_SIZE: usize = 65536; // 64KB
 
 #[inline]
 pub fn frame_config() -> impl bincode::config::Config {
     config::standard()
         .with_fixed_int_encoding()
         .with_big_endian()
-        .with_limit::<1024>() // 设置最大消息大小为 1024
+        .with_limit::<MAX_FRAME_SIZE>() // 最大消息大小为 64KB
 }
 
 /// ⚡ 修正后的 Codec trait

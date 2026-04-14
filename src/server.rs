@@ -83,16 +83,13 @@ impl Server {
     }
 
     /// Enables HTTP/2 support using the same router as HTTP/1.1.
-    /// Call this AFTER calling http() to share the same routes.
     pub fn http2(&self) -> &Self {
-        // Get the HTTP router that was already set
         if let Some(http_router) = self.globals.routers.get_value::<Arc<HttpRouter>>() {
             let global = self.globals.clone();
             let h2_codec = Arc::new(crate::http2::H2Codec::new(
                 http_router,
                 global,
             ));
-            // Store in dedicated field (not routers TypeMap)
             *self.globals.h2_codec.write().unwrap() = Some(h2_codec);
         }
         self
@@ -100,13 +97,19 @@ impl Server {
 
     /// Sets the TCP router.
     pub fn tcp(&self, router: TcpRouter) -> &Self {
-        self.globals.routers.set_value(Arc::new(router));
+        self.globals.routers.insert(
+            std::any::TypeId::of::<crate::connection::context::TcpRouterKey>(),
+            Box::new(Arc::new(router)),
+        );
         self
     }
 
     /// Sets the UDP router.
     pub fn udp(&self, router: UdpRouter) -> &Self {
-        self.globals.routers.set_value(Arc::new(router));
+        self.globals.routers.insert(
+            std::any::TypeId::of::<crate::connection::context::UdpRouterKey>(),
+            Box::new(Arc::new(router)),
+        );
         self
     }
 
@@ -169,7 +172,7 @@ impl Server {
         C: TCPCommand,
     {
         let listener = TcpListener::bind(self.addr).await?;
-        println!("[AEX] TCP listener started on {}", self.addr);
+        tracing::info!("TCP listener started on {}", self.addr);
 
         let manager = self.globals.manager.clone();
         let global = self.globals.clone();
@@ -255,11 +258,11 @@ impl Server {
         C: TCPCommand,
     {
         // 1. 获取 UDP 路由
-        let router: Option<Arc<UdpRouter>> = self.globals.routers.get_value();
+        let router: Option<Arc<UdpRouter>> = crate::connection::context::get_udp_router(&self.globals.routers);
 
         if let Some(router) = &router {
             let socket = Arc::new(UdpSocket::bind(self.addr).await?);
-            println!("[AEX] UDP listener started on {}", self.addr);
+            tracing::info!("UDP listener started on {}", self.addr);
 
             let rt = router.clone();
             let globals = self.globals.clone();
@@ -268,7 +271,7 @@ impl Server {
             // 只要 udp_token 被取消，整个 rt.handle 协程会被立即中止
             tokio::select! {
                 _ = task_token.cancelled() => {
-                    println!("[AEX] UDP server received stop signal.");
+                    tracing::info!("UDP server received stop signal.");
                 }
                 res = rt.handle::<F, C>(globals, socket, extractor) => {
                     if let Err(e) = res {

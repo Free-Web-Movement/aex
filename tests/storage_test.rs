@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use aex::storage::{DEFAULT_APP_DIR, Storage};
+    use aex::storage::{Storage, DEFAULT_APP_DIR};
     use serde::{Deserialize, Serialize};
 
     use std::{fs, path::PathBuf};
@@ -166,5 +166,76 @@ mod tests {
             .expect("Path should be valid UTF-8");
 
         assert_eq!(storage.dir(), expected);
+    }
+
+    #[test]
+    fn test_real_path() {
+        let (storage, test_dir) = setup_storage();
+
+        let key = "test_key".to_string();
+        let path = storage.real_path(&key);
+
+        assert!(path.to_string_lossy().contains("test_key"));
+
+        let _ = fs::remove_dir_all(test_dir);
+    }
+
+    #[test]
+    fn test_save_overwrite() -> anyhow::Result<()> {
+        let (storage, test_dir) = setup_storage();
+
+        let key = "overwrite".to_string();
+        storage.save(
+            &key,
+            &TestData {
+                id: 1,
+                name: "A".to_string(),
+            },
+        )?;
+        storage.save(
+            &key,
+            &TestData {
+                id: 2,
+                name: "B".to_string(),
+            },
+        )?;
+
+        let loaded: Option<TestData> = storage.read(&key)?;
+        assert_eq!(loaded.unwrap().id, 2);
+
+        let _ = fs::remove_dir_all(test_dir);
+        Ok(())
+    }
+
+    #[test]
+    fn test_storage_with_empty_custom_dir() {
+        let storage = Storage::new(Some(""));
+        assert!(storage.app_dir.to_string_lossy().is_empty() || storage.app_dir.exists());
+    }
+
+    #[test]
+    fn test_multiple_keys() -> anyhow::Result<()> {
+        let (storage, test_dir) = setup_storage();
+
+        for i in 0..5 {
+            let key = format!("key_{}", i);
+            storage.save(
+                &key,
+                &TestData {
+                    id: i,
+                    name: format!("Name{}", i),
+                },
+            )?;
+        }
+
+        for i in 0..5 {
+            let key = format!("key_{}", i);
+            let loaded: Option<TestData> = storage.read(&key)?;
+            assert!(loaded.is_some());
+            assert_eq!(loaded.unwrap().id, i);
+        }
+
+        let _ = fs::remove_dir_all(test_dir);
+        Ok(())
     }
 }

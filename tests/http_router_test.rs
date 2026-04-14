@@ -888,4 +888,179 @@ mod tests {
 
         println!("Full macro suite test passed!");
     }
+
+    #[tokio::test]
+    async fn test_router_put_method() {
+        let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
+        let actual_addr = tokio::net::TcpListener::bind(addr)
+            .await
+            .unwrap()
+            .local_addr()
+            .unwrap();
+
+        let mut hr = Router::new(NodeType::Static("root".into()));
+        
+        hr.put("/data", Arc::new(|ctx: &mut Context| {
+            async move {
+                let mut meta = ctx.local.get_value::<HttpMetadata>().unwrap();
+                meta.status = StatusCode::Ok;
+                meta.body = b"PUT OK".to_vec();
+                ctx.local.set_value(meta);
+                true
+            }
+            .boxed()
+        })).register();
+
+        let server = HTTPServer::new(actual_addr, None).http(hr).clone();
+        tokio::spawn(async move {
+            let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c| c.id())).await;
+        });
+
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        
+        let client = reqwest::Client::new();
+        let res = client.put(format!("http://{}/data", actual_addr)).send().await.unwrap();
+        
+        assert_eq!(res.status().as_u16(), 200);
+    }
+
+    #[tokio::test]
+    async fn test_router_delete_method() {
+        let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
+        let actual_addr = tokio::net::TcpListener::bind(addr)
+            .await
+            .unwrap()
+            .local_addr()
+            .unwrap();
+
+        let mut hr = Router::new(NodeType::Static("root".into()));
+        
+        hr.delete("/item/:id", Arc::new(|ctx: &mut Context| {
+            async move {
+                let mut meta = ctx.local.get_value::<HttpMetadata>().unwrap();
+                meta.status = StatusCode::Ok;
+                meta.body = b"DELETED".to_vec();
+                ctx.local.set_value(meta);
+                true
+            }
+            .boxed()
+        })).register();
+
+        let server = HTTPServer::new(actual_addr, None).http(hr).clone();
+        tokio::spawn(async move {
+            let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c| c.id())).await;
+        });
+
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        
+        let client = reqwest::Client::new();
+        let res = client.delete(format!("http://{}/item/123", actual_addr)).send().await.unwrap();
+        
+        assert_eq!(res.status().as_u16(), 200);
+        assert_eq!(res.text().await.unwrap(), "DELETED");
+    }
+
+    #[tokio::test]
+    async fn test_router_patch_method() {
+        let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
+        let actual_addr = tokio::net::TcpListener::bind(addr)
+            .await
+            .unwrap()
+            .local_addr()
+            .unwrap();
+
+        let mut hr = Router::new(NodeType::Static("root".into()));
+        
+        hr.patch("/update", Arc::new(|ctx: &mut Context| {
+            async move {
+                let mut meta = ctx.local.get_value::<HttpMetadata>().unwrap();
+                meta.status = StatusCode::Ok;
+                meta.body = b"PATCHED".to_vec();
+                ctx.local.set_value(meta);
+                true
+            }
+            .boxed()
+        })).register();
+
+        let server = HTTPServer::new(actual_addr, None).http(hr).clone();
+        tokio::spawn(async move {
+            let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c| c.id())).await;
+        });
+
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        
+        let client = reqwest::Client::new();
+        let res = client.patch(format!("http://{}/update", actual_addr)).send().await.unwrap();
+        
+        assert_eq!(res.status().as_u16(), 200);
+    }
+
+    #[tokio::test]
+    async fn test_router_options_method() {
+        let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
+        let actual_addr = tokio::net::TcpListener::bind(addr)
+            .await
+            .unwrap()
+            .local_addr()
+            .unwrap();
+
+        let mut hr = Router::new(NodeType::Static("root".into()));
+        
+        hr.options("/api", Arc::new(|ctx: &mut Context| {
+            async move {
+                let mut meta = ctx.local.get_value::<HttpMetadata>().unwrap();
+                meta.status = StatusCode::Ok;
+                meta.body = b"OPTIONS OK".to_vec();
+                ctx.local.set_value(meta);
+                true
+            }
+            .boxed()
+        })).register();
+
+        let server = HTTPServer::new(actual_addr, None).http(hr).clone();
+        tokio::spawn(async move {
+            let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c| c.id())).await;
+        });
+
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        
+        let client = reqwest::Client::new();
+        let res = client.request(reqwest::Method::OPTIONS, format!("http://{}/api", actual_addr)).send().await.unwrap();
+        
+        assert_eq!(res.status().as_u16(), 200);
+    }
+
+    #[tokio::test]
+    async fn test_router_head_method() {
+        let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
+        let actual_addr = tokio::net::TcpListener::bind(addr)
+            .await
+            .unwrap()
+            .local_addr()
+            .unwrap();
+
+        let mut hr = Router::new(NodeType::Static("root".into()));
+        
+        hr.head("/head-test", Arc::new(|ctx: &mut Context| {
+            async move {
+                let mut meta = ctx.local.get_value::<HttpMetadata>().unwrap();
+                meta.status = StatusCode::Ok;
+                ctx.local.set_value(meta);
+                true
+            }
+            .boxed()
+        })).register();
+
+        let server = HTTPServer::new(actual_addr, None).http(hr).clone();
+        tokio::spawn(async move {
+            let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c| c.id())).await;
+        });
+
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        
+        let client = reqwest::Client::new();
+        let res = client.head(format!("http://{}/head-test", actual_addr)).send().await.unwrap();
+        
+        assert_eq!(res.status().as_u16(), 200);
+    }
 }

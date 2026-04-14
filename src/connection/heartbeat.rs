@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
+#[allow(unused_imports)]
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::Mutex;
 use tokio::task::AbortHandle;
@@ -145,6 +146,7 @@ impl HeartbeatManager {
             loop {
                 tokio::select! {
                     _ = cancel_token.cancelled() => {
+                        active.write().await.remove(&peer_addr);
                         break;
                     }
                     _ = interval.tick() => {
@@ -161,6 +163,7 @@ impl HeartbeatManager {
                     }
                 }
             }
+            active.write().await.remove(&peer_addr);
         });
     }
 
@@ -173,6 +176,7 @@ impl HeartbeatManager {
         Ok(())
     }
 
+    #[allow(unused_variables)]
     pub async fn handle_ping(
         &self,
         ctx: Arc<Mutex<Context>>,

@@ -477,6 +477,7 @@ mod tests {
                     // 业务逻辑：收到连接后打印或执行简单操作
                 },
                 Arc::new(|cmd: &RawCodec| cmd.id()),
+                Some(10),
             )
             .await;
 
@@ -513,6 +514,7 @@ mod tests {
                     // 业务逻辑：收到连接后打印或执行简单操作
                 },
                 Arc::new(|cmd: &RawCodec| cmd.id()),
+                Some(10),
             )
             .await;
         assert!(result.is_ok());
@@ -534,6 +536,7 @@ mod tests {
                     // 业务逻辑：收到连接后打印或执行简单操作
                 },
                 Arc::new(|cmd: &RawCodec| cmd.id()),
+                Some(10),
             )
             .await;
         // 逻辑：TcpStream::connect 失败，应该返回 Err
@@ -559,6 +562,7 @@ mod tests {
                     let _ = tx.send(true);
                 },
                 Arc::new(|cmd: &RawCodec| cmd.id()),
+                Some(10),
             )
             .await;
 

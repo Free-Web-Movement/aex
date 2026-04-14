@@ -73,3 +73,15 @@ h2 = "0.4"
 [[bench]]
 name = "http_router"
 harness = false
+
+[[bench]]
+name = "middleware_performance"
+harness = false
+
+[[bench]]
+name = "codec_performance"
+harness = false
+
+[[bench]]
+name = "connection_performance"
+harness = false

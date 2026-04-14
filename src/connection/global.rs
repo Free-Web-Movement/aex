@@ -38,10 +38,8 @@ pub struct GlobalContext {
     pub paired_session_keys: Option<Arc<Mutex<PairedSessionKey>>>,
     pub heartbeat_config: HeartbeatConfig,
     pub heartbeat_manager: Option<HeartbeatManager>,
-    /// 全局 TypeMap：允许灵活添加数据库连接池、全局配置等
     pub extensions: Arc<RwLock<TypeMap>>,
     pub routers: TypeMap,
-    /// HTTP/2 codec (stored separately to allow HTTP/1.1 and HTTP/2 to coexist)
     pub h2_codec: std::sync::RwLock<Option<Arc<crate::http2::H2Codec>>>,
     pub exits: Mutex<HashMap<String, (CancellationToken, AbortHandle)>>,
 }
@@ -185,7 +183,7 @@ impl GlobalContext {
             // 2. 物理强制中止
             handle.abort();
 
-            println!("[AEX] Shutdown component: {}", key);
+            tracing::info!("Shutdown component: {}", key);
         }
 
         // 3. 联动清理 ConnectionManager 里的所有 Peer 连接
