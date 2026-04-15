@@ -192,3 +192,51 @@ async fn test_heartbeat_manager_create_pong() {
     
     assert_eq!(pong.timestamp, ping.timestamp);
 }
+
+#[tokio::test]
+async fn test_heartbeat_manager_check_timeout() {
+    use std::net::SocketAddr;
+    
+    let node = Node::from_system(8080, vec![0x77u8; 32], 1);
+    let config = HeartbeatConfig::new().on_timeout(|_addr| {});
+    let manager = HeartbeatManager::new(node).with_config(config);
+    
+    let peer_addr: SocketAddr = "127.0.0.1:8080".parse().unwrap();
+    
+    manager.set_connection_state(peer_addr, 3, 0).await;
+    
+    let timed_out = manager.check_timeout(peer_addr).await;
+    assert!(timed_out);
+}
+
+#[tokio::test]
+async fn test_heartbeat_manager_remove_connection() {
+    use std::net::SocketAddr;
+    
+    let node = Node::from_system(8080, vec![0x88u8; 32], 1);
+    let manager = HeartbeatManager::new(node);
+    
+    let peer_addr: SocketAddr = "127.0.0.1:8080".parse().unwrap();
+    
+    manager.set_connection_state(peer_addr, 0, 1000).await;
+    
+    manager.remove_connection(&peer_addr).await;
+    
+    let latency = manager.get_latency(peer_addr).await;
+    assert!(latency.is_none());
+}
+
+#[tokio::test]
+async fn test_heartbeat_manager_get_latency() {
+    use std::net::SocketAddr;
+    
+    let node = Node::from_system(8080, vec![0x99u8; 32], 1);
+    let manager = HeartbeatManager::new(node);
+    
+    let peer_addr: SocketAddr = "127.0.0.1:8080".parse().unwrap();
+    
+    manager.set_connection_state(peer_addr, 0, 5000).await;
+    
+    let latency = manager.get_latency(peer_addr).await;
+    assert_eq!(latency, Some(5000));
+}

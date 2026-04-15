@@ -242,4 +242,16 @@ impl HeartbeatManager {
             .get(&peer_addr)
             .map(|s| s.latency_avg)
     }
+
+    pub async fn set_connection_state(&self, peer_addr: SocketAddr, missed: u32, latency: u64) {
+        let mut active = self.active_connections.write().await;
+        active.insert(peer_addr, HeartbeatState {
+            last_ping: 0,
+            last_pong: 0,
+            latency_ns: latency,
+            latency_avg: latency,
+            missed_pings: missed,
+            abort_handle: None,
+        });
+    }
 }
