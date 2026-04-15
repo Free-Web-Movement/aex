@@ -701,16 +701,52 @@ let decrypted = session_keys.decrypt(&encrypted, &private_key)?;
 ### TCP 协议
 
 ```rust
-// 自定义二进制协议
-pub trait TCPFrame: Clone + Send {
-    fn encode(&self) -> Vec<u8>;
-    fn decode(data: &[u8]) -> Option<Self>;
+use aex::tcp::router::Router as TcpRouter;
+use aex::tcp::types::{Codec, Command, Frame};
+use aex::connection::global::GlobalContext;
+use std::sync::Arc;
+use std::net::SocketAddr;
+
+// 1. 定义帧类型
+#[derive(Clone, Debug)]
+struct MyFrame {
+    data: Vec<u8>,
 }
 
-pub trait TCPCommand: Send {
-    fn id(&self) -> u32;
-    fn validate(&self) -> bool;
+impl Frame for MyFrame {
+    fn payload(&self) -> Option<Vec<u8>> { Some(self.data.clone()) }
+    fn validate(&self) -> bool { true }
+    fn command(&self) -> Option<&Vec<u8>> { Some(&self.data) }
+    fn is_flat(&self) -> bool { false }
 }
+
+impl Codec for MyFrame {}
+
+// 2. 定义命令类型
+#[derive(Clone, Debug)]
+struct MyCommand {
+    id: u32,
+    data: Vec<u8>,
+}
+
+impl Command for MyCommand {
+    fn id(&self) -> u32 { self.id }
+    fn validate(&self) -> bool { true }
+    fn data(&self) -> &Vec<u8> { &self.data }
+}
+
+impl Codec for MyCommand {}
+
+// 3. 创建 TCP 路由器
+let mut tcp_router = TcpRouter::new();
+
+// 注册命令处理器 (命令 ID = 1)
+tcp_router.on::<MyFrame, MyCommand, _, _>(1, |_global, _frame, cmd, _addr, _socket| {
+    Box::pin(async move {
+        println!("Received command: {}", cmd.id());
+        Ok(true)
+    })
+});
 ```
 
 | TCP 特性 | 支持 |
@@ -723,8 +759,47 @@ pub trait TCPCommand: Send {
 ### UDP 协议
 
 ```rust
-// UDP 路由
-router.on::<Frame, Command, _, _>(id, handler);
+use aex::udp::router::Router as UdpRouter;
+use aex::tcp::types::{Codec, Command, Frame};
+use std::sync::Arc;
+
+// 1. 定义帧和命令（与 TCP 类似）
+#[derive(Clone, Debug)]
+struct UdpFrame { payload: Option<Vec<u8>>, is_valid: bool }
+
+impl Frame for UdpFrame {
+    fn payload(&self) -> Option<Vec<u8>> { self.payload.clone() }
+    fn validate(&self) -> bool { self.is_valid }
+    fn command(&self) -> Option<&Vec<u8>> { self.payload.as_ref() }
+    fn is_flat(&self) -> bool { false }
+}
+impl Codec for UdpFrame {}
+
+#[derive(Clone, Debug)]
+struct UdpCommand { id: u32, valid: bool, data: Vec<u8> }
+
+impl Command for UdpCommand {
+    fn id(&self) -> u32 { self.id }
+    fn validate(&self) -> bool { self.valid }
+    fn data(&self) -> &Vec<u8> { &self.data }
+}
+impl Codec for UdpCommand {}
+
+// 2. 创建 UDP 路由器
+let mut udp_router = UdpRouter::new();
+
+// 注册处理器
+udp_router.on::<UdpFrame, UdpCommand, _, _>(100, |global, frame, cmd, addr, socket| {
+    Box::pin(async move {
+        println!("UDP packet from {}: cmd_id={}", addr, cmd.id());
+        Ok(true)
+    })
+});
+
+// 3. 启动 UDP 服务器
+use aex::connection::types::IDExtractor;
+let extractor: IDExtractor<UdpCommand> = Arc::new(|cmd| cmd.id());
+Arc::new(udp_router).handle::<UdpFrame, UdpCommand>(global, socket, extractor).await?;
 ```
 
 | UDP 特性 | 支持 |
@@ -733,6 +808,245 @@ router.on::<Frame, Command, _, _>(id, handler);
 | 广播 | ✅ |
 | 多播 | ✅ |
 | NAT 穿透 | 规划中 |
+
+### WebSocket 协议
+
+```rust
+use aex::http::websocket::{WSCodec, WSFrame, WebSocket, TextHandler, BinaryHandler};
+use aex::http::router::{NodeType, Router as HttpRouter};
+use aex::http::middlewares::websocket::WebSocket as WsMiddleware;
+use aex::exe;
+use std::sync::Arc;
+
+// 1. 创建 WebSocket 处理器
+let text_handler: TextHandler = Arc::new(|ws, ctx, text| {
+    Box::pin(async move {
+        println!("Received text: {}", text);
+        // 发送回复
+        ws.send_text("pong").await;
+        true
+    })
+});
+
+let binary_handler: BinaryHandler = Arc::new(|ws, ctx, data| {
+    Box::pin(async move {
+        println!("Received binary: {:?}", data);
+        ws.send_binary(data).await;
+        true
+    })
+});
+
+// 2. 创建 WebSocket 中间件
+let ws_middleware = WebSocket::to_middleware(WebSocket {
+    on_text: Some(text_handler),
+    on_binary: Some(binary_handler),
+});
+
+// 3. 注册路由
+let mut router = HttpRouter::new(NodeType::Static("root".into()));
+router.get("/ws", exe!(|_ctx| true))
+    .middleware(ws_middleware)
+    .register();
+```
+
+### HTTP 路由详解
+
+```rust
+use aex::http::router::{NodeType, Router as HttpRouter, PathParams};
+use aex::exe;
+
+// 1. 创建路由器
+let mut router = HttpRouter::new(NodeType::Static("root".into()));
+
+// 2. 静态路由
+router.get("/api/health", exe!(|ctx| {
+    ctx.send("OK", None);
+    true
+})).register();
+
+// 3. 参数路由
+router.get("/api/users/:id", exe!(|ctx| {
+    // 获取路径参数
+    let params = ctx.local.get_ref::<PathParams>();
+    if let Some(p) = params {
+        let id = p.get("id");
+        ctx.send(format!("User: {}", id), None);
+    }
+    true
+})).register();
+
+// 4. 通配符路由
+router.get("/api/files/*", exe!(|ctx| {
+    let params = ctx.local.get_ref::<PathParams>();
+    if let Some(p) = params {
+        let path = p.get("*");
+        ctx.send(format!("File: {}", path), None);
+    }
+    true
+})).register();
+
+// 5. 带中间件的路由
+router.post("/api/users", exe!(|ctx| {
+    ctx.send("Created", None);
+    true
+})).middleware(auth_middleware).register();
+```
+
+### P2P 功能详解
+
+```rust
+use aex::connection::node::Node;
+use aex::connection::commands::{CommandId, HelloCommand, WelcomeCommand, AckCommand, RejectCommand, PingCommand, PongCommand};
+use aex::connection::heartbeat::{HeartbeatManager, HeartbeatConfig};
+use aex::connection::commands::router::CommandRouter;
+
+// 1. 创建节点
+let node = Node::from_system(8080, vec![1, 2, 3, 4], 1);
+
+// 2. 创建 Hello 命令
+let hello = HelloCommand::new(node.clone(), Some(ephemeral_pub), true);
+let data = hello.encode();
+
+// 3. 解码命令
+let decoded = HelloCommand::decode(&data)?;
+
+// 4. 创建 Welcome 响应
+let welcome = WelcomeCommand::new(peer_node.clone(), true, Some(ephemeral_public));
+let data = welcome.encode();
+
+// 5. 创建 Ack
+let ack = AckCommand::accepted(Some(session_key_id));
+
+// 6. 创建心跳管理器
+let config = HeartbeatConfig::new()
+    .with_interval(30)
+    .with_timeout(10)
+    .on_timeout(|addr| println!("Timeout: {}", addr))
+    .on_latency(|addr, lat| println!("Latency {}: {}", addr, lat));
+
+let manager = HeartbeatManager::new(local_node).with_config(config);
+
+// 7. 创建命令路由器
+let mut cmd_router = CommandRouter::new();
+cmd_router.register(CommandId::Ping, |ctx, data, addr| {
+    Box::pin(async move {
+        let ping = PingCommand::decode(data)?;
+        let pong = PongCommand::new(ping.timestamp, ping.nonce);
+        Ok(true)
+    })
+});
+```
+
+### Pipe (N:1 消息管道)
+
+```rust
+use aex::communicators::pipe::PipeManager;
+use std::sync::Arc;
+
+// 1. 注册 Pipe
+global.pipe.register("audit_log", Box::new(|msg: String| {
+    async move {
+        // 写入文件或数据库
+        tokio::fs::write("/tmp/audit.log", &msg).await?;
+        Ok(true)
+    }
+})).await?;
+
+// 2. 发送消息
+global.pipe.send("audit_log", "User login: user123".to_string()).await;
+
+// 3. 获取 Pipe 状态
+let info = global.pipe.info("audit_log").await;
+```
+
+### Spreader (1:N 广播)
+
+```rust
+use aex::communicators::spreader::SpreadManager;
+
+// 1. 注册 Spreader
+global.spread.register("config_sync", Box::new(|val: i32| {
+    async move {
+        println!("Config updated: {}", val);
+        Ok(true)
+    }
+})).await?;
+
+// 2. 广播更新
+global.spread.publish("config_sync", 42).await;
+
+// 3. 订阅
+let handler = Arc::new(|val: i32| {
+    async move {
+        println!("Received: {}", val);
+        Ok(())
+    }
+});
+global.spread.subscribe("config_sync", handler).await?;
+```
+
+### Event (M:N 事件系统)
+
+```rust
+use aex::communicators::event::EventEmitter;
+
+// 1. 注册 Event 监听器
+global.event._on("user_login", Arc::new(|uid: u32| {
+    async move {
+        println!("User {} logged in", uid);
+        Ok(())
+    }
+})).await;
+
+// 2. 触发事件
+global.event.notify("user_login", 12345).await;
+
+// 3. 移除监听器
+global.event.off("user_login", listener_id).await;
+```
+
+### 完整服务器示例
+
+```rust
+use aex::server::HTTPServer;
+use aex::http::router::{NodeType, Router as HttpRouter};
+use aex::tcp::router::Router as TcpRouter;
+use aex::udp::router::Router as UdpRouter;
+use aex::tcp::types::RawCodec;
+use aex::exe;
+use std::net::SocketAddr;
+use std::sync::Arc;
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let addr: SocketAddr = "0.0.0.0:8080".parse()?;
+
+    // HTTP 路由
+    let mut http_router = HttpRouter::new(NodeType::Static("root".into()));
+    http_router.get("/", exe!(|ctx| {
+        ctx.send("Hello!", None);
+        true
+    })).register();
+
+    // TCP 路由 (简化示例)
+    let mut tcp_router = TcpRouter::new();
+    // tcp_router.on::<MyFrame, MyCommand, _, _>(1, handler);
+
+    // UDP 路由 (简化示例)  
+    let mut udp_router = UdpRouter::new();
+    // udp_router.on::<UdpFrame, UdpCommand, _, _>(1, handler);
+
+    // 启动统一服务器
+    HTTPServer::new(addr, None)
+        .http(http_router)
+        .http2()
+        .tcp(tcp_router)
+        .udp(udp_router)
+        .start::<RawCodec, RawCodec>(Arc::new(|c| c.id()))
+        .await?;
+
+    Ok(())
+}
 
 ### 协议嗅探
 
