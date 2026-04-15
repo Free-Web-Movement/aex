@@ -2,18 +2,27 @@ use aex::connection::context::Context;
 use aex::http::meta::HttpMetadata;
 use aex::http::protocol::header::HeaderKey;
 use aex::http::protocol::status::StatusCode;
+use aex::http2::H2Codec;
 use aex::server::HTTPServer;
 use aex::tcp::types::{Codec, Command, RawCodec};
 use futures::FutureExt;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream, UdpSocket};
 use tokio::time::{Duration, sleep, timeout};
 
 use aex::http::router::{NodeType, Router as HttpRouter};
 use aex::tcp::router::Router as TcpRouter;
 use aex::udp::router::Router as UdpRouter;
+use aex::connection::global::GlobalContext;
+
+#[test]
+fn test_h2_codec_new() {
+    let router = HttpRouter::new(NodeType::Static("root".into()));
+    let global = Arc::new(GlobalContext::new("127.0.0.1:0".parse().unwrap(), None));
+    let _codec = H2Codec::new(Arc::new(router), global);
+}
 
 #[tokio::test]
 async fn test_http2_routing() {
