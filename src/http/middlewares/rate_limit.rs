@@ -6,7 +6,10 @@ use std::time::{Duration, Instant};
 use crate::{
     connection::context::Context,
     exe,
-    http::{meta::HttpMetadata, protocol::status::StatusCode, types::Executor, protocol::header::HeaderKey},
+    http::{
+        meta::HttpMetadata, protocol::header::HeaderKey, protocol::status::StatusCode,
+        types::Executor,
+    },
 };
 
 #[derive(Clone)]
@@ -21,16 +24,12 @@ impl RateLimitConfig {
         Self {
             max_requests,
             window_secs,
-            key_fn: Arc::new(|ctx| {
-                ctx.addr.to_string()
-            }),
+            key_fn: Arc::new(|ctx| ctx.addr.to_string()),
         }
     }
 
     pub fn by_ip(mut self) -> Self {
-        self.key_fn = Arc::new(|ctx| {
-            ctx.addr.to_string()
-        });
+        self.key_fn = Arc::new(|ctx| ctx.addr.to_string());
         self
     }
 
@@ -60,59 +59,70 @@ impl RateLimitConfig {
         self
     }
 
+    #[cfg(test)]
+    pub fn max_requests(&self) -> usize {
+        self.max_requests
+    }
+
+    #[cfg(test)]
+    pub fn window_secs(&self) -> u64 {
+        self.window_secs
+    }
+
     pub fn build(self) -> Arc<Executor> {
         let state = Arc::new(RwLock::new(AHashMap::<String, RateLimitBucket>::new()));
         let config = Arc::new(self);
 
-        exe!(move |ctx, data| {
-            let (config, key, state) = data;
-            let now = Instant::now();
-            let window = Duration::from_secs(config.window_secs);
+        exe!(
+            move |ctx, data| {
+                let (config, key, state) = data;
+                let now = Instant::now();
+                let window = Duration::from_secs(config.window_secs);
 
-            let mut state = state.write();
-            let bucket = state.entry(key.clone()).or_insert_with(|| RateLimitBucket {
-                tokens: config.max_requests,
-                last_refill: now,
-            });
+                let mut state = state.write();
+                let bucket = state.entry(key.clone()).or_insert_with(|| RateLimitBucket {
+                    tokens: config.max_requests,
+                    last_refill: now,
+                });
 
-            if now.duration_since(bucket.last_refill) >= window {
-                bucket.tokens = config.max_requests;
-                bucket.last_refill = now;
+                if now.duration_since(bucket.last_refill) >= window {
+                    bucket.tokens = config.max_requests;
+                    bucket.last_refill = now;
+                }
+
+                if bucket.tokens > 0 {
+                    bucket.tokens -= 1;
+                    let remaining = bucket.tokens;
+                    let reset = bucket.last_refill + window;
+
+                    ctx.res()
+                        .set_header("X-RateLimit-Limit", config.max_requests.to_string())
+                        .set_header("X-RateLimit-Remaining", remaining.to_string())
+                        .set_header("X-RateLimit-Reset", reset.elapsed().as_secs().to_string());
+
+                    true
+                } else {
+                    let retry_after = bucket.last_refill + window - now;
+                    let retry_after_secs = retry_after.as_secs().to_string();
+                    ctx.status(StatusCode::TooManyRequests).send(
+                        format!(
+                            "Rate limit exceeded. Retry after {} seconds.",
+                            retry_after_secs
+                        ),
+                        None,
+                    );
+                    ctx.res().set_header("Retry-After", retry_after_secs);
+                    false
+                }
+            },
+            |ctx| {
+                let config = config.clone();
+                let key = (config.key_fn)(ctx);
+                (config, key, state.clone())
             }
-
-            if bucket.tokens > 0 {
-                bucket.tokens -= 1;
-                let remaining = bucket.tokens;
-                let reset = bucket.last_refill + window;
-
-                ctx.res()
-                    .set_header("X-RateLimit-Limit", config.max_requests.to_string())
-                    .set_header("X-RateLimit-Remaining", remaining.to_string())
-                    .set_header("X-RateLimit-Reset", reset.elapsed().as_secs().to_string());
-
-                true
-            } else {
-                let retry_after = bucket.last_refill + window - now;
-                let retry_after_secs = retry_after.as_secs().to_string();
-                ctx.status(StatusCode::TooManyRequests).send(
-                    format!(
-                        "Rate limit exceeded. Retry after {} seconds.",
-                        retry_after_secs
-                    ),
-                    None,
-                );
-                ctx.res()
-                    .set_header("Retry-After", retry_after_secs);
-                false
-            }
-        }, |ctx| {
-            let config = config.clone();
-            let key = (config.key_fn)(ctx);
-            (config, key, state.clone())
-        })
+        )
     }
 }
-
 
 struct RateLimitBucket {
     tokens: usize,

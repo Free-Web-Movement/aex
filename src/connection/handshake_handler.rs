@@ -31,6 +31,21 @@ impl HandshakeHandler {
         }
     }
 
+    #[cfg(test)]
+    pub fn new_with_node(node: Node) -> Self {
+        Self {
+            local_node: node,
+            session_keys: None,
+            on_established: None,
+            on_rejected: None,
+        }
+    }
+
+    #[cfg(test)]
+    pub fn local_node_ref(&self) -> &Node {
+        &self.local_node
+    }
+
     pub fn with_session_keys(mut self, keys: Arc<Mutex<PairedSessionKey>>) -> Self {
         self.session_keys = Some(keys);
         self
@@ -140,6 +155,19 @@ impl HandshakeHandler {
     }
 
     async fn send_frame(&self, ctx: Arc<Mutex<Context>>, data: Vec<u8>) -> Result<()> {
+        let mut guard = ctx.lock().await;
+        let writer = guard.writer.as_mut().ok_or_else(|| anyhow::anyhow!("no writer"))?;
+        writer.write_all(&(data.len() as u32).to_le_bytes()).await?;
+        writer.write_all(&data).await?;
+        Ok(())
+    }
+
+    #[cfg(test)]
+    pub async fn send_frame_test(ctx: Arc<Mutex<Context>>, data: Vec<u8>) -> Result<()> {
+        Self::send_frame_internal(&ctx, data).await
+    }
+
+    async fn send_frame_internal(ctx: &Arc<Mutex<Context>>, data: Vec<u8>) -> Result<()> {
         let mut guard = ctx.lock().await;
         let writer = guard.writer.as_mut().ok_or_else(|| anyhow::anyhow!("no writer"))?;
         writer.write_all(&(data.len() as u32).to_le_bytes()).await?;

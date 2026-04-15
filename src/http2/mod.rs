@@ -33,6 +33,16 @@ impl H2Codec {
         Self { router, global }
     }
 
+    #[cfg(test)]
+    pub fn router(&self) -> &Arc<HttpRouter> {
+        &self.router
+    }
+
+    #[cfg(test)]
+    pub fn global(&self) -> &Arc<GlobalContext> {
+        &self.global
+    }
+
     /// Handle an HTTP/2 connection
     pub async fn handle(
         &self,

@@ -75,6 +75,13 @@ impl ConnectionStateMachine {
         }
     }
 
+    #[cfg(test)]
+    pub fn new_with_state(state: ConnectionState) -> Self {
+        Self {
+            state: AtomicU8::new(state.as_u8()),
+        }
+    }
+
     pub fn current(&self) -> ConnectionState {
         ConnectionState::from_u8(self.state.load(Ordering::SeqCst))
     }

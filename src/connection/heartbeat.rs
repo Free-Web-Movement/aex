@@ -68,6 +68,18 @@ impl Default for HeartbeatConfig {
     }
 }
 
+impl HeartbeatConfig {
+    #[cfg(test)]
+    pub fn interval(&self) -> u64 {
+        self.interval_secs
+    }
+
+    #[cfg(test)]
+    pub fn timeout(&self) -> u64 {
+        self.timeout_secs
+    }
+}
+
 #[derive(Clone)]
 pub struct HeartbeatManager {
     pub local_node: Node,
