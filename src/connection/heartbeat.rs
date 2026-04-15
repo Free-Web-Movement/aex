@@ -95,6 +95,15 @@ impl HeartbeatManager {
         }
     }
 
+    pub fn new_with_arc(local_node: Node, active: Arc<tokio::sync::RwLock<std::collections::HashMap<SocketAddr, HeartbeatState>>>) -> Self {
+        Self {
+            local_node,
+            config: HeartbeatConfig::new(),
+            session_keys: None,
+            active_connections: active,
+        }
+    }
+
     pub fn with_config(mut self, config: HeartbeatConfig) -> Self {
         self.config = config;
         self

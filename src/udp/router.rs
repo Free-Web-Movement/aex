@@ -29,6 +29,21 @@ impl Router {
             handlers: HashMap::new(),
         }
     }
+
+    pub fn new_with_handler() -> Self {
+        let mut router = Self {
+            handlers: HashMap::new(),
+        };
+        router.handlers.insert(0, Box::new(|_global: Arc<GlobalContext>, _frame: (), _cmd: (), _addr: SocketAddr, _socket: Arc<UdpSocket>| {
+            Box::pin(async { Ok::<bool, anyhow::Error>(true) })
+        }) as Box<dyn Any + Send + Sync>);
+        router
+    }
+
+    pub fn handler_count(&self) -> usize {
+        self.handlers.len()
+    }
+
     // 注册 Handler 的方法与 TCP 类似，只需适配 PacketExecutor 的闭包即可
     pub fn on<F, C, FFut, Fut>(&mut self, key: u32, f: FFut)
     where

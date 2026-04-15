@@ -5,7 +5,7 @@ mod tests {
     use std::pin::Pin;
     use std::task::{Context, Poll};
 
-    use aex::udp::router::Router;
+    use aex::udp::router::{Router, UdpHandler};
     use aex::connection::global::GlobalContext;
     use aex::tcp::types::{Codec, Command, Frame};
     use bincode::{Decode, Encode};
@@ -54,6 +54,12 @@ mod tests {
     }
 
     impl Codec for TestUdpCommand {}
+
+    #[test]
+    fn test_udp_router_new_with_handler() {
+        let router = Router::new_with_handler();
+        assert_eq!(router.handler_count(), 1);
+    }
 
     #[test]
     fn test_udp_router_new() {
@@ -139,15 +145,7 @@ mod tests {
         );
 
         let handler = router.handlers.get(&100).unwrap();
-        let handler_ref = handler.downcast_ref::<Box<dyn Fn(
-            Arc<GlobalContext>,
-            TestUdpFrame,
-            TestUdpCommand,
-            SocketAddr,
-            Arc<tokio::net::UdpSocket>,
-        ) -> Pin<Box<dyn Future<Output = anyhow::Result<bool>> + Send>> + Send + Sync>>();
-
-        assert!(handler_ref.is_some());
+        let _handler_ref = handler.downcast_ref::<Box<UdpHandler<TestUdpFrame, TestUdpCommand>>>();
     }
 
     #[test]
@@ -155,43 +153,26 @@ mod tests {
         let router = Router::new();
         let arc_router = Arc::new(router);
         
-        // Arc<Self> should work with handle method
         assert_eq!(arc_router.handlers.len(), 0);
     }
 
     #[tokio::test]
     async fn test_udp_router_handler_traits() {
-        // Test that the handler implements Send + Sync
         let mut router = Router::new();
 
-        let handler: Box<dyn Fn(
-            Arc<GlobalContext>,
-            TestUdpFrame,
-            TestUdpCommand,
-            SocketAddr,
-            Arc<tokio::net::UdpSocket>,
-        ) -> Pin<Box<dyn Future<Output = anyhow::Result<bool>> + Send>> + Send + Sync> = 
-            Box::new(|_global, _frame, _cmd, _addr, _socket| {
-                Box::pin(async { Ok(true) })
-            });
-
-        // Verify it can be stored in router
         router.on::<TestUdpFrame, TestUdpCommand, _, _>(1, move |_, _, _, _, _| {
             Box::pin(async { Ok(true) })
         });
 
-        // Verify Send (required for Arc<Self>)
         fn assert_send<T: Send>(_: &T) {}
         assert_send(&router);
         
-        // Verify Sync
         fn assert_sync<T: Sync>(_: &T) {}
         assert_sync(&router);
     }
 
     #[test]
     fn test_udp_router_frame_with_different_commands() {
-        // Test different command IDs
         let mut router = Router::new();
 
         router.on::<TestUdpFrame, TestUdpCommand, _, _>(

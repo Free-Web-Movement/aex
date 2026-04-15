@@ -65,6 +65,17 @@ impl WebSocket {
         Self { on_frame: None }
     }
 
+    #[cfg(test)]
+    pub fn new_with_handler<F>(handler: F) -> Self
+    where
+        F: Fn(&WebSocket, &mut Context, WSFrame) -> BoxFuture<'static, bool>
+            + Send
+            + Sync
+            + 'static,
+    {
+        Self { on_frame: Some(Arc::new(handler)) }
+    }
+
     /// 设置通用处理器
     pub fn set_handler<F>(mut self, handler: F) -> Self
     where
