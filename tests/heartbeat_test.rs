@@ -181,3 +181,14 @@ async fn test_heartbeat_manager_create_ping_with_keys() {
     let ping = manager.create_ping();
     assert!(ping.nonce.is_some());
 }
+
+#[tokio::test]
+async fn test_heartbeat_manager_create_pong() {
+    let node = Node::from_system(8080, vec![0x55u8; 32], 1);
+    let manager = HeartbeatManager::new(node);
+    
+    let ping = PingCommand::new();
+    let pong = manager.create_pong(&ping);
+    
+    assert_eq!(pong.timestamp, ping.timestamp);
+}
