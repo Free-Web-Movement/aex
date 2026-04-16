@@ -1,10 +1,10 @@
 use std::collections::HashMap;
-use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 
 use tokio::sync::RwLock;
 
-const DEFAULT_MULTICAST_TTL: u8 = 64;
+use crate::constants::udp::DEFAULT_MULTICAST_TTL;
 
 #[derive(Debug, Clone)]
 pub struct MulticastGroup {

@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::{fs, path::PathBuf};
 
-pub const DEFAULT_APP_DIR: &str = ".aex";
+use crate::constants::server::DEFAULT_APP_DIR;
 
 #[derive(Debug, Clone)]
 pub struct Storage {

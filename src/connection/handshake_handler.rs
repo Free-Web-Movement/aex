@@ -5,14 +5,13 @@ use anyhow::{Ok, Result};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::Mutex;
 
+use crate::constants::tcp::MAX_HANDSHAKE_SIZE;
 use crate::connection::commands::{
     HelloCommand, WelcomeCommand, AckCommand, RejectCommand, CommandId,
 };
 use crate::connection::context::Context;
 use crate::connection::node::Node;
 use crate::crypto::session_key_manager::PairedSessionKey;
-
-const MAX_HANDSHAKE_SIZE: usize = 4096;
 
 pub struct HandshakeHandler {
     pub local_node: Node,

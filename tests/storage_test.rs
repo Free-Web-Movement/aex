@@ -1,6 +1,7 @@
 #[cfg(test)]
 mod tests {
-    use aex::storage::{Storage, DEFAULT_APP_DIR};
+    use aex::constants::server::DEFAULT_APP_DIR;
+    use aex::storage::Storage;
     use serde::{Deserialize, Serialize};
 
     use std::{fs, path::PathBuf};

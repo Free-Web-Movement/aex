@@ -13,6 +13,7 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 
+use crate::constants::server::SERVER_NAME;
 use crate::{
     communicators::{
         event::{Event, EventCallback, EventEmitter},
@@ -20,7 +21,7 @@ use crate::{
         spreader::{SpreadCallback, SpreadManager},
     },
     connection::{
-        context::{SERVER_NAME, TypeMap},
+        context::TypeMap,
         heartbeat::{HeartbeatConfig, HeartbeatManager},
     },
     crypto::session_key_manager::PairedSessionKey,

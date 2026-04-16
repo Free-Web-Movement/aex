@@ -9,13 +9,11 @@ use tokio::sync::Mutex;
 use tokio::task::AbortHandle;
 use tokio_util::sync::CancellationToken;
 
+use crate::constants::tcp::{DEFAULT_PING_INTERVAL_SEC, DEFAULT_PING_TIMEOUT_SEC};
 use crate::connection::commands::{PingCommand, PongCommand};
 use crate::connection::context::Context;
 use crate::connection::node::Node;
 use crate::crypto::session_key_manager::PairedSessionKey;
-
-const DEFAULT_PING_INTERVAL: u64 = 30;
-const DEFAULT_PING_TIMEOUT: u64 = 10;
 
 #[derive(Clone)]
 pub struct HeartbeatConfig {
@@ -28,8 +26,8 @@ pub struct HeartbeatConfig {
 impl HeartbeatConfig {
     pub fn new() -> Self {
         Self {
-            interval_secs: DEFAULT_PING_INTERVAL,
-            timeout_secs: DEFAULT_PING_TIMEOUT,
+            interval_secs: DEFAULT_PING_INTERVAL_SEC,
+            timeout_secs: DEFAULT_PING_TIMEOUT_SEC,
             on_timeout: None,
             on_latency: None,
         }

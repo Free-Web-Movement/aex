@@ -6,6 +6,7 @@ use anyhow::{Context, bail};
 use tokio::{io::AsyncBufReadExt, time::timeout};
 
 use crate::{
+    constants::http::*,
     connection::context::{BoxReader, LocalTypeMap},
     http::{
         meta::HttpMetadata,
@@ -21,8 +22,6 @@ use crate::{
         },
     },
 };
-pub const MAX_CAPACITY: i32 = 1024;
-pub const TIME_LIMIT: i32 = 500;
 
 pub struct Request<'a> {
     pub reader: &'a mut Option<BoxReader>,
@@ -31,8 +30,10 @@ pub struct Request<'a> {
 
 impl<'a> Request<'a> {
     pub async fn parse_to_local(&mut self) -> anyhow::Result<()> {
-        // 1. 解析请求行 (Method, Path, Version)
         let line = self.read_line_with_limit().await?;
+        if line.len() > MAX_REQUEST_LINE_SIZE {
+            bail!("Request line too long: {} bytes", line.len());
+        }
         let line_str = std::str::from_utf8(&line).context("Request line not UTF-8")?;
         let mut parts = line_str.split_whitespace();
 
@@ -43,8 +44,19 @@ impl<'a> Request<'a> {
         let version = HttpVersion::from_str(&version).context("Unknown HTTP version")?;
         let method = HttpMethod::from_str(method_str).context("Unknown method")?;
 
-        // 2. 解析所有 Headers
         let headers_map = self.parse_headers_from_reader().await?;
+        
+        if headers_map.len() > MAX_HEADER_COUNT {
+            bail!("Too many headers: {}", headers_map.len());
+        }
+
+        let header_size: usize = headers_map.iter()
+            .map(|(k, v)| k.as_str().len() + v.len())
+            .sum();
+        if header_size > MAX_HEADER_SIZE {
+            bail!("Total header size too large: {} bytes", header_size);
+        }
+
         let headers = Headers::from(headers_map);
 
         // 3.2 Content-Type & Multipart Boundary
@@ -106,7 +118,11 @@ impl<'a> Request<'a> {
     /// 移植旧的 Cookie 解析逻辑
     fn parse_cookies_raw(&self, header_value: &str) -> AHashMap<String, String> {
         let mut map = AHashMap::with_capacity(4);
+        let mut count = 0;
         for pair in header_value.split(';') {
+            if count >= MAX_COOKIE_COUNT {
+                break;
+            }
             let pair = pair.trim();
             if pair.is_empty() {
                 continue;
@@ -114,6 +130,7 @@ impl<'a> Request<'a> {
             let mut kv = pair.splitn(2, '=');
             if let (Some(k), Some(v)) = (kv.next(), kv.next()) {
                 map.insert(k.trim().to_string(), v.trim().to_string());
+                count += 1;
             }
         }
         map
@@ -124,7 +141,7 @@ impl<'a> Request<'a> {
 
         if let Some(r) = self.reader.as_deref_mut() {
             let n = timeout(
-                Duration::from_millis(TIME_LIMIT as u64),
+                Duration::from_millis(TIME_LIMIT_MS as u64),
                 r.read_until(b'\n', &mut buf),
             )
             .await

@@ -2,9 +2,7 @@ use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::connection::commands::CommandId;
-
-const MAX_FRAME_SIZE: usize = 65536;
-const HEADER_SIZE: usize = 8;
+use crate::constants::tcp::{MAX_FRAME_SIZE, PROTOCOL_HEADER_SIZE};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ProtocolFlags(u8);
@@ -70,7 +68,7 @@ impl FrameHeader {
     }
 
     pub fn encode(&self) -> Vec<u8> {
-        let mut bytes = vec![0u8; HEADER_SIZE];
+        let mut bytes = vec![0u8; PROTOCOL_HEADER_SIZE];
         bytes[0..4].copy_from_slice(&self.command_id.to_le_bytes());
         bytes[4] = self.flags;
         bytes[5..8].copy_from_slice(&self.sequence.to_le_bytes()[..3]);
@@ -78,7 +76,7 @@ impl FrameHeader {
     }
 
     pub fn decode(data: &[u8]) -> Result<Self> {
-        if data.len() < HEADER_SIZE {
+        if data.len() < PROTOCOL_HEADER_SIZE {
             return Err(anyhow!("frame header too short"));
         }
         let command_id = u32::from_le_bytes(data[0..4].try_into().unwrap());
@@ -117,15 +115,15 @@ impl ProtocolFrame {
     }
 
     pub fn decode(data: &[u8]) -> Result<Self> {
-        if data.len() < HEADER_SIZE {
+        if data.len() < PROTOCOL_HEADER_SIZE {
             return Err(anyhow!("frame too short"));
         }
         let header = FrameHeader::decode(data)?;
         let payload_length = header.payload_length as usize;
-        if data.len() < HEADER_SIZE + payload_length {
+        if data.len() < PROTOCOL_HEADER_SIZE + payload_length {
             return Err(anyhow!("incomplete payload"));
         }
-        let payload = data[HEADER_SIZE..HEADER_SIZE + payload_length].to_vec();
+        let payload = data[PROTOCOL_HEADER_SIZE..PROTOCOL_HEADER_SIZE + payload_length].to_vec();
         Ok(Self { header, payload })
     }
 

@@ -28,7 +28,7 @@ use crate::http::protocol::status::StatusCode;
 use crate::http::req::Request;
 use crate::http::res::Response;
 
-pub const SERVER_NAME: &str = "Aex/1.0";
+use crate::constants::server::SERVER_NAME;
 
 /// TypeMap for storing shared data using TypeId as keys. Concurrent version.
 pub type ConcurrentTypeMap =

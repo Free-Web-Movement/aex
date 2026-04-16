@@ -4,7 +4,8 @@ mod tests {
     use std::sync::Arc;
     use tokio::sync::Mutex;
 
-    use aex::connection::handshake::{HandshakeContext, HandshakeState, HANDSHAKE_VERSION};
+    use aex::connection::handshake::{HandshakeContext, HandshakeState};
+    use aex::constants::tcp::HANDSHAKE_VERSION;
     use aex::connection::node::Node;
     use aex::connection::commands::{HelloCommand, WelcomeCommand, AckCommand, RejectCommand};
 

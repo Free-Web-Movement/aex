@@ -1,5 +1,7 @@
 use ahash::AHashMap;
 
+use crate::constants::protocol::EMPTY_STRING;
+
 const MAX_PARAMS: usize = 8;
 
 #[derive(Debug, Clone)]
@@ -87,7 +89,6 @@ impl SmallParams {
         map
     }
 }
-
 
 impl From<SmallParams> for AHashMap<String, String> {
     fn from(small: SmallParams) -> Self {

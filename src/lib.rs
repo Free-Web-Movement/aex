@@ -55,6 +55,7 @@
 
 pub mod communicators;
 pub mod connection;
+pub mod constants;
 pub mod crypto;
 pub mod http;
 pub mod http2;
