@@ -143,7 +143,7 @@ mod tests {
 
         tokio::spawn(async move {
             if let Err(e) = server
-                .start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id()))
+                .start()
                 .await
             {
                 eprintln!("Server exit: {}", e);
@@ -247,7 +247,7 @@ mod tests {
 
         tokio::spawn(async move {
             let _ = server
-                .start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id()))
+                .start()
                 .await;
         });
 
@@ -328,7 +328,7 @@ mod tests {
         let server = server.http(hr).clone();
         tokio::spawn(async move {
             let _ = server
-                .start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id()))
+                .start()
                 .await;
         });
 
@@ -359,7 +359,7 @@ mod tests {
         let server = server.http(hr).clone();
         tokio::spawn(async move {
             let _ = server
-                .start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id()))
+                .start()
                 .await;
         });
 
@@ -404,7 +404,7 @@ mod tests {
     //         let actual_addr = tokio::net::TcpListener::bind(addr).await.unwrap().local_addr().unwrap();
     //         let mut server = HTTPServer::new(actual_addr, None);
     //         let server = server.http(hr);
-    //         tokio::spawn(async move { let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id())).await; });
+    //         tokio::spawn(async move { let _ = server.start().await; });
 
     //         tokio::time::sleep(Duration::from_millis(200)).await;
 
@@ -440,7 +440,7 @@ mod tests {
         let server = server.http(hr).clone();
         tokio::spawn(async move {
             let _ = server
-                .start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id()))
+                .start()
                 .await;
         });
 
@@ -500,7 +500,7 @@ mod tests {
         let server = server.http(hr).clone();
         tokio::spawn(async move {
             let _ = server
-                .start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id()))
+                .start()
                 .await;
         });
 
@@ -565,7 +565,7 @@ mod tests {
         let server = server.http(hr).clone();
         tokio::spawn(async move {
             let _ = server
-                .start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id()))
+                .start()
                 .await;
         });
 
@@ -606,7 +606,7 @@ mod tests {
         let mut hr = Router::new(NodeType::Static("root".into()));
         let mw_hit_count = Arc::new(AtomicUsize::new(0));
 
-        let server = HTTPServer::new(actual_addr, None);
+        let mut server = HTTPServer::new(actual_addr, None);
 
         let count = mw_hit_count.clone();
         let mw_any: Arc<Executor> = Arc::new(move |_| {
@@ -628,10 +628,10 @@ mod tests {
 
         // ... 启动 Server ...
 
-        let server = server.http(hr).clone();
+        let server = server.http(hr);
         tokio::spawn(async move {
             let _ = server
-                .start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id()))
+                .start()
                 .await;
         });
 
@@ -707,7 +707,7 @@ mod tests {
         let server = HTTPServer::new(actual_addr, None).http(hr).clone();
         tokio::spawn(async move {
             let _ = server
-                .start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id()))
+                .start()
                 .await;
         });
 
@@ -777,7 +777,7 @@ mod tests {
         let server = HTTPServer::new(actual_addr, None).http(hr).clone();
         tokio::spawn(async move {
             let _ = server
-                .start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id()))
+                .start()
                 .await;
         });
 
@@ -852,7 +852,7 @@ mod tests {
         let server = HTTPServer::new(actual_addr, None).http(hr).clone();
         tokio::spawn(async move {
             let _ = server
-                .start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id()))
+                .start()
                 .await;
         });
 
@@ -913,7 +913,7 @@ mod tests {
 
         let server = HTTPServer::new(actual_addr, None).http(hr).clone();
         tokio::spawn(async move {
-            let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c| c.id())).await;
+            let _ = server.start().await;
         });
 
         tokio::time::sleep(Duration::from_millis(200)).await;
@@ -948,7 +948,7 @@ mod tests {
 
         let server = HTTPServer::new(actual_addr, None).http(hr).clone();
         tokio::spawn(async move {
-            let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c| c.id())).await;
+            let _ = server.start().await;
         });
 
         tokio::time::sleep(Duration::from_millis(200)).await;
@@ -984,7 +984,7 @@ mod tests {
 
         let server = HTTPServer::new(actual_addr, None).http(hr).clone();
         tokio::spawn(async move {
-            let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c| c.id())).await;
+            let _ = server.start().await;
         });
 
         tokio::time::sleep(Duration::from_millis(200)).await;
@@ -1019,7 +1019,7 @@ mod tests {
 
         let server = HTTPServer::new(actual_addr, None).http(hr).clone();
         tokio::spawn(async move {
-            let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c| c.id())).await;
+            let _ = server.start().await;
         });
 
         tokio::time::sleep(Duration::from_millis(200)).await;
@@ -1053,7 +1053,7 @@ mod tests {
 
         let server = HTTPServer::new(actual_addr, None).http(hr).clone();
         tokio::spawn(async move {
-            let _ = server.start::<RawCodec, RawCodec>(Arc::new(|c| c.id())).await;
+            let _ = server.start().await;
         });
 
         tokio::time::sleep(Duration::from_millis(200)).await;

@@ -26,7 +26,7 @@ async fn main() -> anyhow::Result<()> {
     HTTPServer::new(addr, None)
         .http(router)
         .http2()
-        .start::<RawCodec, RawCodec>(Arc::new(|c| c.id()))
+        .start()
         .await?;
     Ok(())
 }

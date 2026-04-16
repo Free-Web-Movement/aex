@@ -85,7 +85,7 @@ async fn main() -> anyhow::Result<()> {
 
     HTTPServer::new(addr, None)
         .http(router)
-        .start::<RawCodec, RawCodec>(Arc::new(|c| c.id()))
+        .start()
         .await?;
     Ok(())
 }

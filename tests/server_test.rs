@@ -77,18 +77,15 @@ async fn test_aex_server_coverage() {
         drop(temp_listener); // 释放临时绑定的端口以便 Server 使用
 
         server.addr = actual_addr;
-        let server = server.http(hr).tcp(tr).udp(ur).clone();
+        let server = server
+            .http(hr)
+            .tcp(tr, Arc::new(|c: &RawCodec| c.id()))
+            .udp(ur, Arc::new(|c: &RawCodec| c.id()))
+            .clone();
 
         // 启动服务器
         tokio::spawn(async move {
-            if let Err(e) = server
-                .start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| {
-                    println!("inside extractor!");
-                    println!("data: {:?}", c);
-                    c.id()
-                }))
-                .await
-            {
+            if let Err(e) = server.start().await {
                 eprintln!("Server exit with error: {}", e);
             }
         });
@@ -282,11 +279,11 @@ async fn test_server_start_tcp_only() {
     drop(temp_listener);
     
     server.addr = actual_addr;
-    let server = server.tcp(tr).clone();
+    let server = server.tcp::<RawCodec>(tr, Arc::new(|c: &RawCodec| c.id())).clone();
     let globals = server.globals.clone();
     
     tokio::spawn(async move {
-        if let Err(e) = server.start::<RawCodec, RawCodec>(Arc::new(|c| c.id())).await {
+        if let Err(e) = server.start().await {
             eprintln!("TCP server error: {}", e);
         }
     });
@@ -310,11 +307,11 @@ async fn test_server_start_udp_only() {
     drop(socket);
     
     server.addr = actual_addr;
-    let server = server.udp(ur).clone();
+    let server = server.udp::<RawCodec>(ur, Arc::new(|c: &RawCodec| c.id())).clone();
     let globals = server.globals.clone();
     
     tokio::spawn(async move {
-        if let Err(e) = server.start::<RawCodec, RawCodec>(Arc::new(|c| c.id())).await {
+        if let Err(e) = server.start().await {
             eprintln!("UDP server error: {}", e);
         }
     });
@@ -338,8 +335,7 @@ async fn test_server_http2_enable() {
     drop(temp_listener);
     
     server.addr = actual_addr;
-    server.http(hr);
-    server.http2();
+    let server = server.http(hr).http2();
     
     assert!(server.globals.h2_codec.read().unwrap().is_some());
 }
@@ -356,15 +352,25 @@ async fn test_server_httpserver_alias() {
 #[tokio::test]
 async fn test_local_shutdown() -> anyhow::Result<()> {
     let addr: SocketAddr = "[::1]:0".parse()?; // 使用 0 端口自动分配
-    let server = Server::new(addr, None);
+    
+    // 需要创建 router 以启用 TCP/UDP
+    let mut tr = TcpRouter::new();
+    tr.on::<RawCodec, RawCodec>(
+        10,
+        Box::new(|_, _, _| Box::pin(async move { Ok(true) }).boxed()),
+        vec![],
+    );
+    let mut ur = UdpRouter::new();
+    ur.on::<RawCodec, RawCodec, _, _>(20, |_, _, _, _addr, _socket| async move { Ok(true) });
+    
+    let server = Server::new(addr, None)
+        .tcp::<RawCodec>(tr, Arc::new(|c: &RawCodec| c.id()))
+        .udp::<RawCodec>(ur, Arc::new(|c: &RawCodec| c.id()));
     let globals = server.globals.clone();
 
     // 1. 启动服务器 (在后台 Task)
-    // 这里的 extractor 简单返回 id
     let server_handle = tokio::spawn(async move {
-        server
-            .start::<RawCodec, RawCodec>(Arc::new(|c| c.id()))
-            .await
+        server.start().await
     });
 
     // 给一点时间让服务器起来

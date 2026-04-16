@@ -1,4 +1,3 @@
-use aex::connection::context::TypeMapExt;
 use aex::connection::global::GlobalContext;
 use aex::http::meta::HttpMetadata;
 use aex::http::middlewares::websocket::WebSocket;
@@ -185,9 +184,9 @@ async fn main() -> anyhow::Result<()> {
     // ═══════════════════════════════════════════════════════════════════════
     Server::new(addr, None)
         .http(http_router)
-        .tcp(tcp_router)
-        .udp(udp_router)
-        .start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id()))
+        .tcp::<RawCodec>(tcp_router, Arc::new(|c: &RawCodec| c.id()))
+        .udp::<RawCodec>(udp_router, Arc::new(|c: &RawCodec| c.id()))
+        .start()
         .await?;
 
     Ok(())

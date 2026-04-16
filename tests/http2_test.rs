@@ -82,7 +82,7 @@ async fn test_http2_routing() {
 
         tokio::spawn(async move {
             if let Err(e) = server
-                .start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id()))
+                .start()
                 .await
             {
                 eprintln!("Server exit with error: {}", e);
@@ -142,11 +142,16 @@ async fn test_mixed_protocol_server() {
         drop(temp_listener);
 
         server.addr = actual_addr;
-        let server = server.http(hr).tcp(tr).udp(ur).http2().clone();
+        let server = server
+            .http(hr)
+            .tcp::<RawCodec>(tr, Arc::new(|c: &RawCodec| c.id()))
+            .udp::<RawCodec>(ur, Arc::new(|c: &RawCodec| c.id()))
+            .http2()
+            .clone();
 
         tokio::spawn(async move {
             if let Err(e) = server
-                .start::<RawCodec, RawCodec>(Arc::new(|c: &RawCodec| c.id()))
+                .start()
                 .await
             {
                 eprintln!("Server exit with error: {}", e);
