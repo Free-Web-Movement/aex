@@ -4,7 +4,7 @@ use crate::{
         meta::HttpMetadata,
         protocol::{header::HeaderKey, method::HttpMethod, header::Headers},
         types::Executor,
-        websocket::{WSCodec, WSFrame, WebSocketHandler},
+        websocket::{BinaryHandler, TextHandler, WSCodec, WSFrame, WebSocketHandler},
     },
 };
 use base64::Engine;
@@ -58,26 +58,44 @@ impl AsyncWrite for CombinedStream {
 
 #[derive(Clone)]
 pub struct WebSocket {
-    pub on_frame: Option<WebSocketHandler>,
+    pub on_text: Option<TextHandler>,
+    pub on_binary: Option<BinaryHandler>,
 }
 
 impl WebSocket {
     pub fn new() -> Self {
-        Self { on_frame: None }
+        Self {
+            on_text: None,
+            on_binary: None,
+        }
     }
 
-    #[cfg(test)]
-    pub fn new_with_handler<F>(handler: F) -> Self
+    /// 设置文本消息处理器
+    pub fn on_text<F>(mut self, handler: F) -> Self
     where
-        F: Fn(&WebSocket, &mut Context, WSFrame) -> BoxFuture<'static, bool>
+        F: Fn(&WebSocket, &mut Context, String) -> BoxFuture<'static, bool>
             + Send
             + Sync
             + 'static,
     {
-        Self { on_frame: Some(Arc::new(handler)) }
+        self.on_text = Some(Arc::new(handler));
+        self
     }
 
-    /// 设置通用处理器
+    /// 设置二进制消息处理器
+    pub fn on_binary<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(&WebSocket, &mut Context, Vec<u8>) -> BoxFuture<'static, bool>
+            + Send
+            + Sync
+            + 'static,
+    {
+        self.on_binary = Some(Arc::new(handler));
+        self
+    }
+
+    /// 设置统一的帧处理器 (兼容旧API)
+    #[allow(unused)]
     pub fn set_handler<F>(mut self, handler: F) -> Self
     where
         F: Fn(&WebSocket, &mut Context, WSFrame) -> BoxFuture<'static, bool>
@@ -85,7 +103,6 @@ impl WebSocket {
             + Sync
             + 'static,
     {
-        self.on_frame = Some(Arc::new(handler));
         self
     }
 
@@ -154,27 +171,39 @@ impl WebSocket {
                 }
             };
 
-            // 检查是否有通用处理器
-            if let Some(handler) = &ws.on_frame {
-                // 调用处理器。如果返回 false，表示业务层要求关闭连接
-                if !handler(ws, ctx, frame.clone()).await {
-                    let _ = framed
-                        .send(WSFrame::Close(1000, Some("Handler exit".into())))
-                        .await;
-                    break;
+            // 检查处理器并调用
+            let close_connection = match frame {
+                WSFrame::Text(text) => {
+                    if let Some(ref handler) = ws.on_text {
+                        handler(ws, ctx, text).await
+                    } else {
+                        true
+                    }
                 }
-            }
-
-            // 默认行为处理 (如果 Handler 没拦截或者没设置，可以在这里做兜底)
-            match frame {
+                WSFrame::Binary(data) => {
+                    if let Some(ref handler) = ws.on_binary {
+                        handler(ws, ctx, data).await
+                    } else {
+                        true
+                    }
+                }
                 WSFrame::Ping(p) => {
-                    framed.send(WSFrame::Pong(p)).await?;
+                    let _ = framed.send(WSFrame::Pong(p)).await;
+                    true
                 }
                 WSFrame::Close(code, reason) => {
                     let _ = framed.send(WSFrame::Close(code, reason)).await;
                     break;
                 }
-                _ => {} // Text/Binary 在没有设置 Handler 时默认忽略
+                _ => true,
+            };
+
+            // 如果处理器返回 false，关闭连接
+            if !close_connection {
+                let _ = framed
+                    .send(WSFrame::Close(1000, Some("Handler exit".into())))
+                    .await;
+                break;
             }
         }
         Ok(())

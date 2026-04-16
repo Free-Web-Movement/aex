@@ -205,3 +205,9 @@ impl Encoder<WSFrame> for WSCodec {
 
 pub type WebSocketHandler =
     Arc<dyn (Fn(&WebSocket, &mut Context, WSFrame) -> BoxFuture<'static, bool>) + Send + Sync>;
+
+pub type TextHandler =
+    Arc<dyn (Fn(&WebSocket, &mut Context, String) -> BoxFuture<'static, bool>) + Send + Sync>;
+
+pub type BinaryHandler =
+    Arc<dyn (Fn(&WebSocket, &mut Context, Vec<u8>) -> BoxFuture<'static, bool>) + Send + Sync>;

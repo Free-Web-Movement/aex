@@ -1,8 +1,10 @@
 use aex::communicators::event::Event;
 use aex::connection::context::{Context, TypeMapExt};
 use aex::http::meta::HttpMetadata;
+use aex::http::middlewares::websocket::WebSocket;
 use aex::http::protocol::header::HeaderKey;
 use aex::http::protocol::status::StatusCode;
+use aex::http::websocket::{WSFrame, WebSocketHandler};
 use aex::server::{HTTPServer, Server};
 use aex::tcp::types::{Codec, Command, RawCodec, TCPFrame, TCPCommand};
 use futures::FutureExt;
@@ -399,4 +401,103 @@ async fn test_local_shutdown() -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+#[tokio::test]
+async fn test_server_all_protocols_http1_http2_ws_tcp_udp() {
+    let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
+    let mut server = HTTPServer::new(addr, None);
+
+    // HTTP 路由
+    let mut hr = HttpRouter::new(NodeType::Static("root".into()));
+    hr.insert(
+        "/",
+        Some("GET"),
+        Arc::new(|ctx: &mut Context| {
+            Box::pin(async move {
+                let meta = &mut ctx.local.get_value::<HttpMetadata>().unwrap();
+                meta.status = StatusCode::Ok;
+                meta.headers.insert(HeaderKey::ContentType, "text/plain".to_string());
+                meta.body = b"All protocols!".to_vec();
+                ctx.local.set_value(meta.clone());
+                true
+            })
+            .boxed()
+        }),
+        None,
+    );
+    hr.insert(
+        "/ws",
+        Some("GET"),
+        Arc::new(|_: &mut Context| Box::pin(async move { true }).boxed()),
+        None,
+    );
+
+    // TCP 路由
+    let mut tr = TcpRouter::new();
+    tr.on::<RawCodec, RawCodec>(10, Box::new(|_, _, _| Box::pin(async move { Ok(true) }).boxed()), vec![]);
+
+    // UDP 路由
+    let mut ur = UdpRouter::new();
+    ur.on::<RawCodec, RawCodec, _, _>(20, |_, _, _, addr, socket| async move {
+        socket.send_to(b"udp_ok", addr).await?;
+        Ok(true)
+    });
+
+    // WebSocket 处理器 (带 text 和 binary 处理)
+    let ws_handler = WebSocket::new()
+        .on_text(|_ws, _ctx, text| {
+            Box::pin(async move {
+                println!("WS received text: {}", text);
+                true
+            })
+        })
+        .on_binary(|_ws, _ctx, data| {
+            Box::pin(async move {
+                println!("WS received binary: {} bytes", data.len());
+                true
+            })
+        });
+
+    // 绑定端口
+    let temp_listener = TcpListener::bind(addr).await.unwrap();
+    let actual_addr = temp_listener.local_addr().unwrap();
+    drop(temp_listener);
+
+    server.addr = actual_addr;
+    let server = server
+        .http(hr)
+        .http2()
+        .ws(ws_handler)
+        .tcp::<RawCodec>(tr, Arc::new(|c: &RawCodec| c.id()))
+        .udp::<RawCodec>(ur, Arc::new(|c: &RawCodec| c.id()))
+        .clone();
+
+    // 启动服务器
+    tokio::spawn(async move {
+        let _ = server.start().await;
+    });
+
+    sleep(Duration::from_millis(300)).await;
+
+    // 测试 HTTP
+    let http_res = reqwest::get(format!("http://{}", actual_addr))
+        .await
+        .expect("HTTP request failed");
+    assert_eq!(http_res.status(), 200);
+    assert_eq!(http_res.text().await.unwrap(), "All protocols!");
+
+    // 测试 TCP
+    let mut tcp_conn = TcpStream::connect(actual_addr).await.expect("TCP connect failed");
+    let rawtcp = Codec::encode(&RawCodec(vec![10, 0, 0, 0]));
+    tcp_conn.write_all(&rawtcp).await.unwrap();
+    sleep(Duration::from_millis(100)).await;
+
+    // 测试 UDP
+    let udp_client = UdpSocket::bind("0.0.0.0:0").await.unwrap();
+    let rawudp = Codec::encode(&RawCodec(vec![20, 0, 0, 0]));
+    udp_client.send_to(&rawudp, actual_addr).await.unwrap();
+    sleep(Duration::from_millis(100)).await;
+
+    println!("✅ All protocols (HTTP/1.1 + HTTP/2 + WS + TCP + UDP) test passed!");
 }

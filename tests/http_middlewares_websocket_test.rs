@@ -84,16 +84,15 @@ mod websocket_tests {
         let (client, server) = duplex(1024);
 
         // 模拟业务逻辑：收到任何消息都回复 "ACK"
-        let ws = WebSocket {
-            on_frame: Some(Arc::new(|_ws, _ctx, frame| {
+        let ws = WebSocket::new()
+            .on_text(|_ws, _ctx, text| {
                 Box::pin(async move {
-                    match frame {
-                        WSFrame::Text(t) if t == "ping" => true,
+                    match text.as_str() {
+                        "ping" => true,
                         _ => false, // 收到非 ping 则断开
                     }
                 })
-            })),
-        };
+            });
 
         // 启动服务器循环
         // 1. 拆分双工流
@@ -190,22 +189,22 @@ mod websocket_tests {
         let global = Arc::new(GlobalContext::new(addr, None));
 
         // 1. 定义更复杂的业务逻辑
-        let ws = WebSocket {
-            on_frame: Some(Arc::new(|_ws, _ctx, frame| {
+        let ws = WebSocket::new()
+            .on_text(|_ws, _ctx, text| {
                 Box::pin(async move {
-                    match frame {
-                        WSFrame::Binary(data) => {
-                            // 收到二进制数据，验证内容
-                            assert_eq!(data, vec![0xde, 0xad]);
-                            true
-                        }
-                        WSFrame::Text(t) if t == "exit" => false, // 自定义指令：退出
-                        WSFrame::Ping(_) => true, // 允许 Ping 穿透到默认处理器（自动回 Pong）
+                    match text.as_str() {
+                        "exit" => false, // 自定义指令：退出
                         _ => true,
                     }
                 })
-            })),
-        };
+            })
+            .on_binary(|_ws, _ctx, data| {
+                Box::pin(async move {
+                    // 收到二进制数据，验证内容
+                    assert_eq!(data, vec![0xde, 0xad]);
+                    true
+                })
+            });
 
         // 2. 准备 Server Context
         let (s_reader, s_writer) = tokio::io::split(server);
@@ -381,7 +380,7 @@ mod websocket_tests {
         let mut client_framed = Framed::new(client, WSCodec);
 
         // 使用默认逻辑的 WebSocket（自动回 Ping）
-        let ws = WebSocket { on_frame: None };
+        let ws = WebSocket::new();
 
         // 启动服务端 (简化 Context 初始化)
         let (r, w) = tokio::io::split(server);
