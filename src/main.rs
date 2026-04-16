@@ -52,8 +52,8 @@ async fn main() -> anyhow::Result<()> {
 
     Server::new(addr, None)
         .http(http_router)
-        .tcp(tcp_router, Arc::new(|c: &RawCodec| c.id()))
-        .udp(udp_router, Arc::new(|c: &RawCodec| c.id()))
+        .tcp::<RawCodec>(tcp_router, Arc::new(|c: &RawCodec| c.id()))
+        .udp::<RawCodec>(udp_router, Arc::new(|c: &RawCodec| c.id()))
         .start()
         .await?;
 

@@ -35,6 +35,7 @@ use crate::connection::entry::ConnectionEntry;
 use crate::connection::global::GlobalContext;
 use crate::connection::types::IDExtractor;
 use crate::crypto::session_key_manager::PairedSessionKey;
+use crate::http::middlewares::websocket::WebSocket;
 use crate::http::router::Router as HttpRouter;
 use crate::tcp::router::Router as TcpRouter;
 use crate::tcp::types::{TCPCommand, TCPFrame, RawCodec};
@@ -48,13 +49,44 @@ use tokio_util::sync::CancellationToken;
 
 type Extractor = Arc<dyn Fn(&RawCodec) -> u32 + Send + Sync>;
 
+/// HTTP versions to support
+#[derive(Clone, Default)]
+pub struct HttpVersions(pub Vec<u8>);
+
+impl HttpVersions {
+    /// HTTP/1.1 only
+    pub fn v1() -> Self {
+        Self(vec![1])
+    }
+
+    /// HTTP/1.1 + HTTP/2
+    pub fn v1_v2() -> Self {
+        Self(vec![1, 2])
+    }
+
+    /// HTTP/1.1 + HTTP/2 + HTTP/3
+    pub fn v1_v2_v3() -> Self {
+        Self(vec![1, 2, 3])
+    }
+
+    /// Check if HTTP/2 is enabled
+    pub fn has_http2(&self) -> bool {
+        self.0.contains(&2)
+    }
+
+    /// Check if HTTP/3 is enabled
+    pub fn has_http3(&self) -> bool {
+        self.0.contains(&3)
+    }
+}
+
 /// Multi-protocol server supporting HTTP, TCP, and UDP.
 ///
 /// # Example
 ///
 /// ```rust,ignore
 /// Server::new(addr, None)
-///     .http(http_router)
+///     .http(http_router, HttpVersions::http1_and_h2())
 ///     .tcp(tcp_router, Arc::new(|c| c.id()))
 ///     .udp(udp_router, Arc::new(|c| c.id()))
 ///     .start()
@@ -66,6 +98,8 @@ pub struct Server {
     pub globals: Arc<GlobalContext>,
     tcp_extractor: Option<Extractor>,
     udp_extractor: Option<Extractor>,
+    http_versions: HttpVersions,
+    ws_handler: Option<WebSocket>,
 }
 
 impl Server {
@@ -79,16 +113,24 @@ impl Server {
             ))),
             tcp_extractor: None,
             udp_extractor: None,
+            http_versions: HttpVersions::v1(),
+            ws_handler: None,
         }
     }
 
-    /// Sets the HTTP router (HTTP/1.1).
+    /// Returns whether WebSocket is enabled.
+    pub fn has_ws(&self) -> bool {
+        self.ws_handler.is_some()
+    }
+
+    /// Sets the HTTP router (HTTP/1.1 only).
     pub fn http(mut self, router: HttpRouter) -> Self {
         self.globals.routers.set_value(Arc::new(router));
+        self.http_versions = HttpVersions::v1();
         self
     }
 
-    /// Enables HTTP/2 support using the same router as HTTP/1.1.
+    /// Enables HTTP/2 support.
     pub fn http2(mut self) -> Self {
         let global = self.globals.clone();
         if let Some(http_router) = global.routers.get_value::<Arc<HttpRouter>>() {
@@ -98,6 +140,34 @@ impl Server {
             ));
             *self.globals.h2_codec.write().unwrap() = Some(h2_codec);
         }
+        self.http_versions = HttpVersions::v1_v2();
+        self
+    }
+
+    /// Sets the WebSocket handler for upgrade.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use aex::http::middlewares::websocket::WebSocket;
+    /// use aex::http::websocket::{TextHandler, BinaryHandler};
+    ///
+    /// let ws = WebSocket::new()
+    ///     .on_text(|ws, ctx, text| {
+    ///         Box::pin(async move {
+    ///             ws.send_text("pong").await;
+    ///             true
+    ///         })
+    ///     });
+    ///
+    /// Server::new(addr, None)
+    ///     .http(router, HttpVersions::http1())
+    ///     .ws(ws)
+    ///     .start()
+    ///     .await?;
+    /// ```
+    pub fn ws(mut self, handler: WebSocket) -> Self {
+        self.ws_handler = Some(handler);
         self
     }
 

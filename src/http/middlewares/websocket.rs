@@ -56,6 +56,7 @@ impl AsyncWrite for CombinedStream {
     }
 }
 
+#[derive(Clone)]
 pub struct WebSocket {
     pub on_frame: Option<WebSocketHandler>,
 }
