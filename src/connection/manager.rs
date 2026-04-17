@@ -156,7 +156,7 @@ impl ConnectionManager {
 
         // 4. 使用统一的启动器
         // 传入 manager 的 token 作为父级，获取该连接独有的 token 和 handle
-        let (conn_token, abort_handle, ctx) = ConnectionEntry::start::<F, C, _, _>(
+        let (conn_token, abort_handle, ctx) = ConnectionEntry::start::<_, _>(
             self.cancel_token.clone(),
             socket,
             addr,

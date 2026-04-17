@@ -5,14 +5,10 @@ use aex::http::router::{NodeType, Router as HttpRouter};
 use aex::http::types::Executor;
 use aex::http::websocket::WSFrame;
 use aex::server::Server;
-use aex::tcp::router::Router as TcpRouter;
-use aex::tcp::types::{Command, RawCodec};
-use aex::udp::router::Router as UdpRouter;
 use aex::exe;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
-use tokio::net::UdpSocket;
 
 static VISITOR_COUNT: once_cell::sync::Lazy<Mutex<HashMap<String, u64>>> =
     once_cell::sync::Lazy::new(|| Mutex::new(HashMap::new()));
@@ -110,85 +106,11 @@ async fn main() -> anyhow::Result<()> {
     .register();
 
     // ═══════════════════════════════════════════════════════════════════════
-    // TCP Router
-    // ═══════════════════════════════════════════════════════════════════════
-    let mut tcp_router = TcpRouter::<RawCodec, RawCodec>::new();
-    let mut tcp_router = tcp_router.extractor(|c: &RawCodec| c.id());
-
-    tcp_router.on::<RawCodec, RawCodec>(
-        0x01,
-        Box::new(|_ctx, _frame: RawCodec, cmd: RawCodec| {
-            Box::pin(async move {
-                let msg = String::from_utf8_lossy(&cmd.data());
-                println!("[TCP] PING: {}", msg);
-                Ok(true)
-            })
-        }),
-        vec![],
-    );
-
-    tcp_router.on::<RawCodec, RawCodec>(
-        0xFF,
-        Box::new(|_ctx, _frame: RawCodec, cmd: RawCodec| {
-            Box::pin(async move {
-                let msg = String::from_utf8_lossy(&cmd.data()).trim().to_uppercase();
-                println!("[TCP] Command: {}", msg);
-                Ok(true)
-            })
-        }),
-        vec![],
-    );
-
-    // ═══════════════════════════════════════════════════════════════════════
-    // UDP Router
-    // ═══════════════════════════════════════════════════════════════════════
-    let mut udp_router = UdpRouter::<RawCodec, RawCodec>::new();
-    let mut udp_router = udp_router.extractor(|c: &RawCodec| c.id());
-
-    udp_router.on(
-        0x01,
-        move |_global: Arc<GlobalContext>,
-               _frame: RawCodec,
-               payload: RawCodec,
-               peer: SocketAddr,
-               socket: Arc<UdpSocket>| async move {
-            let msg = String::from_utf8_lossy(&payload.data());
-            let msg = msg.trim();
-            println!("[UDP] {} -> {}", peer, msg);
-
-            let response = format!("ACK: {}", msg);
-            let _ = socket.send_to(response.as_bytes(), peer).await;
-            Ok(true)
-        },
-    );
-
-    udp_router.on(
-        0x02,
-        move |_global: Arc<GlobalContext>,
-               _frame: RawCodec,
-               _payload: RawCodec,
-               peer: SocketAddr,
-               socket: Arc<UdpSocket>| async move {
-            let (total, unique) = {
-                let visitors = VISITOR_COUNT.lock().unwrap();
-                let total: u64 = visitors.values().sum();
-                let unique = visitors.len();
-                (total, unique)
-            };
-            let response = format!("VISITORS: total={}, unique={}", total, unique);
-            let _ = socket.send_to(response.as_bytes(), peer).await;
-            Ok(true)
-        },
-    );
-
-    // ═══════════════════════════════════════════════════════════════════════
     // Start Server
     // ═══════════════════════════════════════════════════════════════════════
     Server::new(addr, None)
         .http(http_router)
-        .tcp::<RawCodec, RawCodec>(tcp_router)
-        .udp::<RawCodec, RawCodec>(udp_router)
-        .start_with_protocols::<RawCodec, RawCodec>()
+        .start()
         .await?;
 
     Ok(())

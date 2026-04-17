@@ -1,10 +1,8 @@
-use aex::connection::context::TypeMapExt;
 use aex::http::meta::HttpMetadata;
 use aex::http::protocol::header::HeaderKey;
 use aex::http::router::{NodeType, Router as HttpRouter};
 use aex::http::types::Executor;
-use aex::server::HTTPServer;
-use aex::tcp::types::{Command, RawCodec};
+use aex::server::Server;
 use aex::exe;
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -160,7 +158,7 @@ async fn main() -> anyhow::Result<()> {
 
     println!("REST API Server running at http://{}", addr);
 
-    HTTPServer::new(addr, None)
+    Server::new(addr, None)
         .http(router)
         .start()
         .await?;

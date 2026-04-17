@@ -1,9 +1,7 @@
 use aex::http::router::{NodeType, Router as HttpRouter};
-use aex::server::HTTPServer;
-use aex::tcp::types::{Command, RawCodec};
+use aex::server::Server;
 use aex::exe;
 use std::net::SocketAddr;
-use std::sync::Arc;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -11,7 +9,7 @@ async fn main() -> anyhow::Result<()> {
     let mut router = HttpRouter::new(NodeType::Static("root".into()));
 
     router.get("/", exe!(|ctx| {
-        ctx.send("Hello from HTTP/2!", None);
+        ctx.send("Hello from HTTP server!", None);
         true
     })).register();
 
@@ -20,12 +18,10 @@ async fn main() -> anyhow::Result<()> {
         true
     })).register();
 
-    println!("Starting HTTP/2 server on {}", addr);
-    println!("Use: curl --http2 http://localhost:8080/");
+    println!("Starting HTTP server on {}", addr);
 
-    HTTPServer::new(addr, None)
+    Server::new(addr, None)
         .http(router)
-        .http2()
         .start()
         .await?;
     Ok(())

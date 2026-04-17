@@ -17,8 +17,7 @@ use std::sync::Arc;
 use tokio::io::AsyncBufRead;
 use tokio::io::AsyncWrite;
 
-use crate::tcp::router::Router as TcpRouter;
-use crate::udp::router::Router as UdpRouter;
+use crate::tcp::router::{TcpRouter, UdpRouter};
 
 use crate::connection::global::GlobalContext;
 use crate::http::meta::HttpMetadata;
@@ -71,10 +70,20 @@ impl LocalTypeMap {
     }
 }
 
-/// Router wrappers for type-safe storage
 pub struct HttpRouterKey;
 pub struct TcpRouterKey;
-pub struct UdpRouterKey;
+
+pub fn get_tcp_router(global: &ConcurrentTypeMap) -> Option<Arc<crate::tcp::router::TcpRouter>> {
+    global.get(&TypeId::of::<TcpRouterKey>()).and_then(|r| {
+        r.value()
+            .downcast_ref::<Arc<crate::tcp::router::TcpRouter>>()
+            .cloned()
+    })
+}
+
+pub fn get_udp_router(global: &ConcurrentTypeMap) -> Option<Arc<crate::tcp::router::UdpRouter>> {
+    None
+}
 
 /// Extension trait for ConcurrentTypeMap to get/set values by type.
 pub trait TypeMapExt {
@@ -91,36 +100,6 @@ impl TypeMapExt for ConcurrentTypeMap {
     fn set_value<T: Send + Sync + 'static>(&self, val: T) {
         self.insert(TypeId::of::<T>(), Box::new(val));
     }
-}
-
-/// Get TCP router from global context
-pub fn get_tcp_router<F, C>(
-    global: &ConcurrentTypeMap,
-) -> Option<Arc<crate::tcp::router::Router<F, C>>>
-where
-    F: crate::tcp::types::TCPFrame,
-    C: crate::tcp::types::TCPCommand,
-{
-    global.get(&TypeId::of::<TcpRouterKey>()).and_then(|r| {
-        r.value()
-            .downcast_ref::<Arc<crate::tcp::router::Router<F, C>>>()
-            .cloned()
-    })
-}
-
-/// Get UDP router from global context
-pub fn get_udp_router<F, C>(
-    global: &ConcurrentTypeMap,
-) -> Option<Arc<crate::udp::router::Router<F, C>>>
-where
-    F: crate::tcp::types::Frame + Send + Sync + Clone + 'static,
-    C: crate::tcp::types::Command + Send + Sync + 'static,
-{
-    global.get(&TypeId::of::<UdpRouterKey>()).and_then(|r| {
-        r.value()
-            .downcast_ref::<Arc<crate::udp::router::Router<F, C>>>()
-            .cloned()
-    })
 }
 
 pub type AexReader = dyn AsyncBufRead + Send + Sync + Unpin;

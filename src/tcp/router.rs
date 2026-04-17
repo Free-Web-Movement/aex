@@ -1,187 +1,121 @@
-use anyhow::Ok;
-use futures::future::BoxFuture;
-use std::any::Any;
 use std::collections::HashMap;
 use std::sync::Arc;
+
+use crate::connection::context::Context;
+use crate::connection::global::GlobalContext;
 use tokio::io::AsyncReadExt;
 use tokio::sync::Mutex;
 
-use crate::connection::context::Context;
-use crate::connection::types::IDExtractor;
-use crate::tcp::types::{Codec, TCPCommand, TCPFrame};
-
-pub type Doer<F, C> = Box<
-    dyn Fn(Arc<Mutex<Context>>, F, C) -> BoxFuture<'static, anyhow::Result<bool>>
-        + Send
-        + Sync
-        + 'static,
->;
-
-pub struct Router<F = (), C = ()> {
-    pub handlers: HashMap<u32, Vec<Box<dyn Any + Send + Sync>>>,
-    extractor: Option<Arc<dyn Fn(&C) -> u32 + Send + Sync>>,
-    _phantom: std::marker::PhantomData<(F, C)>,
+pub trait Command: Send + Sync + 'static {
+    fn id(&self) -> u32;
+    fn data(&self) -> &[u8];
 }
 
-impl<F, C> Router<F, C> {
+pub struct TcpRouter {
+    pub handlers: HashMap<u32, Box<dyn Fn(Arc<Mutex<Context>>, &[u8]) -> bool + Send + Sync>>,
+}
+
+impl TcpRouter {
     pub fn new() -> Self {
         Self {
             handlers: HashMap::new(),
-            extractor: None,
-            _phantom: std::marker::PhantomData,
         }
     }
 
-    pub fn extractor<E: Fn(&C) -> u32 + Send + Sync + 'static>(mut self, extractor: E) -> Self {
-        self.extractor = Some(Arc::new(extractor));
-        self
-    }
-
-    pub fn get_extractor(&self) -> Option<&Arc<dyn Fn(&C) -> u32 + Send + Sync>> {
-        self.extractor.as_ref()
-    }
-
-    pub fn on<F2, C2>(&mut self, key: u32, f: Doer<F2, C2>, middlewares: Vec<Doer<F2, C2>>)
-    where
-        F: TCPFrame,
-        C: TCPCommand,
-        F2: TCPFrame,
-        C2: TCPCommand,
-    {
-        // 1. 创建统一的线性链条
-        // 预分配容量：middlewares 数量 + 1 个 executor
-        let mut chain: Vec<Box<dyn Any + Send + Sync>> = Vec::with_capacity(middlewares.len() + 1);
-
-        // 2. 先把所有中间件按顺序存入
-        for mw in middlewares {
-            chain.push(Box::new(mw));
-        }
-
-        // 3. 将最后的核心逻辑 f 存入
-        chain.push(Box::new(f));
-
-        // 4. 以 Any 类型持久化存储到 HashMap
-        self.handlers.insert(key, chain);
-    }
-
-    /// 核心分发逻辑
-    pub async fn handle_frame(
-        &self,
-        ctx: Arc<Mutex<Context>>,
-        frame: F,
-    ) -> anyhow::Result<bool>
-    where
-        F: TCPFrame,
-        C: TCPCommand,
-    {
-        let extractor = self.extractor.as_ref()
-            .ok_or_else(|| anyhow::anyhow!("TCP extractor not set"))?;
-        if !frame.validate() {
-            return Ok(false); // 校验失败，跳过此帧
-        }
-        if let Some(data) = frame.command() {
-            let key: u32;
-            let c: Option<C>;
-            if !frame.is_flat() {
-                use std::result::Result::Ok;
-                if let Ok(cmd) = <C as crate::tcp::types::Codec>::decode(&data) {
-                    key = (extractor)(&cmd);
-                    c = Some(cmd);
-                } else {
-                    let boxed_f = Box::new(frame.clone()) as Box<dyn Any>;
-                    if let Ok(cmd) = boxed_f.downcast::<C>() {
-                        let c_val = *cmd;
-                        key = (extractor)(&c_val);
-                        c = Some(c_val);
-                    } else {
-                        return Ok(false);
-                    }
-                }
-
-                if let Some(any_handler) = self.handlers.get(&key) {
-                    for handler in any_handler {
-                        let handler = handler.downcast_ref::<Doer<F, C>>().ok_or_else(|| {
-                            anyhow::anyhow!("Handler type mismatch for key: {}", key)
-                        })?;
-                        if !handler(ctx.clone(), frame.clone(), c.clone().unwrap().clone()).await? {
-                            return Ok(false);
-                        }
-                    }
-                }
+    pub fn on<C: Command>(&mut self, key: u32, handler: impl Fn(Arc<Mutex<Context>>, &C) -> bool + Send + Sync + 'static) {
+        self.handlers.insert(key, Box::new(move |ctx, data| {
+            let cmd = parse_command::<C>(data);
+            if let Some(cmd) = cmd {
+                return handler(ctx, &cmd);
             }
-        }
-
-        Ok(true)
+            true
+        }));
     }
 
-    pub async fn handle(
-        &self,
-        ctx: Arc<Mutex<Context>>,
-    ) -> anyhow::Result<()>
-    where
-        F: TCPFrame,
-        C: TCPCommand,
-    {
-        let extractor = self.extractor.as_ref()
-            .ok_or_else(|| anyhow::anyhow!("TCP extractor not set"))?;
+    pub async fn handle(&self, ctx: Arc<Mutex<Context>>) -> std::io::Result<()> {
+        let mut buf = vec![0u8; 4096];
+        let mut session = Vec::new();
         
-        let mut session_buf: Vec<u8> = Vec::with_capacity(4096);
-        let mut buf = vec![0u8; 1024];
-
-        // 💡 核心优化：在 I/O 时不锁定 Context，解决 P2P 双向传递锁死问题
-        let reader = {
-            let mut guard = ctx.lock().await;
-            guard.reader.take()
-        };
-
-        if reader.is_none() {
-            return Ok(());
-        }
-        let mut r = reader.unwrap();
-
         loop {
-            // 在不锁定 Context 的情况下进行异步读取
-            let n = match r.read(&mut buf).await {
-                std::result::Result::Ok(n) => n,
-                std::result::Result::Err(e) => {
-                    let mut guard = ctx.lock().await;
-                    guard.reader = Some(r);
-                    return Err(e.into());
+            let n = {
+                let mut guard = ctx.lock().await;
+                if let Some(ref mut r) = guard.reader {
+                    r.read(&mut buf).await?
+                } else {
+                    break;
                 }
             };
-
-            if n == 0 {
-                break;
-            }
-            session_buf.extend_from_slice(&buf[..n]);
-
-            // 正确处理粘包与半包
-            while !session_buf.is_empty() {
-                match <F as Codec>::decode_with_len(&session_buf) {
-                    std::result::Result::Ok((frame, consumed)) => {
-                        let should_continue = self
-                            .handle_frame(ctx.clone(), frame)
-                            .await?;
-
-                        session_buf.drain(0..consumed);
-
-                        if !should_continue {
-                            let mut guard = ctx.lock().await;
-                            guard.reader = Some(r);
-                            return std::result::Result::Ok(());
+            
+            if n == 0 { break; }
+            session.extend_from_slice(&buf[..n]);
+            
+            while session.len() >= 4 {
+                let len = u32::from_le_bytes(session[..4].try_into().unwrap()) as usize;
+                if session.len() >= 4 + len {
+                    let frame = &session[4..4 + len];
+                    for handler in self.handlers.values() {
+                        if !handler(ctx.clone(), frame) {
+                            return Ok(());
                         }
                     }
-                    std::result::Result::Err(_) => {
-                        // 等待更多数据
+                    session.drain(..4 + len);
+                } else {
+                    break;
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+fn parse_command<C: Command>(data: &[u8]) -> Option<C> {
+    None
+}
+
+impl Default for TcpRouter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+pub struct UdpRouter {
+    pub handlers: HashMap<u32, Box<dyn Fn(Arc<GlobalContext>, &[u8], std::net::SocketAddr) -> bool + Send + Sync>>,
+}
+
+impl UdpRouter {
+    pub fn new() -> Self {
+        Self {
+            handlers: HashMap::new(),
+        }
+    }
+
+    pub fn on<C: Command>(&mut self, key: u32, handler: impl Fn(Arc<GlobalContext>, &C, std::net::SocketAddr) -> bool + Send + Sync + 'static) {
+        self.handlers.insert(key, Box::new(move |global, data, addr| {
+            let cmd = parse_command::<C>(data);
+            if let Some(cmd) = cmd {
+                return handler(global, &cmd, addr);
+            }
+            true
+        }));
+    }
+
+    pub async fn handle(self: Arc<Self>, global: Arc<GlobalContext>, socket: std::sync::Arc<tokio::net::UdpSocket>) {
+        let mut buf = [0u8; 65535];
+        loop {
+            if let Ok((n, addr)) = socket.recv_from(&mut buf).await {
+                let data = &buf[..n];
+                for handler in self.handlers.values() {
+                    if !handler(global.clone(), data, addr) {
                         break;
                     }
                 }
             }
         }
+    }
+}
 
-        // 归还 Reader
-        let mut guard = ctx.lock().await;
-        guard.reader = Some(r);
-        std::result::Result::Ok(())
+impl Default for UdpRouter {
+    fn default() -> Self {
+        Self::new()
     }
 }
