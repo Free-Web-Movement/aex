@@ -8,7 +8,6 @@ use aex::connection::context::Context;
 use aex::connection::global::GlobalContext;
 use aex::connection::manager::ConnectionManager;
 use aex::connection::node::Node;
-use aex::connection::types::IDExtractor;
 use aex::connection::entry::ConnectionEntry;
 use aex::tcp::types::{RawCodec, Codec, Command, TCPCommand, TCPFrame};
 use tokio_util::sync::CancellationToken;
@@ -42,9 +41,8 @@ async fn test_p2p_bidirectional_basics() {
     let manager_a_clone = manager_a.clone();
     tokio::spawn(async move {
         let (socket, peer) = listener_a.accept().await.unwrap();
-        let extractor: IDExtractor<RawCodec> = Arc::new(|c: &RawCodec| c.id());
         
-        let pipeline = ConnectionEntry::default_pipeline::<RawCodec, RawCodec>(peer, true, extractor);
+        let pipeline = ConnectionEntry::default_pipeline::<RawCodec, RawCodec>(peer, true);
         
         let (token, handle, ctx) = ConnectionEntry::start::<RawCodec, RawCodec, _, _>(
             manager_a_clone.cancel_token.clone(),
@@ -82,9 +80,8 @@ async fn test_p2p_bidirectional_basics() {
     let manager_b_clone = manager_b.clone();
     tokio::spawn(async move {
         let (socket, peer) = listener_b.accept().await.unwrap();
-        let extractor: IDExtractor<RawCodec> = Arc::new(|c: &RawCodec| c.id());
         
-        let pipeline = ConnectionEntry::default_pipeline::<RawCodec, RawCodec>(peer, true, extractor);
+        let pipeline = ConnectionEntry::default_pipeline::<RawCodec, RawCodec>(peer, true);
         
         let (token, handle, ctx) = ConnectionEntry::start::<RawCodec, RawCodec, _, _>(
             manager_b_clone.cancel_token.clone(),
@@ -162,8 +159,7 @@ async fn test_p2p_bidirectional_stress() {
             tokio::select! {
                 result = listener.accept() => {
                     if let Ok((socket, peer)) = result {
-                        let extractor: IDExtractor<RawCodec> = Arc::new(|c: &RawCodec| c.id());
-                        let pipeline = ConnectionEntry::default_pipeline::<RawCodec, RawCodec>(peer, true, extractor);
+                        let pipeline = ConnectionEntry::default_pipeline::<RawCodec, RawCodec>(peer, true);
                         let tx_inner = tx_clone.clone();
                         
                         let (token, handle, ctx) = ConnectionEntry::start::<RawCodec, RawCodec, _, _>(

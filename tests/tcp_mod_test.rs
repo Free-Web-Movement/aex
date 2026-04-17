@@ -2,7 +2,10 @@
 mod tests {
     #[test]
     fn test_tcp_router_creation() {
-        let router = aex::tcp::router::Router::new();
-        assert!(router.handlers.is_empty());
+        use aex::tcp::router::Router;
+        use aex::tcp::types::RawCodec;
+
+        let router: Router<RawCodec, RawCodec> = Router::new();
+        assert!(router.get_extractor().is_none());
     }
 }

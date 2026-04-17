@@ -17,22 +17,36 @@ pub type Doer<F, C> = Box<
         + 'static,
 >;
 
-pub struct Router {
+pub struct Router<F = (), C = ()> {
     pub handlers: HashMap<u32, Vec<Box<dyn Any + Send + Sync>>>,
+    extractor: Option<Arc<dyn Fn(&C) -> u32 + Send + Sync>>,
+    _phantom: std::marker::PhantomData<(F, C)>,
 }
 
-impl Router {
+impl<F, C> Router<F, C> {
     pub fn new() -> Self {
         Self {
             handlers: HashMap::new(),
+            extractor: None,
+            _phantom: std::marker::PhantomData,
         }
     }
 
-    /// 修复语法：正确构建 Pin<Box<dyn Future>>
-    pub fn on<F, C>(&mut self, key: u32, f: Doer<F, C>, middlewares: Vec<Doer<F, C>>)
+    pub fn extractor<E: Fn(&C) -> u32 + Send + Sync + 'static>(mut self, extractor: E) -> Self {
+        self.extractor = Some(Arc::new(extractor));
+        self
+    }
+
+    pub fn get_extractor(&self) -> Option<&Arc<dyn Fn(&C) -> u32 + Send + Sync>> {
+        self.extractor.as_ref()
+    }
+
+    pub fn on<F2, C2>(&mut self, key: u32, f: Doer<F2, C2>, middlewares: Vec<Doer<F2, C2>>)
     where
         F: TCPFrame,
         C: TCPCommand,
+        F2: TCPFrame,
+        C2: TCPCommand,
     {
         // 1. 创建统一的线性链条
         // 预分配容量：middlewares 数量 + 1 个 executor
@@ -51,16 +65,17 @@ impl Router {
     }
 
     /// 核心分发逻辑
-    pub async fn handle_frame<F, C>(
+    pub async fn handle_frame(
         &self,
-        ctx: Arc<Mutex<Context>>, // 假设你的 Context 定义是 Context<R, W>
+        ctx: Arc<Mutex<Context>>,
         frame: F,
-        extractor: IDExtractor<C>,
     ) -> anyhow::Result<bool>
     where
         F: TCPFrame,
         C: TCPCommand,
     {
+        let extractor = self.extractor.as_ref()
+            .ok_or_else(|| anyhow::anyhow!("TCP extractor not set"))?;
         if !frame.validate() {
             return Ok(false); // 校验失败，跳过此帧
         }
@@ -99,15 +114,17 @@ impl Router {
         Ok(true)
     }
 
-    pub async fn handle<F, C>(
+    pub async fn handle(
         &self,
         ctx: Arc<Mutex<Context>>,
-        extractor: IDExtractor<C>,
     ) -> anyhow::Result<()>
     where
         F: TCPFrame,
         C: TCPCommand,
     {
+        let extractor = self.extractor.as_ref()
+            .ok_or_else(|| anyhow::anyhow!("TCP extractor not set"))?;
+        
         let mut session_buf: Vec<u8> = Vec::with_capacity(4096);
         let mut buf = vec![0u8; 1024];
 
@@ -143,7 +160,7 @@ impl Router {
                 match <F as Codec>::decode_with_len(&session_buf) {
                     std::result::Result::Ok((frame, consumed)) => {
                         let should_continue = self
-                            .handle_frame::<F, C>(ctx.clone(), frame, extractor.clone())
+                            .handle_frame(ctx.clone(), frame)
                             .await?;
 
                         session_buf.drain(0..consumed);

@@ -124,15 +124,15 @@ async fn test_mixed_protocol_server() {
             None,
         );
 
-        let mut tr = TcpRouter::new();
-        tr.on::<RawCodec, RawCodec>(
+        let mut tr = TcpRouter::<RawCodec, RawCodec>::new().extractor(|c: &RawCodec| c.id());
+        tr.on(
             10,
-            Box::new(|_, _, _| Box::pin(async move { Ok(true) }).boxed()),
+            Box::new(|_, _: RawCodec, _: RawCodec| Box::pin(async move { Ok(true) }).boxed()),
             vec![],
         );
 
-        let mut ur = UdpRouter::new();
-        ur.on::<RawCodec, RawCodec, _, _>(20, |_, _, _, addr, socket| async move {
+        let mut ur = UdpRouter::<RawCodec, RawCodec>::new().extractor(|c: &RawCodec| c.id());
+        ur.on(20, |_, _: RawCodec, _: RawCodec, addr, socket| async move {
             socket.send_to(b"udp_ok", addr).await?;
             Ok(true)
         });
@@ -144,14 +144,14 @@ async fn test_mixed_protocol_server() {
         server.addr = actual_addr;
         let server = server
             .http(hr)
-            .tcp::<RawCodec>(tr, Arc::new(|c: &RawCodec| c.id()))
-            .udp::<RawCodec>(ur, Arc::new(|c: &RawCodec| c.id()))
+            .tcp(tr)
+            .udp(ur)
             .http2()
             .clone();
 
         tokio::spawn(async move {
             if let Err(e) = server
-                .start()
+                .start_with_protocols::<RawCodec, RawCodec>()
                 .await
             {
                 eprintln!("Server exit with error: {}", e);

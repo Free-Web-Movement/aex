@@ -1,12 +1,8 @@
 #[cfg(test)]
 mod tests {
-    use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
     use std::sync::Arc;
-    use std::pin::Pin;
-    use std::task::{Context, Poll};
 
-    use aex::udp::router::{Router, UdpHandler};
-    use aex::connection::global::GlobalContext;
+    use aex::udp::router::{Router as UdpRouter, UdpHandler};
     use aex::tcp::types::{Codec, Command, Frame};
     use bincode::{Decode, Encode};
     use serde::{Deserialize, Serialize};
@@ -57,21 +53,22 @@ mod tests {
 
     #[test]
     fn test_udp_router_new_with_handler() {
-        let router = Router::new_with_handler();
+        let router = UdpRouter::<TestUdpFrame, TestUdpCommand>::new_with_handler();
         assert_eq!(router.handler_count(), 1);
     }
 
     #[test]
     fn test_udp_router_new() {
-        let router = Router::new();
+        let router = UdpRouter::<TestUdpFrame, TestUdpCommand>::new();
         assert!(router.handlers.is_empty());
     }
 
     #[test]
     fn test_udp_router_on() {
-        let mut router = Router::new();
+        let mut router = UdpRouter::<TestUdpFrame, TestUdpCommand>::new()
+            .extractor(|c: &TestUdpCommand| c.id());
 
-        router.on::<TestUdpFrame, TestUdpCommand, _, _>(
+        router.on(
             100,
             |_global, _frame, _cmd, _addr, _socket| {
                 Box::pin(async { Ok(true) })
@@ -84,23 +81,24 @@ mod tests {
 
     #[test]
     fn test_udp_router_on_multiple_handlers() {
-        let mut router = Router::new();
+        let mut router = UdpRouter::<TestUdpFrame, TestUdpCommand>::new()
+            .extractor(|c: &TestUdpCommand| c.id());
 
-        router.on::<TestUdpFrame, TestUdpCommand, _, _>(
+        router.on(
             1,
             |_global, _frame, _cmd, _addr, _socket| {
                 Box::pin(async { Ok(true) })
             },
         );
 
-        router.on::<TestUdpFrame, TestUdpCommand, _, _>(
+        router.on(
             2,
             |_global, _frame, _cmd, _addr, _socket| {
                 Box::pin(async { Ok(true) })
             },
         );
 
-        router.on::<TestUdpFrame, TestUdpCommand, _, _>(
+        router.on(
             3,
             |_global, _frame, _cmd, _addr, _socket| {
                 Box::pin(async { Ok(false) })
@@ -112,16 +110,17 @@ mod tests {
 
     #[test]
     fn test_udp_router_handler_replacement() {
-        let mut router = Router::new();
+        let mut router = UdpRouter::<TestUdpFrame, TestUdpCommand>::new()
+            .extractor(|c: &TestUdpCommand| c.id());
 
-        router.on::<TestUdpFrame, TestUdpCommand, _, _>(
+        router.on(
             100,
             |_global, _frame, _cmd, _addr, _socket| {
                 Box::pin(async { Ok(true) })
             },
         );
 
-        router.on::<TestUdpFrame, TestUdpCommand, _, _>(
+        router.on(
             100,
             |_global, _frame, _cmd, _addr, _socket| {
                 Box::pin(async { Ok(false) })
@@ -133,11 +132,10 @@ mod tests {
 
     #[test]
     fn test_udp_router_handler_downcast() {
-        use std::any::Any;
+        let mut router = UdpRouter::<TestUdpFrame, TestUdpCommand>::new()
+            .extractor(|c: &TestUdpCommand| c.id());
 
-        let mut router = Router::new();
-
-        router.on::<TestUdpFrame, TestUdpCommand, _, _>(
+        router.on(
             100,
             |_global, _frame, _cmd, _addr, _socket| {
                 Box::pin(async { Ok(true) })
@@ -150,7 +148,7 @@ mod tests {
 
     #[test]
     fn test_udp_router_handler_arc() {
-        let router = Router::new();
+        let router = UdpRouter::<TestUdpFrame, TestUdpCommand>::new();
         let arc_router = Arc::new(router);
         
         assert_eq!(arc_router.handlers.len(), 0);
@@ -158,9 +156,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_udp_router_handler_traits() {
-        let mut router = Router::new();
+        let mut router = UdpRouter::<TestUdpFrame, TestUdpCommand>::new()
+            .extractor(|c: &TestUdpCommand| c.id());
 
-        router.on::<TestUdpFrame, TestUdpCommand, _, _>(1, move |_, _, _, _, _| {
+        router.on(1, move |_, _, _, _, _| {
             Box::pin(async { Ok(true) })
         });
 
@@ -173,9 +172,10 @@ mod tests {
 
     #[test]
     fn test_udp_router_frame_with_different_commands() {
-        let mut router = Router::new();
+        let mut router = UdpRouter::<TestUdpFrame, TestUdpCommand>::new()
+            .extractor(|c: &TestUdpCommand| c.id());
 
-        router.on::<TestUdpFrame, TestUdpCommand, _, _>(
+        router.on(
             1,
             |_global, _frame, cmd, _addr, _socket| {
                 Box::pin(async move {

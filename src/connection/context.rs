@@ -94,19 +94,31 @@ impl TypeMapExt for ConcurrentTypeMap {
 }
 
 /// Get TCP router from global context
-pub fn get_tcp_router(global: &ConcurrentTypeMap) -> Option<Arc<crate::tcp::router::Router>> {
+pub fn get_tcp_router<F, C>(
+    global: &ConcurrentTypeMap,
+) -> Option<Arc<crate::tcp::router::Router<F, C>>>
+where
+    F: crate::tcp::types::TCPFrame,
+    C: crate::tcp::types::TCPCommand,
+{
     global.get(&TypeId::of::<TcpRouterKey>()).and_then(|r| {
         r.value()
-            .downcast_ref::<Arc<crate::tcp::router::Router>>()
+            .downcast_ref::<Arc<crate::tcp::router::Router<F, C>>>()
             .cloned()
     })
 }
 
 /// Get UDP router from global context
-pub fn get_udp_router(global: &ConcurrentTypeMap) -> Option<Arc<crate::udp::router::Router>> {
+pub fn get_udp_router<F, C>(
+    global: &ConcurrentTypeMap,
+) -> Option<Arc<crate::udp::router::Router<F, C>>>
+where
+    F: crate::tcp::types::Frame + Send + Sync + Clone + 'static,
+    C: crate::tcp::types::Command + Send + Sync + 'static,
+{
     global.get(&TypeId::of::<UdpRouterKey>()).and_then(|r| {
         r.value()
-            .downcast_ref::<Arc<crate::udp::router::Router>>()
+            .downcast_ref::<Arc<crate::udp::router::Router<F, C>>>()
             .cloned()
     })
 }

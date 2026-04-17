@@ -7,7 +7,7 @@
 //! ```rust,ignore
 //! use aex::http::router::{NodeType, Router as HttpRouter};
 //! use aex::server::HTTPServer;
-//! use aex::tcp::types::RawCodec;
+//! use aex::tcp::types::Command;
 //! use aex::exe;
 //! use std::net::SocketAddr;
 //! use std::sync::Arc;
@@ -33,12 +33,11 @@
 use crate::connection::context::TypeMapExt;
 use crate::connection::entry::ConnectionEntry;
 use crate::connection::global::GlobalContext;
-use crate::connection::types::IDExtractor;
 use crate::crypto::session_key_manager::PairedSessionKey;
 use crate::http::middlewares::websocket::WebSocket;
 use crate::http::router::Router as HttpRouter;
 use crate::tcp::router::Router as TcpRouter;
-use crate::tcp::types::{TCPCommand, TCPFrame, RawCodec};
+use crate::tcp::types::Command;
 use crate::udp::router::Router as UdpRouter;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -47,7 +46,7 @@ use tokio::net::UdpSocket;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
-type Extractor = Arc<dyn Fn(&RawCodec) -> u32 + Send + Sync>;
+type Extractor = Arc<dyn Fn(&dyn std::any::Any) -> u32 + Send + Sync>;
 
 /// HTTP versions to support
 #[derive(Clone, Default)]
@@ -96,8 +95,6 @@ impl HttpVersions {
 pub struct Server {
     pub addr: SocketAddr,
     pub globals: Arc<GlobalContext>,
-    tcp_extractor: Option<Extractor>,
-    udp_extractor: Option<Extractor>,
     http_versions: HttpVersions,
     ws_handler: Option<WebSocket>,
 }
@@ -111,8 +108,6 @@ impl Server {
                 addr,
                 Some(Arc::new(Mutex::new(PairedSessionKey::new(16)))),
             ))),
-            tcp_extractor: None,
-            udp_extractor: None,
             http_versions: HttpVersions::v1(),
             ws_handler: None,
         }
@@ -171,126 +166,134 @@ impl Server {
         self
     }
 
-    /// Sets the TCP router with extractor.
-    pub fn tcp<C: 'static>(mut self, router: TcpRouter, extractor: Arc<dyn Fn(&C) -> u32 + Send + Sync>) -> Self {
+    /// Sets the TCP router (with extractor set via router.extractor()).
+    pub fn tcp<F, C>(mut self, router: TcpRouter<F, C>) -> Self
+    where
+        F: crate::tcp::types::TCPFrame + 'static,
+        C: crate::tcp::types::TCPCommand + 'static,
+    {
         self.globals.routers.insert(
             std::any::TypeId::of::<crate::connection::context::TcpRouterKey>(),
             Box::new(Arc::new(router)),
         );
-        self.tcp_extractor = Some(Arc::new(move |c: &RawCodec| {
-            let any = c as &dyn std::any::Any;
-            if let Some(c) = any.downcast_ref::<C>() {
-                extractor(c)
-            } else {
-                0
-            }
-        }));
         self
     }
 
-    /// Sets the UDP router with extractor.
-    pub fn udp<C: 'static>(mut self, router: UdpRouter, extractor: Arc<dyn Fn(&C) -> u32 + Send + Sync>) -> Self {
+    /// Sets the UDP router (with extractor set via router.extractor()).
+    pub fn udp<F, C>(mut self, router: UdpRouter<F, C>) -> Self
+    where
+        F: crate::tcp::types::Frame + Send + Sync + Clone + 'static,
+        C: crate::tcp::types::Command + Send + Sync + 'static,
+    {
         self.globals.routers.insert(
             std::any::TypeId::of::<crate::connection::context::UdpRouterKey>(),
             Box::new(Arc::new(router)),
         );
-        self.udp_extractor = Some(Arc::new(move |c: &RawCodec| {
-            let any = c as &dyn std::any::Any;
-            if let Some(c) = any.downcast_ref::<C>() {
-                extractor(c)
-            } else {
-                0
-            }
-        }));
         self
     }
 
-    /// Starts the server with all configured protocols.
+    /// Starts the server.
     pub async fn start(&self) -> anyhow::Result<()> {
-        let extractor = self.tcp_extractor.clone().unwrap_or_else(|| Arc::new(|_: &RawCodec| 0));
+        let server = Arc::new(self.clone());
+
+        let has_tcp = self.globals.routers.get::<std::any::TypeId>(&std::any::TypeId::of::<crate::connection::context::TcpRouterKey>()).is_some();
+        let has_udp = self.globals.routers.get::<std::any::TypeId>(&std::any::TypeId::of::<crate::connection::context::UdpRouterKey>()).is_some();
+        let has_http = self.globals.routers.get_value::<Arc<HttpRouter>>().is_some();
+
+        if !has_tcp && !has_udp && has_http {
+            let http_router = server.globals.routers.get_value::<Arc<HttpRouter>>().unwrap();
+            let router = http_router.clone();
+            let globals = server.globals.clone();
+            
+            tokio::spawn(async move {
+                let listener = match TcpListener::bind(globals.addr).await {
+                    Ok(l) => l,
+                    Err(e) => {
+                        tracing::error!("HTTP bind failed: {}", e);
+                        return;
+                    }
+                };
+                tracing::info!("HTTP listener started on {}", globals.addr);
+
+                loop {
+                    match listener.accept().await {
+                        Ok((socket, peer_addr)) => {
+                            let router = router.clone();
+                            let globals = globals.clone();
+                            tokio::spawn(async move {
+                                use tokio::io::{BufReader, BufWriter};
+                                
+                                let (reader, writer) = socket.into_split();
+                                let reader = Box::new(BufReader::new(reader)) as Box<dyn tokio::io::AsyncBufRead + Send + Sync + Unpin>;
+                                let writer = Box::new(BufWriter::new(writer)) as Box<dyn tokio::io::AsyncWrite + Send + Sync + Unpin>;
+                                
+                                let mut ctx = crate::connection::context::Context::new(
+                                    Some(reader), Some(writer), globals, peer_addr,
+                                );
+                                
+                                if ctx.req().parse_to_local().await.is_ok() {
+                                    if router.on_request(&mut ctx).await {
+                                        let _ = ctx.res().send_response().await;
+                                    } else {
+                                        let _ = ctx.res().send_failure().await;
+                                    }
+                                }
+                            });
+                        }
+                        Err(e) => {
+                            tracing::warn!("Accept error: {}", e);
+                        }
+                    }
+                }
+            });
+        }
+
+        Ok(())
+    }
+
+    /// Starts the server with TCP/UDP protocols.
+    pub async fn start_with_protocols<F, C>(&self) -> anyhow::Result<()>
+    where
+        F: crate::tcp::types::TCPFrame + 'static,
+        C: crate::tcp::types::TCPCommand + 'static,
+    {
         let server = Arc::new(self.clone());
 
         // --- UDP ---
-        if self.udp_extractor.is_some() {
+        let has_udp = self.globals.routers.get::<std::any::TypeId>(&std::any::TypeId::of::<crate::connection::context::UdpRouterKey>()).is_some();
+        if has_udp {
             let udp_token = CancellationToken::new();
             let udp_loop_token = udp_token.clone();
             let server_udp = server.clone();
-            let extractor_udp = self.udp_extractor.clone().unwrap();
 
             let udp_handle = tokio::spawn(async move {
-                let _ = server_udp.start_udp(extractor_udp, udp_loop_token).await;
+                let _ = server_udp.start_udp::<F, C>(udp_loop_token).await;
             });
             server.globals.add_exit("udp", udp_token, udp_handle.abort_handle()).await;
         }
 
         // --- TCP ---
-        if self.tcp_extractor.is_some() {
+        let has_tcp = self.globals.routers.get::<std::any::TypeId>(&std::any::TypeId::of::<crate::connection::context::TcpRouterKey>()).is_some();
+        if has_tcp {
             let tcp_token = CancellationToken::new();
             let tcp_loop_token = tcp_token.clone();
             let server_tcp = server.clone();
 
             let tcp_handle = tokio::spawn(async move {
-                let _ = server_tcp.start_tcp(extractor, tcp_loop_token).await;
+                let _ = server_tcp.start_tcp::<F, C>(tcp_loop_token).await;
             });
             server.globals.add_exit("tcp", tcp_token, tcp_handle.abort_handle()).await;
-        }
-
-        // --- HTTP (if no TCP/UDP) ---
-        if self.tcp_extractor.is_none() && self.udp_extractor.is_none() {
-            let http_router = server.globals.routers.get_value::<Arc<HttpRouter>>();
-            if let Some(router) = http_router {
-                let router = router.clone();
-                let globals = server.globals.clone();
-                
-                tokio::spawn(async move {
-                    let listener = match TcpListener::bind(globals.addr).await {
-                        Ok(l) => l,
-                        Err(e) => {
-                            tracing::error!("HTTP bind failed: {}", e);
-                            return;
-                        }
-                    };
-                    tracing::info!("HTTP listener started on {}", globals.addr);
-
-                    loop {
-                        match listener.accept().await {
-                            Ok((socket, peer_addr)) => {
-                                let router = router.clone();
-                                let globals = globals.clone();
-                                tokio::spawn(async move {
-                                    use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader, BufWriter};
-                                    
-                                    let (reader, writer) = socket.into_split();
-                                    let reader = Box::new(BufReader::new(reader)) as Box<dyn tokio::io::AsyncBufRead + Send + Sync + Unpin>;
-                                    let writer = Box::new(BufWriter::new(writer)) as Box<dyn tokio::io::AsyncWrite + Send + Sync + Unpin>;
-                                    
-                                    let mut ctx = crate::connection::context::Context::new(
-                                        Some(reader), Some(writer), globals, peer_addr,
-                                    );
-                                    
-                                    if ctx.req().parse_to_local().await.is_ok() {
-                                        if router.on_request(&mut ctx).await {
-                                            let _ = ctx.res().send_response().await;
-                                        } else {
-                                            let _ = ctx.res().send_failure().await;
-                                        }
-                                    }
-                                });
-                            }
-                            Err(e) => {
-                                tracing::warn!("Accept error: {}", e);
-                            }
-                        }
-                    }
-                });
-            }
         }
 
         Ok(())
     }
 
     /// TCP 核心分发循环
-    pub async fn start_tcp(&self, extractor: Extractor, loop_token: CancellationToken) -> anyhow::Result<()> {
+    pub async fn start_tcp<F, C>(&self, loop_token: CancellationToken) -> anyhow::Result<()>
+    where
+        F: crate::tcp::types::TCPFrame + 'static,
+        C: crate::tcp::types::TCPCommand + 'static,
+    {
         let listener = TcpListener::bind(self.addr).await?;
         tracing::info!("TCP listener started on {}", self.addr);
 
@@ -328,10 +331,10 @@ impl Server {
                         }
                     }
 
-                    let pipeline = ConnectionEntry::default_pipeline::<RawCodec, RawCodec>(
-                        peer_addr, true, extractor.clone()
+                    let pipeline = ConnectionEntry::default_pipeline::<F, C>(
+                        peer_addr, true
                     );
-                    let (conn_token, abort_handle, ctx) = ConnectionEntry::start::<RawCodec, RawCodec, _, _>(
+                    let (conn_token, abort_handle, ctx) = ConnectionEntry::start::<F, C, _, _>(
                         manager.cancel_token.clone(), socket, peer_addr, global.clone(), pipeline,
                     );
 
@@ -343,14 +346,18 @@ impl Server {
     }
 
     /// UDP 核心分发循环
-    pub async fn start_udp(&self, extractor: Extractor, loop_token: CancellationToken) -> anyhow::Result<()> {
+    pub async fn start_udp<F, C>(&self, loop_token: CancellationToken) -> anyhow::Result<()>
+    where
+        F: crate::tcp::types::Frame + Send + Sync + Clone + 'static,
+        C: crate::tcp::types::Command + Send + Sync + 'static,
+    {
         let socket = Arc::new(UdpSocket::bind(self.addr).await?);
         tracing::info!("UDP listener started on {}", self.addr);
 
-        let rt = self.globals.routers.get_value::<Arc<UdpRouter>>()
+        let rt = self.globals.routers.get_value::<Arc<UdpRouter<F, C>>>()
             .ok_or_else(|| anyhow::anyhow!("UDP router not found"))?;
 
-        rt.handle::<RawCodec, RawCodec>(self.globals.clone(), socket, extractor).await
+        rt.handle(self.globals.clone(), socket).await
     }
 }
 

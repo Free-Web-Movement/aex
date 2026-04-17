@@ -14,7 +14,7 @@ mod tests {
 
     #[test]
     fn test_router_new() {
-        let router = Router::new();
+        let router = Router::<RawCodec, RawCodec>::new();
         assert!(router.handlers.is_empty());
     }
 
@@ -22,7 +22,7 @@ mod tests {
     fn test_router_on_and_handler_count() {
         use futures::FutureExt;
 
-        let mut router = Router::new();
+        let mut router = Router::<RawCodec, RawCodec>::new().extractor(|c: &RawCodec| c.id());
 
         router.on::<RawCodec, RawCodec>(
             1,
@@ -45,7 +45,7 @@ mod tests {
     fn test_router_on_with_middleware() {
         use futures::FutureExt;
 
-        let mut router = Router::new();
+        let mut router = Router::<RawCodec, RawCodec>::new().extractor(|c: &RawCodec| c.id());
 
         let middleware: aex::tcp::router::Doer<RawCodec, RawCodec> = 
             Box::new(|_, _, _| Box::pin(async { Ok(true) }).boxed());
@@ -65,7 +65,7 @@ mod tests {
     fn test_router_handler_replacement() {
         use futures::FutureExt;
 
-        let mut router = Router::new();
+        let mut router = Router::<RawCodec, RawCodec>::new().extractor(|c: &RawCodec| c.id());
 
         router.on::<RawCodec, RawCodec>(
             100,
@@ -86,7 +86,7 @@ mod tests {
     async fn test_router_handle_frame_invalid_validate() {
         use aex::connection::context::Context;
 
-        let router = Router::new();
+        let router = Router::<RawCodec, RawCodec>::new().extractor(|c: &RawCodec| c.id());
         let addr: SocketAddr = "127.0.0.1:8080".parse().unwrap();
         let global = GlobalContext::new(addr, None);
         let ctx = Arc::new(Mutex::new(Context::new(
@@ -96,18 +96,12 @@ mod tests {
             addr,
         )));
 
-        // Create a RawCodec with insufficient data to decode - this simulates an invalid frame
         let frame = RawCodec(vec![0xFF, 0x00]);
 
         let result = router
-            .handle_frame::<RawCodec, RawCodec>(
-                ctx,
-                frame,
-                Arc::new(|c: &RawCodec| c.id()),
-            )
+            .handle_frame(ctx, frame)
             .await;
 
-        // Should return Ok(false) or Ok(true) - either way it handled the error
         assert!(result.is_ok());
     }
 
@@ -116,7 +110,7 @@ mod tests {
         use aex::connection::context::Context;
         use futures::FutureExt;
 
-        let mut router = Router::new();
+        let mut router = Router::<RawCodec, RawCodec>::new().extractor(|c: &RawCodec| c.id());
         let addr: SocketAddr = "127.0.0.1:8080".parse().unwrap();
         let global = GlobalContext::new(addr, None);
         
@@ -133,15 +127,10 @@ mod tests {
             addr,
         )));
 
-        // Create a RawCodec with empty payload
         let frame = RawCodec(vec![]);
 
         let result = router
-            .handle_frame::<RawCodec, RawCodec>(
-                ctx,
-                frame,
-                Arc::new(|_: &RawCodec| 1),
-            )
+            .handle_frame(ctx, frame)
             .await;
 
         assert!(result.unwrap());
@@ -151,7 +140,7 @@ mod tests {
     async fn test_router_handle_no_handler() {
         use aex::connection::context::Context;
 
-        let mut router = Router::new();
+        let router = Router::<RawCodec, RawCodec>::new().extractor(|c: &RawCodec| c.id());
         let addr: SocketAddr = "127.0.0.1:8080".parse().unwrap();
         let global = GlobalContext::new(addr, None);
 
@@ -166,11 +155,7 @@ mod tests {
         
         if let Some(frame) = frame {
             let result = router
-                .handle_frame::<RawCodec, RawCodec>(
-                    ctx,
-                    frame,
-                    Arc::new(|c: &RawCodec| c.id()),
-                )
+                .handle_frame(ctx, frame)
                 .await;
             
             assert!(result.unwrap());

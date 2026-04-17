@@ -32,7 +32,7 @@
 //!
 //!     HTTPServer::new(addr, None)
 //!         .http(router)
-//!         .start::<RawCodec, RawCodec>(Arc::new(|c| c.id()))
+//!         .start_with_protocols::<RawCodec, RawCodec>(Arc::new(|c| c.id()))
 //!         .await?;
 //!     Ok(())
 //! }

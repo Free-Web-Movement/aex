@@ -476,7 +476,6 @@ mod tests {
                 |_ctx| async move {
                     // 业务逻辑：收到连接后打印或执行简单操作
                 },
-                Arc::new(|cmd: &RawCodec| cmd.id()),
                 Some(10),
             )
             .await;
@@ -513,7 +512,6 @@ mod tests {
                 |_ctx| async move {
                     // 业务逻辑：收到连接后打印或执行简单操作
                 },
-                Arc::new(|cmd: &RawCodec| cmd.id()),
                 Some(10),
             )
             .await;
@@ -535,7 +533,6 @@ mod tests {
                 |_ctx| async move {
                     // 业务逻辑：收到连接后打印或执行简单操作
                 },
-                Arc::new(|cmd: &RawCodec| cmd.id()),
                 Some(10),
             )
             .await;
@@ -561,7 +558,6 @@ mod tests {
                     // 业务逻辑：收到连接后打印或执行简单操作
                     let _ = tx.send(true);
                 },
-                Arc::new(|cmd: &RawCodec| cmd.id()),
                 Some(10),
             )
             .await;

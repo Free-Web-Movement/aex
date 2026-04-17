@@ -2,7 +2,6 @@ use crate::connection::context::{BoxReader, BoxWriter, Context, TypeMapExt};
 use crate::connection::global::GlobalContext;
 use crate::connection::heartbeat::{HeartbeatConfig, HeartbeatManager};
 use crate::connection::node::Node;
-use crate::connection::types::IDExtractor;
 use crate::tcp::types::{TCPCommand, TCPFrame};
 
 use crate::http::router::Router as HttpRouter;
@@ -134,7 +133,6 @@ impl ConnectionEntry {
     pub fn default_pipeline<F, C>(
         peer_addr: std::net::SocketAddr,
         is_server: bool,
-        extractor: IDExtractor<C>,
     ) -> impl FnOnce(Arc<Mutex<Context>>) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>>
     where
         F: TCPFrame,
@@ -159,8 +157,8 @@ impl ConnectionEntry {
                 }
 
                 // 3. 自定义 TCP 路由处理
-                if let Some(tr) = crate::connection::context::get_tcp_router(&gtx.routers) {
-                    return tr.handle::<F, C>(ctx, extractor).await;
+                if let Some(tr) = crate::connection::context::get_tcp_router::<F, C>(&gtx.routers) {
+                    return tr.handle(ctx).await;
                 }
 
                 Ok(())

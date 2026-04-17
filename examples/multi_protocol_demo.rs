@@ -112,7 +112,8 @@ async fn main() -> anyhow::Result<()> {
     // ═══════════════════════════════════════════════════════════════════════
     // TCP Router
     // ═══════════════════════════════════════════════════════════════════════
-    let mut tcp_router = TcpRouter::new();
+    let mut tcp_router = TcpRouter::<RawCodec, RawCodec>::new();
+    let mut tcp_router = tcp_router.extractor(|c: &RawCodec| c.id());
 
     tcp_router.on::<RawCodec, RawCodec>(
         0x01,
@@ -141,9 +142,10 @@ async fn main() -> anyhow::Result<()> {
     // ═══════════════════════════════════════════════════════════════════════
     // UDP Router
     // ═══════════════════════════════════════════════════════════════════════
-    let mut udp_router = UdpRouter::new();
+    let mut udp_router = UdpRouter::<RawCodec, RawCodec>::new();
+    let mut udp_router = udp_router.extractor(|c: &RawCodec| c.id());
 
-    udp_router.on::<RawCodec, RawCodec, _, _>(
+    udp_router.on(
         0x01,
         move |_global: Arc<GlobalContext>,
                _frame: RawCodec,
@@ -160,7 +162,7 @@ async fn main() -> anyhow::Result<()> {
         },
     );
 
-    udp_router.on::<RawCodec, RawCodec, _, _>(
+    udp_router.on(
         0x02,
         move |_global: Arc<GlobalContext>,
                _frame: RawCodec,
@@ -184,9 +186,9 @@ async fn main() -> anyhow::Result<()> {
     // ═══════════════════════════════════════════════════════════════════════
     Server::new(addr, None)
         .http(http_router)
-        .tcp::<RawCodec>(tcp_router, Arc::new(|c: &RawCodec| c.id()))
-        .udp::<RawCodec>(udp_router, Arc::new(|c: &RawCodec| c.id()))
-        .start()
+        .tcp::<RawCodec, RawCodec>(tcp_router)
+        .udp::<RawCodec, RawCodec>(udp_router)
+        .start_with_protocols::<RawCodec, RawCodec>()
         .await?;
 
     Ok(())

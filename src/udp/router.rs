@@ -9,8 +9,10 @@ use crate::connection::global::GlobalContext;
 use crate::connection::types::IDExtractor;
 use crate::tcp::types::{Codec, Command, Frame};
 
-pub struct Router {
+pub struct Router<F = (), C = ()> {
     pub handlers: HashMap<u32, Box<dyn Any + Send + Sync>>,
+    extractor: Option<Arc<dyn Fn(&C) -> u32 + Send + Sync>>,
+    _phantom: std::marker::PhantomData<(F, C)>,
 }
 
 pub type UdpHandler<F, C> = dyn Fn(
@@ -21,18 +23,36 @@ pub type UdpHandler<F, C> = dyn Fn(
         Arc<UdpSocket>,
     ) -> Pin<Box<dyn Future<Output = anyhow::Result<bool>> + Send>>
     + Send
-    + Sync;
+    + Sync
+    + 'static;
 
-impl Router {
+impl<F, C> Router<F, C> {
     pub fn new() -> Self {
         Self {
             handlers: HashMap::new(),
+            extractor: None,
+            _phantom: std::marker::PhantomData,
         }
     }
 
-    pub fn new_with_handler() -> Self {
+    pub fn extractor<E: Fn(&C) -> u32 + Send + Sync + 'static>(mut self, extractor: E) -> Self {
+        self.extractor = Some(Arc::new(extractor));
+        self
+    }
+
+    pub fn get_extractor(&self) -> Option<&Arc<dyn Fn(&C) -> u32 + Send + Sync>> {
+        self.extractor.as_ref()
+    }
+
+    pub fn new_with_handler() -> Self
+    where
+        F: Frame + Send + Sync + Clone + 'static,
+        C: Command + Send + Sync + 'static,
+    {
         let mut router = Self {
             handlers: HashMap::new(),
+            extractor: None,
+            _phantom: std::marker::PhantomData,
         };
         router.handlers.insert(0, Box::new(|_global: Arc<GlobalContext>, _frame: (), _cmd: (), _addr: SocketAddr, _socket: Arc<UdpSocket>| {
             Box::pin(async { Ok::<bool, anyhow::Error>(true) })
@@ -44,11 +64,10 @@ impl Router {
         self.handlers.len()
     }
 
-    // 注册 Handler 的方法与 TCP 类似，只需适配 PacketExecutor 的闭包即可
-    pub fn on<F, C, FFut, Fut>(&mut self, key: u32, f: FFut)
+    pub fn on<FFut, Fut>(&mut self, key: u32, f: FFut)
     where
-        F: Frame + Send + Sync + Clone + 'static,
-        C: Command + Send + Sync + 'static,
+        F: 'static,
+        C: 'static,
         FFut:
             Fn(Arc<GlobalContext>, F, C, SocketAddr, Arc<UdpSocket>) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = anyhow::Result<bool>> + Send + 'static,
@@ -63,16 +82,18 @@ impl Router {
         self.handlers.insert(key, Box::new(handler));
     }
 
-    pub async fn handle<F, C>(
+    pub async fn handle(
         self: Arc<Self>,
         global: Arc<GlobalContext>,
         socket: Arc<UdpSocket>,
-        extractor: IDExtractor<C>,
     ) -> anyhow::Result<()>
     where
         F: Frame + Send + Sync + Clone + 'static,
         C: Command + Send + Sync + 'static,
     {
+        let extractor = self.extractor.as_ref()
+            .ok_or_else(|| anyhow::anyhow!("UDP extractor not set"))?;
+        
         let mut buf = [0u8; 65535];
         loop {
             let (n, peer_addr) = socket.recv_from(&mut buf).await?;

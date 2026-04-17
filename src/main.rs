@@ -20,41 +20,47 @@ async fn main() -> anyhow::Result<()> {
         true
     })).register();
 
-    let mut tcp_router = TcpRouter::new();
+    let tcp_router = {
+        let mut router = TcpRouter::<RawCodec, RawCodec>::new();
+        let mut router = router.extractor(|c: &RawCodec| c.id());
+        router.on::<RawCodec, RawCodec>(
+            1001,
+            Box::new(|_ctx, _frame: RawCodec, cmd: RawCodec| {
+                Box::pin(async move {
+                    let _cmd = cmd.clone();
+                    println!("Handling command...");
+                    Ok(true)
+                })
+            }),
+            vec![],
+        );
+        router
+    };
 
-    tcp_router.on::<RawCodec, RawCodec>(
-        1001,
-        Box::new(|_ctx, _frame: RawCodec, cmd: RawCodec| {
-            Box::pin(async move {
-                let _cmd = cmd.clone();
-                println!("Handling command...");
+    let udp_router = {
+        let mut router = UdpRouter::<RawCodec, RawCodec>::new();
+        let mut router = router.extractor(|c: &RawCodec| c.id());
+        router.on(
+            2002,
+            |_global: Arc<GlobalContext>,
+             _frame: RawCodec,
+             payload: RawCodec,
+             peer,
+             socket: Arc<UdpSocket>| async move {
+                println!("[UDP] Received 2002 from {}, data: {:?}", peer, payload);
+                let response = b"UDP ACK".to_vec();
+                let _ = socket.send_to(&response, peer).await;
                 Ok(true)
-            })
-        }),
-        vec![],
-    );
-
-    let mut udp_router = UdpRouter::new();
-
-    udp_router.on::<RawCodec, RawCodec, _, _>(
-        2002,
-        |_global: Arc<GlobalContext>,
-         _frame: RawCodec,
-         payload: RawCodec,
-         peer,
-         socket: Arc<UdpSocket>| async move {
-            println!("[UDP] Received 2002 from {}, data: {:?}", peer, payload);
-            let response = b"UDP ACK".to_vec();
-            let _ = socket.send_to(&response, peer).await;
-            Ok(true)
-        },
-    );
+            },
+        );
+        router
+    };
 
     Server::new(addr, None)
         .http(http_router)
-        .tcp::<RawCodec>(tcp_router, Arc::new(|c: &RawCodec| c.id()))
-        .udp::<RawCodec>(udp_router, Arc::new(|c: &RawCodec| c.id()))
-        .start()
+        .tcp(tcp_router)
+        .udp(udp_router)
+        .start_with_protocols::<RawCodec, RawCodec>()
         .await?;
 
     Ok(())

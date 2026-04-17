@@ -59,16 +59,18 @@ async fn test_aex_server_coverage() {
         );
 
         // 3. 注册 TCP 路由 (ID 10)
-        let mut tr = TcpRouter::new();
+        let mut tr = TcpRouter::<RawCodec, RawCodec>::new();
+        let mut tr = tr.extractor(|c: &RawCodec| c.id());
         tr.on::<RawCodec, RawCodec>(
             10,
-            Box::new(|_, _, _| Box::pin(async move { Ok(true) }).boxed()),
+            Box::new(|_, _: RawCodec, _: RawCodec| Box::pin(async move { Ok(true) }).boxed()),
             vec![],
         );
 
         // 4. 注册 UDP 路由 (ID 20)
-        let mut ur = UdpRouter::new();
-        ur.on::<RawCodec, RawCodec, _, _>(20, |_, _, _, addr, socket| async move {
+        let mut ur = UdpRouter::<RawCodec, RawCodec>::new();
+        let mut ur = ur.extractor(|c: &RawCodec| c.id());
+        ur.on(20, |_, _: RawCodec, _: RawCodec, addr, socket| async move {
             socket.send_to(b"udp_ok", addr).await?;
             Ok(true)
         });
@@ -81,13 +83,13 @@ async fn test_aex_server_coverage() {
         server.addr = actual_addr;
         let server = server
             .http(hr)
-            .tcp(tr, Arc::new(|c: &RawCodec| c.id()))
-            .udp(ur, Arc::new(|c: &RawCodec| c.id()))
+            .tcp::<RawCodec, RawCodec>(tr)
+            .udp::<RawCodec, RawCodec>(ur)
             .clone();
 
         // 启动服务器
         tokio::spawn(async move {
-            if let Err(e) = server.start().await {
+            if let Err(e) = server.start_with_protocols::<RawCodec, RawCodec>().await {
                 eprintln!("Server exit with error: {}", e);
             }
         });
@@ -269,10 +271,11 @@ async fn test_server_start_tcp_only() {
     let addr: SocketAddr = "[::1]:0".parse().unwrap();
     let mut server = HTTPServer::new(addr, None);
     
-    let mut tr = TcpRouter::new();
+    let mut tr = TcpRouter::<RawCodec, RawCodec>::new();
+    let mut tr = tr.extractor(|c: &RawCodec| c.id());
     tr.on::<RawCodec, RawCodec>(
         10,
-        Box::new(|_, _, _| Box::pin(async move { Ok(true) }).boxed()),
+        Box::new(|_, _: RawCodec, _: RawCodec| Box::pin(async move { Ok(true) }).boxed()),
         vec![],
     );
     
@@ -281,11 +284,11 @@ async fn test_server_start_tcp_only() {
     drop(temp_listener);
     
     server.addr = actual_addr;
-    let server = server.tcp::<RawCodec>(tr, Arc::new(|c: &RawCodec| c.id())).clone();
+    let server = server.tcp::<RawCodec, RawCodec>(tr).clone();
     let globals = server.globals.clone();
     
     tokio::spawn(async move {
-        if let Err(e) = server.start().await {
+        if let Err(e) = server.start_with_protocols::<RawCodec, RawCodec>().await {
             eprintln!("TCP server error: {}", e);
         }
     });
@@ -301,19 +304,20 @@ async fn test_server_start_udp_only() {
     let addr: SocketAddr = "[::1]:0".parse().unwrap();
     let mut server = HTTPServer::new(addr, None);
     
-    let mut ur = UdpRouter::new();
-    ur.on::<RawCodec, RawCodec, _, _>(20, |_, _, _, _addr, _socket| async move { Ok(true) });
+    let mut ur = UdpRouter::<RawCodec, RawCodec>::new();
+    let mut ur = ur.extractor(|c: &RawCodec| c.id());
+    ur.on(20, |_, _: RawCodec, _: RawCodec, _addr, _socket| async move { Ok(true) });
     
     let socket = UdpSocket::bind(addr).await.unwrap();
     let actual_addr = socket.local_addr().unwrap();
     drop(socket);
     
     server.addr = actual_addr;
-    let server = server.udp::<RawCodec>(ur, Arc::new(|c: &RawCodec| c.id())).clone();
+    let server = server.udp::<RawCodec, RawCodec>(ur).clone();
     let globals = server.globals.clone();
     
     tokio::spawn(async move {
-        if let Err(e) = server.start().await {
+        if let Err(e) = server.start_with_protocols::<RawCodec, RawCodec>().await {
             eprintln!("UDP server error: {}", e);
         }
     });
@@ -356,23 +360,25 @@ async fn test_local_shutdown() -> anyhow::Result<()> {
     let addr: SocketAddr = "[::1]:0".parse()?; // 使用 0 端口自动分配
     
     // 需要创建 router 以启用 TCP/UDP
-    let mut tr = TcpRouter::new();
+    let mut tr = TcpRouter::<RawCodec, RawCodec>::new();
+    let mut tr = tr.extractor(|c: &RawCodec| c.id());
     tr.on::<RawCodec, RawCodec>(
         10,
-        Box::new(|_, _, _| Box::pin(async move { Ok(true) }).boxed()),
+        Box::new(|_, _: RawCodec, _: RawCodec| Box::pin(async move { Ok(true) }).boxed()),
         vec![],
     );
-    let mut ur = UdpRouter::new();
-    ur.on::<RawCodec, RawCodec, _, _>(20, |_, _, _, _addr, _socket| async move { Ok(true) });
+    let mut ur = UdpRouter::<RawCodec, RawCodec>::new();
+    let mut ur = ur.extractor(|c: &RawCodec| c.id());
+    ur.on(20, |_, _: RawCodec, _: RawCodec, _addr, _socket| async move { Ok(true) });
     
     let server = Server::new(addr, None)
-        .tcp::<RawCodec>(tr, Arc::new(|c: &RawCodec| c.id()))
-        .udp::<RawCodec>(ur, Arc::new(|c: &RawCodec| c.id()));
+        .tcp::<RawCodec, RawCodec>(tr)
+        .udp::<RawCodec, RawCodec>(ur);
     let globals = server.globals.clone();
 
     // 1. 启动服务器 (在后台 Task)
     let server_handle = tokio::spawn(async move {
-        server.start().await
+        server.start_with_protocols::<RawCodec, RawCodec>().await
     });
 
     // 给一点时间让服务器起来
@@ -434,12 +440,14 @@ async fn test_server_all_protocols_http1_http2_ws_tcp_udp() {
     );
 
     // TCP 路由
-    let mut tr = TcpRouter::new();
-    tr.on::<RawCodec, RawCodec>(10, Box::new(|_, _, _| Box::pin(async move { Ok(true) }).boxed()), vec![]);
+    let mut tr = TcpRouter::<RawCodec, RawCodec>::new();
+    let mut tr = tr.extractor(|c: &RawCodec| c.id());
+    tr.on::<RawCodec, RawCodec>(10, Box::new(|_, _: RawCodec, _: RawCodec| Box::pin(async move { Ok(true) }).boxed()), vec![]);
 
     // UDP 路由
-    let mut ur = UdpRouter::new();
-    ur.on::<RawCodec, RawCodec, _, _>(20, |_, _, _, addr, socket| async move {
+    let mut ur = UdpRouter::<RawCodec, RawCodec>::new();
+    let mut ur = ur.extractor(|c: &RawCodec| c.id());
+    ur.on(20, |_, _: RawCodec, _: RawCodec, addr, socket| async move {
         socket.send_to(b"udp_ok", addr).await?;
         Ok(true)
     });
@@ -469,13 +477,13 @@ async fn test_server_all_protocols_http1_http2_ws_tcp_udp() {
         .http(hr)
         .http2()
         .ws(ws_handler)
-        .tcp::<RawCodec>(tr, Arc::new(|c: &RawCodec| c.id()))
-        .udp::<RawCodec>(ur, Arc::new(|c: &RawCodec| c.id()))
+        .tcp::<RawCodec, RawCodec>(tr)
+        .udp::<RawCodec, RawCodec>(ur)
         .clone();
 
     // 启动服务器
     tokio::spawn(async move {
-        let _ = server.start().await;
+        let _ = server.start_with_protocols::<RawCodec, RawCodec>().await;
     });
 
     sleep(Duration::from_millis(300)).await;

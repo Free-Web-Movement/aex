@@ -18,7 +18,7 @@ use crate::{
         global::GlobalContext,
         scope::NetworkScope,
         status::ConnectionStatus,
-        types::{BiDirectionalConnections, IDExtractor},
+        types::BiDirectionalConnections,
     },
     tcp::types::{TCPCommand, TCPFrame},
 };
@@ -126,7 +126,6 @@ impl ConnectionManager {
         addr: SocketAddr,
         global: Arc<GlobalContext>,
         f: FF,
-        extractor: IDExtractor<C>,
         timeout_secs: Option<u64>,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
     where
@@ -135,7 +134,6 @@ impl ConnectionManager {
         FF: FnOnce(Arc<Mutex<Context>>) -> Fut + Send + 'static,
         Fut: std::future::Future<Output = ()> + Send + 'static,
     {
-        // 1. 检查重复连接 (利用 Manager 现有的索引)
         let ip = addr.ip();
         let scope = NetworkScope::from_ip(&ip);
         if let Some(bi_conn) = self.connections.get(&(ip, scope)) {
@@ -144,7 +142,6 @@ impl ConnectionManager {
             }
         }
 
-        // 2. 拨号：物理连接 (带超时)
         let timeout = timeout_secs.unwrap_or(10);
         let socket = match tokio::time::timeout(std::time::Duration::from_secs(timeout), tokio::net::TcpStream::connect(addr)).await {
             Ok(Ok(socket)) => socket,
@@ -155,36 +152,7 @@ impl ConnectionManager {
             }
         };
 
-        // let manager = self.clone();
-        // let extractor_inner = extractor.clone();
-
-        // 3. 定义与 start_tcp 完全一致的业务逻辑闭包
-        // 这赋予了“主动连接”同样的协议侦听与分发能力
-        // let business_logic = move |ctx: Arc<Mutex<Context>>| async move {
-        //     let gtx = {
-        //         let guard = ctx.lock().await;
-        //         let gtx = guard.global.clone();
-        //         // 注册到管理器，使外联连接也能被全局索引
-        //         gtx.manager.update(addr, false, Some(ctx.clone()));
-        //         gtx
-        //     };
-
-        //     // A. 协议嗅探：HTTP
-        //     if let Some(hr) = gtx.routers.get_value::<Arc<HttpRouter>>() {
-        //         if hr.clone().is_http(ctx.clone()).await? {
-        //             return Ok(());
-        //         }
-        //     }
-
-        //     // B. 自定义 TCP 处理
-        //     if let Some(tr) = gtx.routers.get_value::<Arc<TcpRouter>>() {
-        //         return tr.handle::<F, C>(ctx, extractor_inner).await;
-        //     }
-
-        //     Ok(())
-        // };
-
-        let pipeline = ConnectionEntry::default_pipeline::<F, C>(addr, false, extractor);
+        let pipeline = ConnectionEntry::default_pipeline::<F, C>(addr, false);
 
         // 4. 使用统一的启动器
         // 传入 manager 的 token 作为父级，获取该连接独有的 token 和 handle

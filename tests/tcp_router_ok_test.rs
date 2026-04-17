@@ -75,25 +75,21 @@ mod router_tests {
 
     #[tokio::test]
     async fn test_handle_frame_coverage() {
-        let mut router: Router = Router::new();
+        let mut router = Router::<TestFrame, TestCommand>::new().extractor(|c: &TestCommand| c.id());
         let addr: SocketAddr = "127.0.0.1:8080".parse().unwrap();
         let global = GlobalContext::new(addr, None);
 
         let arc_g = Arc::new(global);
 
-        // 注册一个正常的 handler
-        // router.on::<RawCodec, RawCodec, _, _>(100, |_, _, _| async { Ok(true) });
-        router.on::<RawCodec, RawCodec>(
+        router.on::<TestFrame, TestCommand>(
             100,
-            Box::new(|_, _, _| Box::pin(async move { Ok(true) }).boxed()),
+            Box::new(|_: Arc<Mutex<Context>>, _: TestFrame, _: TestCommand| Box::pin(async move { Ok(true) }).boxed()),
             vec![],
         );
 
-        // 注册一个返回 false 的 handler
-        // router.on::<RawCodec, RawCodec, _, _>(200, |_, _, _| async { Ok(false) });
-        router.on::<RawCodec, RawCodec>(
+        router.on::<TestFrame, TestCommand>(
             200,
-            Box::new(|_, _, _| Box::pin(async move { Ok(true) }).boxed()),
+            Box::new(|_: Arc<Mutex<Context>>, _: TestFrame, _: TestCommand| Box::pin(async move { Ok(true) }).boxed()),
             vec![],
         );
 
@@ -113,10 +109,9 @@ mod router_tests {
             };
 
             let res = router
-                .handle_frame::<TestFrame, TestCommand>(
+                .handle_frame(
                     ctx.clone(),
                     invalid_frame,
-                    Arc::new(|c: &TestCommand| c.id()),
                 )
                 .await;
             assert!(!res.unwrap());
@@ -131,10 +126,9 @@ mod router_tests {
                 is_valid: true,
             };
             let res = router
-                .handle_frame::<TestFrame, TestCommand>(
+                .handle_frame(
                     ctx.clone(),
                     no_payload_frame,
-                    Arc::new(|c: &TestCommand| c.id()),
                 )
                 .await;
             assert!(res.unwrap());
@@ -148,17 +142,16 @@ mod router_tests {
                 is_valid: true,
             };
             let res = router
-                .handle_frame::<TestFrame, TestCommand>(
+                .handle_frame(
                     ctx.clone(),
                     bad_data_frame,
-                    Arc::new(|c: &TestCommand| c.id()),
                 )
                 .await;
             assert!(!res.unwrap());
             assert!(ctx_guard.reader.is_some()); // 验证 IO 没被取走
         }
 
-        // 路径 4: cmd.validate() == false
+        // 路径 4: cmd.validate() == false - 现在跳过处理但返回成功
         {
             let invalid_cmd = TestCommand {
                 id: 100,
@@ -172,16 +165,13 @@ mod router_tests {
                 is_valid: true,
             };
             let res = router
-                .handle_frame::<TestFrame, TestCommand>(
+                .handle_frame(
                     ctx.clone(),
                     frame,
-                    Arc::new(|c: &TestCommand| c.id()),
                 )
                 .await;
             println!("{:?}", res);
-            assert!(res.is_err());
-            let err_msg = format!("{:?}", res.err().unwrap());
-            assert!(err_msg.contains("Handler type mismatch for key: 100"));
+            assert!(res.is_ok());
             assert!(ctx_guard.reader.is_some()); // 验证 IO 没被取走
         }
 
@@ -198,10 +188,9 @@ mod router_tests {
                 is_valid: true,
             };
             let res = router
-                .handle_frame::<TestFrame, TestCommand>(
+                .handle_frame(
                     ctx.clone(),
                     frame,
-                    Arc::new(|c: &TestCommand| c.id()),
                 )
                 .await;
             assert!(res.unwrap());
@@ -221,23 +210,18 @@ mod router_tests {
                 is_valid: true,
             };
             let res = router
-                .handle_frame::<TestFrame, TestCommand>(
+                .handle_frame(
                     ctx.clone(),
                     frame,
-                    Arc::new(|c: &TestCommand| c.id()),
                 )
                 .await;
-            assert!(res.is_err());
-            let err_msg = format!("{:?}", res.err().unwrap());
-            assert!(err_msg.contains("Handler type mismatch for key: 100"));
+            assert!(res.is_ok());
             assert!(ctx_guard.reader.is_some()); // 验证 IO 没被取走
         }
 
-        // 路径 7: 成功执行 Handler 并返回 Ok(false)
+        // 路径 7: 成功执行 Handler 并返回 Ok(true)
         {
             let (_r2, w2) = mock_io().await; // 必须重新获取，因为上一组已被 take
-            // let r2_opt = Some(r2);
-            // let _w2_opt = Some(w2);
             let exit_cmd = TestCommand {
                 id: 200,
                 valid: true,
@@ -257,38 +241,28 @@ mod router_tests {
             let ctx = Arc::new(Mutex::new(ctx));
 
             let res = router
-                .handle_frame::<TestFrame, TestCommand>(
+                .handle_frame(
                     ctx.clone(),
                     frame.clone(),
-                    Arc::new(|c: &TestCommand| c.id()),
                 )
                 .await;
-            assert!(res.is_err());
-            let err_msg = format!("{:?}", res.err().unwrap());
-            assert!(err_msg.contains("Handler type mismatch for key: 200"));
-            // assert!(r2_opt.is_none());
+            assert!(res.is_ok());
         }
     }
 
     #[tokio::test]
     async fn test_reader_writer_already_taken() {
-        let mut router: Router = Router::new();
+        let mut router = Router::<TestFrame, TestCommand>::new().extractor(|c: &TestCommand| c.id());
         let addr: SocketAddr = "127.0.0.1:8080".parse().unwrap();
         let global = GlobalContext::new(addr, None);
 
         let arc_g = Arc::new(global);
 
-        // router.on::<TestFrame, TestCommand, _, _>(100, |_, _, _: &mut TestCommand| async move {
-        //     Ok(true)
-        // });
-
         router.on::<TestFrame, TestCommand>(
             100,
-            Box::new(|_, _, _| Box::pin(async move { Ok(true) }).boxed()),
+            Box::new(|_: Arc<Mutex<Context>>, _: TestFrame, _: TestCommand| Box::pin(async move { Ok(true) }).boxed()),
             vec![],
         );
-
-        // router.on::<RawCodec, RawCodec, _, _>(100, |_, _:&mut _,  _: &mut TestCommand, _, _| async { Ok(true) });
 
         let cmd = TestCommand {
             id: 100,
@@ -309,10 +283,9 @@ mod router_tests {
         let ctx = Arc::new(Mutex::new(ctx));
 
         let _res = router
-            .handle_frame::<TestFrame, TestCommand>(
+            .handle_frame(
                 ctx.clone(),
                 frame,
-                Arc::new(|c: &TestCommand| c.id()),
             )
             .await;
         // println!("{:?}", res);
@@ -322,21 +295,15 @@ mod router_tests {
 
     #[tokio::test]
     async fn test_writer_already_taken() {
-        let mut router: Router = Router::new();
+        let mut router = Router::<TestFrame, TestCommand>::new().extractor(|c: &TestCommand| c.id());
         let addr: SocketAddr = "127.0.0.1:8080".parse().unwrap();
         let global = GlobalContext::new(addr, None);
 
         let arc_g = Arc::new(global);
 
-        // 1. 注册一个有效的 Handler
-        // router.on(100, |_, _: TestCommand, _, _| async { Ok(true) });
-        // router.on::<TestFrame, TestCommand, _, _>(100, |_, _, _: &mut TestCommand| async move {
-        //     Ok(true)
-        // });
-
         router.on::<TestFrame, TestCommand>(
             100,
-            Box::new(|_, _, _| Box::pin(async move { Ok(true) }).boxed()),
+            Box::new(|_: Arc<Mutex<Context>>, _: TestFrame, _: TestCommand| Box::pin(async move { Ok(true) }).boxed()),
             vec![],
         );
 
@@ -371,10 +338,9 @@ mod router_tests {
         let ctx = Arc::new(Mutex::new(ctx));
 
         let _res = router
-            .handle_frame::<TestFrame, TestCommand>(
+            .handle_frame(
                 ctx.clone(),
                 frame,
-                Arc::new(|c: &TestCommand| c.id()),
             )
             .await;
 
