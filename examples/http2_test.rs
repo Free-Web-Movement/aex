@@ -9,7 +9,7 @@ async fn main() -> anyhow::Result<()> {
     let mut router = HttpRouter::new(NodeType::Static("root".into()));
 
     router.get("/", exe!(|ctx| {
-        ctx.send("Hello from HTTP server!", None);
+        ctx.send("Hello from HTTP/2 server!", None);
         true
     })).register();
 
@@ -18,10 +18,12 @@ async fn main() -> anyhow::Result<()> {
         true
     })).register();
 
-    println!("Starting HTTP server on {}", addr);
+    println!("Starting HTTP/2 server on {}", addr);
+    println!("Use: curl --http2 http://localhost:8080/");
 
     Server::new(addr, None)
         .http(router)
+        .http2()
         .start()
         .await?;
     Ok(())

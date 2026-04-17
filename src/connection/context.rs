@@ -17,8 +17,6 @@ use std::sync::Arc;
 use tokio::io::AsyncBufRead;
 use tokio::io::AsyncWrite;
 
-use crate::tcp::router::{TcpRouter, UdpRouter};
-
 use crate::connection::global::GlobalContext;
 use crate::http::meta::HttpMetadata;
 use crate::http::protocol::header::HeaderKey;
@@ -72,17 +70,20 @@ impl LocalTypeMap {
 
 pub struct HttpRouterKey;
 pub struct TcpRouterKey;
+pub struct UdpRouterKey;
 
-pub fn get_tcp_router(global: &ConcurrentTypeMap) -> Option<Arc<crate::tcp::router::TcpRouter>> {
+pub fn get_tcp_router<F, C>(
+    global: &ConcurrentTypeMap,
+) -> Option<Arc<crate::tcp::router::Router<F, C>>>
+where
+    F: Send + Sync + 'static,
+    C: Send + Sync + 'static,
+{
     global.get(&TypeId::of::<TcpRouterKey>()).and_then(|r| {
         r.value()
-            .downcast_ref::<Arc<crate::tcp::router::TcpRouter>>()
+            .downcast_ref::<Arc<crate::tcp::router::Router<F, C>>>()
             .cloned()
     })
-}
-
-pub fn get_udp_router(global: &ConcurrentTypeMap) -> Option<Arc<crate::tcp::router::UdpRouter>> {
-    None
 }
 
 /// Extension trait for ConcurrentTypeMap to get/set values by type.
