@@ -4,7 +4,7 @@ use anyhow::Ok;
 use anyhow::Result;
 use anyhow::anyhow;
 use chacha20poly1305::aead::{OsRng, rand_core::RngCore};
-use tokio::sync::{Mutex, RwLock};
+use async_lock::{Mutex, RwLock};
 use x25519_dalek::PublicKey;
 
 use crate::{crypto::zero_trust_session_key::SessionKey, time::SystemTime};

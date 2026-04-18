@@ -2,7 +2,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
-use tokio::sync::Mutex;
+use async_lock::Mutex;
 
 use crate::connection::commands::CommandId;
 use crate::connection::context::Context;

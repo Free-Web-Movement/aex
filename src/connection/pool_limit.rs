@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use tokio::sync::RwLock;
+use async_lock::RwLock;
 
 pub struct ConnectionPoolConfig {
     pub max_total_connections: usize,

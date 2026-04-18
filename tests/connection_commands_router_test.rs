@@ -3,7 +3,7 @@ use aex::connection::commands::CommandId;
 use aex::connection::context::Context;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use async_lock::Mutex;
 
 #[test]
 fn test_command_router_new() {

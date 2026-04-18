@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 
-use tokio::sync::RwLock;
+use async_lock::RwLock;
 
 use crate::constants::udp::DEFAULT_MULTICAST_TTL;
 
