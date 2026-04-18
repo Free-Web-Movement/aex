@@ -9,11 +9,11 @@
 
 ## 版本
 
-当前版本: **0.1.6**
+当前版本: **0.1.5**
 
 ```toml
 [dependencies]
-aex = "0.1.6"
+aex = "0.1.5"
 tokio = { version = "1", features = ["full"] }
 anyhow = "1"
 ```

@@ -61,6 +61,22 @@ name = "comparison"
 path = "benches/comparison.rs"
 harness = false
 
+[[example]]
+name = "http_benchmark_aex"
+path = "examples/http_benchmark_aex.rs"
+
+[[example]]
+name = "http_benchmark_axum"
+path = "examples/http_benchmark_axum.rs"
+
+[[example]]
+name = "http_benchmark_actix"
+path = "examples/http_benchmark_actix.rs"
+
+[[example]]
+name = "simple_test"
+path = "examples/simple_test.rs"
+
 [dev-dependencies]
 reqwest = { version = "0.13.2", features = ["json", "blocking"] }
 tokio = { version = "1", features = ["full", "test-util"] }
