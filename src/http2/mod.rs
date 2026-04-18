@@ -73,7 +73,7 @@ impl H2Codec {
                             let http_method = HttpMethod::from_str(method_str).unwrap_or(HttpMethod::GET);
                             
                             // Build HttpMetadata from HTTP/2 request headers
-                            let mut meta = HttpMetadata::new();
+                            let mut meta = HttpMetadata::default();
                             meta.method = http_method;
                             meta.path = path.clone();
                             meta.version = HttpVersion::Http20;

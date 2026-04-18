@@ -140,13 +140,7 @@ impl<'a> Request<'a> {
         let mut buf = Vec::with_capacity(MAX_CAPACITY as usize);
 
         if let Some(r) = self.reader.as_deref_mut() {
-            let n = timeout(
-                Duration::from_millis(TIME_LIMIT_MS as u64),
-                r.read_until(b'\n', &mut buf),
-            )
-            .await
-            .map_err(|_| anyhow::anyhow!("Read timeout"))??;
-
+            let n = r.read_until(b'\n', &mut buf).await?;
             if n == 0 {
                 bail!("Connection closed");
             }

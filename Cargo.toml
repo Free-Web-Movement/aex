@@ -11,6 +11,7 @@ authors = ["Eric <calidion@gmail.com>"]
 [features]
 default = ["router-cache"]
 router-cache = []
+http-timeout = []
 
 [dependencies]
 tokio = { version = "1.40", features = ["full"] }
@@ -76,6 +77,10 @@ path = "examples/http_benchmark_actix.rs"
 [[example]]
 name = "simple_test"
 path = "examples/simple_test.rs"
+
+[[example]]
+name = "minimal_test"
+path = "examples/minimal_test.rs"
 
 [dev-dependencies]
 reqwest = { version = "0.13.2", features = ["json", "blocking"] }

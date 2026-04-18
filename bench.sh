@@ -10,6 +10,7 @@ cargo build --release --example http_benchmark_aex 2>/dev/null
 cargo build --release --example http_benchmark_axum 2>/dev/null
 cargo build --release --example http_benchmark_actix 2>/dev/null
 cargo build --release --example simple_http_bench 2>/dev/null
+cargo build --release --example minimal_test 2>/dev/null
 
 echo ""
 echo "═══════════════════════════════════════════════════════════════════════════════"
@@ -116,6 +117,12 @@ sleep 1
 sleep 2
 run_bench "Actix-web" 8082 "/api/users/123"
 pkill -f http_benchmark_actix
+
+sleep 1
+"$BIN/minimal_test" &
+sleep 2
+run_bench "MINIMAL" 8080 "/"
+pkill -f minimal_test 2>/dev/null
 
 echo ""
 echo "═══════════════════════════════════════════════════════════════════════════════"

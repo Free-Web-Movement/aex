@@ -8,6 +8,7 @@
 //! - `global`: Shared state across all connections
 //! - `reader`/`writer`: I/O streams for the connection
 
+use ahash::AHashMap;
 use chrono::DateTime;
 use chrono::Utc;
 use std::any::Any;
@@ -35,13 +36,13 @@ pub type TypeMap = ConcurrentTypeMap;
 /// Non-concurrent TypeMap for per-request storage.
 #[derive(Default)]
 pub struct LocalTypeMap {
-    inner: std::collections::HashMap<TypeId, Box<dyn Any + Send + Sync>>,
+    inner: AHashMap<TypeId, Box<dyn Any + Send + Sync>>,
 }
 
 impl LocalTypeMap {
     pub fn new() -> Self {
         Self {
-            inner: std::collections::HashMap::with_capacity(8),
+            inner: AHashMap::with_capacity(8),
         }
     }
 
