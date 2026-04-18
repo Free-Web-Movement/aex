@@ -22,13 +22,34 @@ impl<'a> Response<'a> {
         version: HttpVersion,
     ) -> anyhow::Result<()> {
         let w = self.writer.as_deref_mut().ok_or_else(|| anyhow::anyhow!("Writer not available"))?;
-        w.write_all(format!("{} {} {}\r\n", version, status as u16, status.to_str()).as_bytes())
-            .await?;
-        for (k, v) in headers {
-            w.write_all(format!("{}: {}\r\n", k, v).as_bytes()).await?;
+        
+        // Optimized: build response in single buffer, write once
+        let mut buf = Vec::with_capacity(256);
+        
+        // Status line: "HTTP/1.1 200 OK\r\n"
+        match version {
+            HttpVersion::Http10 => buf.extend_from_slice(b"HTTP/1.0 "),
+            HttpVersion::Http11 => buf.extend_from_slice(b"HTTP/1.1 "),
+            HttpVersion::Http20 => buf.extend_from_slice(b"HTTP/2.0 "),
         }
-        w.write_all(b"\r\n").await?;
-        w.write_all(body).await?;
+        // Status code as u16 -> string with text
+        buf.extend_from_slice((status as u16).to_string().as_bytes());
+        buf.push(b' ');
+        buf.extend_from_slice(status.to_str().as_bytes());
+        buf.extend_from_slice(b"\r\n");
+        
+        // Headers
+        for (k, v) in headers {
+            buf.extend_from_slice(k.as_str().as_bytes());
+            buf.extend_from_slice(b": ");
+            buf.extend_from_slice(v.as_bytes());
+            buf.extend_from_slice(b"\r\n");
+        }
+        
+        buf.extend_from_slice(b"\r\n");
+        buf.extend_from_slice(body);
+        
+        w.write_all(&buf).await?;
         w.flush().await?;
 
         Ok(())
@@ -57,7 +78,7 @@ impl<'a> Response<'a> {
                 meta.status = StatusCode::BadRequest;
             }
             if meta.body.is_empty() {
-                meta.body = format!("Error: {}", meta.status.to_str()).into_bytes();
+                meta.body = b"Error".to_vec();
             }
             meta.headers.insert(HeaderKey::ContentLength, meta.body.len().to_string());
             (meta.headers.clone(), meta.body.clone(), meta.status, meta.version)
@@ -65,4 +86,3 @@ impl<'a> Response<'a> {
         self.send(&headers, &body, status, version).await
     }
 }
-
