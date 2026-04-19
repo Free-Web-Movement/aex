@@ -8,6 +8,20 @@ use crate::{
     },
 };
 
+fn build_status_line(status: StatusCode, version: HttpVersion) -> Vec<u8> {
+    let prefix = match version {
+        HttpVersion::Http10 => b"HTTP/1.0 ".to_vec(),
+        HttpVersion::Http11 => b"HTTP/1.1 ".to_vec(),
+        HttpVersion::Http20 => b"HTTP/2.0 ".to_vec(),
+    };
+    let status_str = status.to_str();
+    let mut buf = prefix;
+    buf.extend_from_slice((status as u16).to_string().as_bytes());
+    buf.push(b' ');
+    buf.extend_from_slice(status_str.as_bytes());
+    buf
+}
+
 pub struct Response<'a> {
     pub writer: &'a mut Option<BoxWriter>,
     pub local: &'a mut LocalTypeMap,
@@ -23,19 +37,12 @@ impl<'a> Response<'a> {
     ) -> anyhow::Result<()> {
         let w = self.writer.as_deref_mut().ok_or_else(|| anyhow::anyhow!("Writer not available"))?;
         
-        // Optimized: build response in single buffer, write once
+        // Optimized: pre-allocate buffer
         let mut buf = Vec::with_capacity(256);
         
-        // Status line: "HTTP/1.1 200 OK\r\n"
-        match version {
-            HttpVersion::Http10 => buf.extend_from_slice(b"HTTP/1.0 "),
-            HttpVersion::Http11 => buf.extend_from_slice(b"HTTP/1.1 "),
-            HttpVersion::Http20 => buf.extend_from_slice(b"HTTP/2.0 "),
-        }
-        // Status code as u16 -> string with text
-        buf.extend_from_slice((status as u16).to_string().as_bytes());
-        buf.push(b' ');
-        buf.extend_from_slice(status.to_str().as_bytes());
+        // Status line
+        let status_line = build_status_line(status, version);
+        buf.extend_from_slice(&status_line);
         buf.extend_from_slice(b"\r\n");
         
         // Headers

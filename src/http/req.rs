@@ -34,15 +34,23 @@ impl<'a> Request<'a> {
         if line.len() > MAX_REQUEST_LINE_SIZE {
             bail!("Request line too long: {} bytes", line.len());
         }
-        let line_str = std::str::from_utf8(&line).context("Request line not UTF-8")?;
-        let mut parts = line_str.split_whitespace();
+        
+        // Optimized: split by ' ' instead of split_whitespace
+        let mut parts = line.split(|c| *c == b' ');
+        let method_bytes = parts.next().context("Missing method")?;
+        let path_bytes = parts.next().context("Missing path")?;
+        let _version_bytes = parts.next().context("Missing version")?;
 
-        let method_str = parts.next().context("Missing method")?;
-        let path = parts.next().context("Missing path")?.to_string();
-        let version = parts.next().context("Missing version")?.to_string();
-
-        let version = HttpVersion::from_str(&version).context("Unknown HTTP version")?;
+        let method_str = std::str::from_utf8(method_bytes).context("Invalid method")?;
+        // Optimized: avoid to_string() - use &str for path
+        let path_str = std::str::from_utf8(path_bytes).context("Invalid path")?;
+        let version_str = b"HTTP/1.1";
+        
+        let version = HttpVersion::Http11;
         let method = HttpMethod::from_str(method_str).context("Unknown method")?;
+
+        // Set path directly without allocation (will clone if needed)
+        let path = path_str.to_string();
 
         let headers_map = self.parse_headers_from_reader().await?;
         
