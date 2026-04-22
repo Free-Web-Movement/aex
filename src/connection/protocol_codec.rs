@@ -2,7 +2,7 @@ use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::connection::commands::CommandId;
-use crate::constants::tcp::{MAX_FRAME_SIZE, PROTOCOL_HEADER_SIZE};
+use crate::constants::tcp::PROTOCOL_HEADER_SIZE;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ProtocolFlags(u8);
@@ -128,7 +128,7 @@ impl ProtocolFrame {
     }
 
     pub fn encode_with_length(&self) -> Vec<u8> {
-        let mut frame = self.encode();
+        let frame = self.encode();
         let mut result = vec![0u8; 4];
         result.extend_from_slice(&(frame.len() as u32).to_le_bytes());
         result.extend_from_slice(&frame);

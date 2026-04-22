@@ -17,7 +17,6 @@ use crate::http::middlewares::websocket::WebSocket;
 use crate::http::protocol::content_type::ContentType;
 use crate::http::protocol::header::HeaderKey;
 use crate::http::protocol::method::HttpMethod;
-use crate::http::protocol::status::StatusCode as AexStatusCode;
 use crate::http::protocol::version::HttpVersion;
 use crate::http::router::Router as HttpRouter;
 

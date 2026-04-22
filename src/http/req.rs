@@ -1,9 +1,7 @@
-use std::time::Duration;
-
 use ahash::AHashMap;
 
 use anyhow::{Context, bail};
-use tokio::{io::AsyncBufReadExt, time::timeout};
+use tokio::io::AsyncBufReadExt;
 
 use crate::{
     constants::http::*,

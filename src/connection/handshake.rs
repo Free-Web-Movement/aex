@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 
 use crate::connection::node::Node;
-use crate::constants::tcp::HANDSHAKE_VERSION;
 
 pub struct HandshakeContext {
     pub local_node: Node,

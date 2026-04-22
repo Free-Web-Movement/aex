@@ -4,7 +4,7 @@ use crate::{
         meta::HttpMetadata,
         protocol::{header::HeaderKey, method::HttpMethod, header::Headers},
         types::Executor,
-        websocket::{BinaryHandler, TextHandler, WSCodec, WSFrame, WebSocketHandler},
+        websocket::{BinaryHandler, TextHandler, WSCodec, WSFrame},
     },
 };
 use base64::Engine;

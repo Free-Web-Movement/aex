@@ -37,7 +37,6 @@ use crate::crypto::session_key_manager::PairedSessionKey;
 use crate::http::middlewares::websocket::WebSocket;
 use crate::http::router::Router as HttpRouter;
 use crate::tcp::router::Router as TcpRouter;
-use crate::tcp::types::{Command, Frame};
 use crate::udp::router::Router as UdpRouter;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -46,6 +45,7 @@ use tokio::net::UdpSocket;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
+#[allow(dead_code)]
 type Extractor = Arc<dyn Fn(&dyn std::any::Any) -> u32 + Send + Sync>;
 
 /// HTTP versions to support

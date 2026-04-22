@@ -26,8 +26,6 @@ use crate::http::protocol::status::StatusCode;
 use crate::http::req::Request;
 use crate::http::res::Response;
 
-use crate::constants::server::SERVER_NAME;
-
 /// TypeMap for storing shared data using TypeId as keys. Concurrent version.
 pub type ConcurrentTypeMap =
     dashmap::DashMap<std::any::TypeId, Box<dyn std::any::Any + Send + Sync>>;
