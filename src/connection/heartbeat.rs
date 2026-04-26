@@ -9,10 +9,10 @@ use tokio::sync::Mutex;
 use tokio::task::AbortHandle;
 use tokio_util::sync::CancellationToken;
 
-use crate::constants::tcp::{DEFAULT_PING_INTERVAL_SEC, DEFAULT_PING_TIMEOUT_SEC};
 use crate::connection::commands::{PingCommand, PongCommand};
 use crate::connection::context::Context;
 use crate::connection::node::Node;
+use crate::constants::tcp::{DEFAULT_PING_INTERVAL_SEC, DEFAULT_PING_TIMEOUT_SEC};
 use crate::crypto::session_key_manager::PairedSessionKey;
 
 #[derive(Clone)]
@@ -83,7 +83,8 @@ pub struct HeartbeatManager {
     pub local_node: Node,
     pub config: HeartbeatConfig,
     pub session_keys: Option<Arc<Mutex<PairedSessionKey>>>,
-    active_connections: Arc<tokio::sync::RwLock<std::collections::HashMap<SocketAddr, HeartbeatState>>>,
+    active_connections:
+        Arc<tokio::sync::RwLock<std::collections::HashMap<SocketAddr, HeartbeatState>>>,
 }
 
 struct HeartbeatState {
@@ -101,11 +102,16 @@ impl HeartbeatManager {
             local_node,
             config: HeartbeatConfig::new(),
             session_keys: None,
-            active_connections: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+            active_connections: Arc::new(
+                tokio::sync::RwLock::new(std::collections::HashMap::new()),
+            ),
         }
     }
 
-    pub fn new_with_arc(local_node: Node, active: Arc<tokio::sync::RwLock<std::collections::HashMap<SocketAddr, HeartbeatState>>>) -> Self {
+    pub fn new_with_arc(
+        local_node: Node,
+        active: Arc<tokio::sync::RwLock<std::collections::HashMap<SocketAddr, HeartbeatState>>>,
+    ) -> Self {
         Self {
             local_node,
             config: HeartbeatConfig::new(),
@@ -145,11 +151,11 @@ impl HeartbeatManager {
         let local_node = self.local_node.clone();
         let config = self.config.clone();
         let active = self.active_connections.clone();
-        
+
         let mut interval = tokio::time::interval(Duration::from_secs(config.interval_secs));
-        
+
         let ping = PingCommand::new();
-        
+
         let state = HeartbeatState {
             last_ping: ping.timestamp,
             last_pong: 0,
@@ -158,9 +164,9 @@ impl HeartbeatManager {
             missed_pings: 0,
             abort_handle: None,
         };
-        
+
         active.write().await.insert(peer_addr, state);
-        
+
         tokio::spawn(async move {
             loop {
                 tokio::select! {
@@ -170,7 +176,7 @@ impl HeartbeatManager {
                     }
                     _ = interval.tick() => {
                         let result = Self::send_ping_internal(&local_node, &ctx, ping.clone()).await;
-                        
+
                         if let Some(state) = active.write().await.get_mut(&peer_addr) {
                             if result.is_ok() {
                                 state.last_ping = ping.timestamp;
@@ -186,10 +192,17 @@ impl HeartbeatManager {
         });
     }
 
-    async fn send_ping_internal(local_node: &Node, ctx: &Arc<Mutex<Context>>, ping: PingCommand) -> Result<()> {
+    async fn send_ping_internal(
+        local_node: &Node,
+        ctx: &Arc<Mutex<Context>>,
+        ping: PingCommand,
+    ) -> Result<()> {
         let data = ping.encode();
         let mut guard = ctx.lock().await;
-        let writer = guard.writer.as_mut().ok_or_else(|| anyhow::anyhow!("no writer"))?;
+        let writer = guard
+            .writer
+            .as_mut()
+            .ok_or_else(|| anyhow::anyhow!("no writer"))?;
         writer.write_all(&(data.len() as u32).to_le_bytes()).await?;
         writer.write_all(&data).await?;
         Ok(())
@@ -203,38 +216,39 @@ impl HeartbeatManager {
         peer_addr: SocketAddr,
     ) -> Result<()> {
         let ping = PingCommand::decode(data).map_err(anyhow::Error::msg)?;
-        
+
         let pong = self.create_pong(&ping);
         let pong_data = pong.encode();
-        
+
         let mut guard = ctx.lock().await;
-        let writer = guard.writer.as_mut().ok_or_else(|| anyhow::anyhow!("no writer"))?;
-        writer.write_all(&(pong_data.len() as u32).to_le_bytes()).await?;
+        let writer = guard
+            .writer
+            .as_mut()
+            .ok_or_else(|| anyhow::anyhow!("no writer"))?;
+        writer
+            .write_all(&(pong_data.len() as u32).to_le_bytes())
+            .await?;
         writer.write_all(&pong_data).await?;
-        
+
         Ok(())
     }
 
-    pub async fn handle_pong(
-        &self,
-        data: &[u8],
-        peer_addr: SocketAddr,
-    ) -> Result<u64> {
+    pub async fn handle_pong(&self, data: &[u8], peer_addr: SocketAddr) -> Result<u64> {
         let pong = PongCommand::decode(data).map_err(anyhow::Error::msg)?;
         let latency = pong.latency();
-        
+
         if let Some(state) = self.active_connections.write().await.get_mut(&peer_addr) {
             state.last_pong = pong.local_time;
             state.latency_ns = latency * 1000;
-            
+
             let old_avg = state.latency_avg;
             state.latency_avg = (old_avg + state.latency_ns) / 2;
-            
+
             if let Some(callback) = &self.config.on_latency {
                 callback(peer_addr, state.latency_avg);
             }
         }
-        
+
         Ok(latency)
     }
 
@@ -264,13 +278,16 @@ impl HeartbeatManager {
 
     pub async fn set_connection_state(&self, peer_addr: SocketAddr, missed: u32, latency: u64) {
         let mut active = self.active_connections.write().await;
-        active.insert(peer_addr, HeartbeatState {
-            last_ping: 0,
-            last_pong: 0,
-            latency_ns: latency,
-            latency_avg: latency,
-            missed_pings: missed,
-            abort_handle: None,
-        });
+        active.insert(
+            peer_addr,
+            HeartbeatState {
+                last_ping: 0,
+                last_pong: 0,
+                latency_ns: latency,
+                latency_avg: latency,
+                missed_pings: missed,
+                abort_handle: None,
+            },
+        );
     }
 }

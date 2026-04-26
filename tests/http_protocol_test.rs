@@ -1,11 +1,11 @@
 #[cfg(test)]
 mod tests {
+    use aex::http::protocol::content_type::ContentType;
+    use aex::http::protocol::header::HeaderKey;
+    use aex::http::protocol::media_type::SubMediaType;
     use aex::http::protocol::method::HttpMethod;
     use aex::http::protocol::status::StatusCode;
     use aex::http::protocol::version::HttpVersion;
-    use aex::http::protocol::header::HeaderKey;
-    use aex::http::protocol::content_type::ContentType;
-    use aex::http::protocol::media_type::SubMediaType;
 
     #[test]
     fn test_method_from_str() {
@@ -36,15 +36,24 @@ mod tests {
     #[test]
     fn test_status_code_to_http_status() {
         assert_eq!(StatusCode::Ok.to_http_status(), http::StatusCode::OK);
-        assert_eq!(StatusCode::NotFound.to_http_status(), http::StatusCode::NOT_FOUND);
-        assert_eq!(StatusCode::BadRequest.to_http_status(), http::StatusCode::BAD_REQUEST);
+        assert_eq!(
+            StatusCode::NotFound.to_http_status(),
+            http::StatusCode::NOT_FOUND
+        );
+        assert_eq!(
+            StatusCode::BadRequest.to_http_status(),
+            http::StatusCode::BAD_REQUEST
+        );
     }
 
     #[test]
     fn test_status_code_from_u16() {
         assert_eq!(StatusCode::from_u16(200), Some(StatusCode::Ok));
         assert_eq!(StatusCode::from_u16(404), Some(StatusCode::NotFound));
-        assert_eq!(StatusCode::from_u16(500), Some(StatusCode::InternalServerError));
+        assert_eq!(
+            StatusCode::from_u16(500),
+            Some(StatusCode::InternalServerError)
+        );
     }
 
     #[test]
@@ -97,13 +106,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_method_is_http_connection() {
-        use tokio::io::BufReader;
         use std::io::Cursor;
-        
+        use tokio::io::BufReader;
+
         let data = b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n";
         let cursor = Cursor::new(data);
         let mut reader = BufReader::new(cursor);
-        
+
         let is_http = HttpMethod::is_http_connection(&mut reader).await.unwrap();
         assert!(is_http);
     }

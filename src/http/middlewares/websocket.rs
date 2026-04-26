@@ -2,7 +2,7 @@ use crate::{
     connection::context::Context,
     http::{
         meta::HttpMetadata,
-        protocol::{header::HeaderKey, method::HttpMethod, header::Headers},
+        protocol::{header::HeaderKey, header::Headers, method::HttpMethod},
         types::Executor,
         websocket::{BinaryHandler, TextHandler, WSCodec, WSFrame},
     },
@@ -73,10 +73,7 @@ impl WebSocket {
     /// 设置文本消息处理器
     pub fn on_text<F>(mut self, handler: F) -> Self
     where
-        F: Fn(&WebSocket, &mut Context, String) -> BoxFuture<'static, bool>
-            + Send
-            + Sync
-            + 'static,
+        F: Fn(&WebSocket, &mut Context, String) -> BoxFuture<'static, bool> + Send + Sync + 'static,
     {
         self.on_text = Some(Arc::new(handler));
         self

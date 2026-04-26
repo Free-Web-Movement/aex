@@ -1,11 +1,11 @@
 use aex::connection::context::TypeMapExt;
+use aex::exe;
 use aex::http::meta::HttpMetadata;
 use aex::http::protocol::header::HeaderKey;
 use aex::http::router::{NodeType, Router as HttpRouter};
 use aex::http::types::Executor;
 use aex::server::HTTPServer;
 use aex::tcp::types::{Command, RawCodec};
-use aex::exe;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
@@ -43,7 +43,8 @@ async fn main() -> anyhow::Result<()> {
 
     let user_detail: Arc<Executor> = exe!(|ctx| {
         let meta = ctx.local.get_value::<HttpMetadata>().unwrap();
-        let id = meta.params
+        let id = meta
+            .params
             .as_ref()
             .and_then(|p| p.data.as_ref())
             .and_then(|d| d.get("id"))
@@ -60,11 +61,13 @@ async fn main() -> anyhow::Result<()> {
 
     router.get("/", home).register();
 
-    router.get("/api/users", users)
+    router
+        .get("/api/users", users)
         .middleware(logger.clone())
         .register();
 
-    router.get("/api/users/:id", user_detail)
+    router
+        .get("/api/users/:id", user_detail)
         .middleware(auth.clone())
         .middleware(logger.clone())
         .register();
@@ -78,9 +81,6 @@ async fn main() -> anyhow::Result<()> {
     println!("  GET /api/users/:id - User detail (auth + logging)");
     println!("  GET /health        - Health check");
 
-    HTTPServer::new(addr, None)
-        .http(router)
-        .start()
-        .await?;
+    HTTPServer::new(addr, None).http(router).start().await?;
     Ok(())
 }

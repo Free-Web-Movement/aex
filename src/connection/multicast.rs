@@ -15,11 +15,11 @@ pub struct MulticastGroup {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MulticastScope {
-    Local,     // 224.0.0.0 - 224.0.0.255
-    Admin,      // 224.0.2.0 - 224.0.255.255
-    SiteLocal,   // 239.255.0.0 - 239.255.255.255
+    Local,        // 224.0.0.0 - 224.0.0.255
+    Admin,        // 224.0.2.0 - 224.0.255.255
+    SiteLocal,    // 239.255.0.0 - 239.255.255.255
     Organization, // 239.192.0.0 - 239.192.255.255
-    Global,    // 224.0.1.0 - 238.255.255.255
+    Global,       // 224.0.1.0 - 238.255.255.255
 }
 
 impl MulticastScope {
@@ -43,9 +43,18 @@ impl MulticastScope {
         match self {
             Self::Local => (Ipv4Addr::new(224, 0, 0, 0), Ipv4Addr::new(224, 0, 0, 255)),
             Self::Admin => (Ipv4Addr::new(224, 0, 2, 0), Ipv4Addr::new(224, 0, 255, 255)),
-            Self::SiteLocal => (Ipv4Addr::new(239, 255, 0, 0), Ipv4Addr::new(239, 255, 255, 255)),
-            Self::Organization => (Ipv4Addr::new(239, 192, 0, 0), Ipv4Addr::new(239, 192, 255, 255)),
-            Self::Global => (Ipv4Addr::new(224, 0, 1, 0), Ipv4Addr::new(238, 255, 255, 255)),
+            Self::SiteLocal => (
+                Ipv4Addr::new(239, 255, 0, 0),
+                Ipv4Addr::new(239, 255, 255, 255),
+            ),
+            Self::Organization => (
+                Ipv4Addr::new(239, 192, 0, 0),
+                Ipv4Addr::new(239, 192, 255, 255),
+            ),
+            Self::Global => (
+                Ipv4Addr::new(224, 0, 1, 0),
+                Ipv4Addr::new(238, 255, 255, 255),
+            ),
         }
     }
 }
@@ -73,7 +82,10 @@ impl MulticastGroup {
     }
 
     pub fn new_site_local(port: u16) -> Self {
-        Self::new(SocketAddr::new(Ipv4Addr::new(239, 255, 255, 254).into(), port))
+        Self::new(SocketAddr::new(
+            Ipv4Addr::new(239, 255, 255, 254).into(),
+            port,
+        ))
     }
 
     pub async fn join(&self, peer: SocketAddr) {
@@ -82,12 +94,15 @@ impl MulticastGroup {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
-        members.insert(peer, MulticastMember {
-            addr: peer,
-            joined_at: now,
-            last_seen: now,
-            ttl: DEFAULT_MULTICAST_TTL,
-        });
+        members.insert(
+            peer,
+            MulticastMember {
+                addr: peer,
+                joined_at: now,
+                last_seen: now,
+                ttl: DEFAULT_MULTICAST_TTL,
+            },
+        );
     }
 
     pub async fn leave(&self, peer: &SocketAddr) {

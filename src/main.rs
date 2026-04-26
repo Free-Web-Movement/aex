@@ -1,10 +1,10 @@
 use aex::connection::global::GlobalContext;
+use aex::exe;
 use aex::http::router::Router as HttpRouter;
 use aex::server::Server;
 use aex::tcp::router::Router as TcpRouter;
 use aex::tcp::types::{Command, RawCodec};
 use aex::udp::router::Router as UdpRouter;
-use aex::exe;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::UdpSocket;
@@ -15,13 +15,18 @@ async fn main() -> anyhow::Result<()> {
 
     let mut http_router = HttpRouter::default();
 
-    http_router.get("/", exe!(|ctx| {
-        ctx.send("Hello world!", None);
-        true
-    })).register();
+    http_router
+        .get(
+            "/",
+            exe!(|ctx| {
+                ctx.send("Hello world!", None);
+                true
+            }),
+        )
+        .register();
 
     let tcp_router = {
-        let mut router = TcpRouter::<RawCodec, RawCodec>::new();
+        let router = TcpRouter::<RawCodec, RawCodec>::new();
         let mut router = router.extractor(|c: &RawCodec| c.id());
         router.on::<RawCodec, RawCodec>(
             1001,
@@ -38,7 +43,7 @@ async fn main() -> anyhow::Result<()> {
     };
 
     let udp_router = {
-        let mut router = UdpRouter::<RawCodec, RawCodec>::new();
+        let router = UdpRouter::<RawCodec, RawCodec>::new();
         let mut router = router.extractor(|c: &RawCodec| c.id());
         router.on(
             2002,

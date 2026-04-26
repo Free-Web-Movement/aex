@@ -1,5 +1,5 @@
-use std::sync::Arc;
 use ahash::AHashMap;
+use std::sync::Arc;
 
 use aex::{
     connection::context::TypeMapExt,
@@ -44,13 +44,13 @@ async fn test_to_validator_integration_full() {
     });
 
     // 路由中的 :id 必须对应 DSL 里的 id
-    hr.post("/check/:id", handler).middleware(mw_validator).register();
+    hr.post("/check/:id", handler)
+        .middleware(mw_validator)
+        .register();
 
     let server = HTTPServer::new(actual_addr, None).http(hr).clone();
     tokio::spawn(async move {
-        let _ = server
-            .start()
-            .await;
+        let _ = server.start().await;
     });
 
     tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
@@ -121,13 +121,13 @@ async fn test_v_macro_integration_full() {
         true
     });
 
-    hr.post("/check/:id", handler).middleware(mw_validator).register();
+    hr.post("/check/:id", handler)
+        .middleware(mw_validator)
+        .register();
 
     let server = HTTPServer::new(actual_addr, None).http(hr).clone();
     tokio::spawn(async move {
-        let _ = server
-            .start()
-            .await;
+        let _ = server.start().await;
     });
     tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
 
@@ -205,13 +205,13 @@ async fn test_validator_to_handler_data_flow() {
     });
 
     // 路由绑定：:id 对应 params 规则
-    hr.post("/user/:id", handler).middleware(mw_validator).register();
+    hr.post("/user/:id", handler)
+        .middleware(mw_validator)
+        .register();
 
     let server = HTTPServer::new(actual_addr, None).http(hr).clone();
     tokio::spawn(async move {
-        let _ = server
-            .start()
-            .await;
+        let _ = server.start().await;
     });
     tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
 
@@ -266,9 +266,7 @@ async fn test_validator_conversion_logic_hardcore() {
 
     let server = HTTPServer::new(actual_addr, None).http(hr).clone();
     tokio::spawn(async move {
-        let _ = server
-            .start()
-            .await;
+        let _ = server.start().await;
     });
     tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
 
@@ -331,9 +329,7 @@ async fn test_validator_edge_cases_and_fallback() {
 
     let server = HTTPServer::new(actual_addr, None).http(hr).clone();
     tokio::spawn(async move {
-        let _ = server
-            .start()
-            .await;
+        let _ = server.start().await;
     });
     tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
 
@@ -400,9 +396,7 @@ async fn test_validator_boolean_strict_error_integration() {
 
     let server = HTTPServer::new(actual_addr, None).http(hr).clone();
     tokio::spawn(async move {
-        let _ = server
-            .start()
-            .await;
+        let _ = server.start().await;
     });
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
@@ -457,9 +451,7 @@ async fn test_validator_integer_strict_error_integration() {
     // 3. 启动 AexServer
     let server = HTTPServer::new(actual_addr, None).http(hr).clone();
     tokio::spawn(async move {
-        let _ = server
-            .start()
-            .await;
+        let _ = server.start().await;
     });
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
@@ -530,9 +522,7 @@ async fn test_validator_float_strict_error_integration() {
     // 3. 启动 AexServer
     let server = HTTPServer::new(actual_addr, None).http(hr).clone();
     tokio::spawn(async move {
-        let _ = server
-            .start()
-            .await;
+        let _ = server.start().await;
     });
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
@@ -615,9 +605,7 @@ async fn test_validator_float_auto_completion_promotion() {
 
     let server = HTTPServer::new(actual_addr, None).http(hr).clone();
     tokio::spawn(async move {
-        let _ = server
-            .start()
-            .await;
+        let _ = server.start().await;
     });
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
@@ -692,9 +680,7 @@ async fn test_validator_value_to_string_fallback() {
 
     let server = HTTPServer::new(actual_addr, None).http(hr).clone();
     tokio::spawn(async move {
-        let _ = server
-            .start()
-            .await;
+        let _ = server.start().await;
     });
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
@@ -779,9 +765,7 @@ async fn test_validator_params_none_fallback() {
     // 2. 启动服务器并发送请求
     let server = HTTPServer::new(actual_addr, None).http(hr).clone();
     tokio::spawn(async move {
-        let _ = server
-            .start()
-            .await;
+        let _ = server.start().await;
     });
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 

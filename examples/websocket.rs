@@ -1,10 +1,10 @@
-use aex::http::router::{NodeType, Router as HttpRouter};
+use aex::exe;
 use aex::http::middlewares::websocket::WebSocket;
+use aex::http::router::{NodeType, Router as HttpRouter};
 use aex::http::types::Executor;
 use aex::http::websocket::WSFrame;
 use aex::server::HTTPServer;
 use aex::tcp::types::{Command, RawCodec};
-use aex::exe;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
@@ -30,21 +30,24 @@ async fn main() -> anyhow::Result<()> {
 
     let ws_middleware: Arc<Executor> = Arc::from(WebSocket::to_middleware(ws_handler));
 
-    router.get("/", exe!(|ctx| {
-        ctx.send("WebSocket server. Connect to /ws", None);
-        true
-    })).register();
+    router
+        .get(
+            "/",
+            exe!(|ctx| {
+                ctx.send("WebSocket server. Connect to /ws", None);
+                true
+            }),
+        )
+        .register();
 
-    router.get("/ws", exe!(|_ctx| { true }))
+    router
+        .get("/ws", exe!(|_ctx| { true }))
         .middleware(ws_middleware)
         .register();
 
     println!("Server running at http://{}", addr);
     println!("WebSocket endpoint: ws://{}/ws", addr);
 
-    HTTPServer::new(addr, None)
-        .http(router)
-        .start()
-        .await?;
+    HTTPServer::new(addr, None).http(router).start().await?;
     Ok(())
 }

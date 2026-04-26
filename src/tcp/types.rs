@@ -2,7 +2,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 use crate::constants::tcp::MAX_FRAME_SIZE;
-use bincode::{config, decode_from_slice, encode_to_vec, Decode, Encode};
+use bincode::{Decode, Encode, config, decode_from_slice, encode_to_vec};
 
 #[inline]
 pub fn frame_config() -> impl bincode::config::Config {

@@ -129,10 +129,7 @@ impl Server {
     pub fn http2(mut self) -> Self {
         let global = self.globals.clone();
         if let Some(http_router) = global.routers.get_value::<Arc<HttpRouter>>() {
-            let h2_codec = Arc::new(crate::http2::H2Codec::new(
-                http_router,
-                global,
-            ));
+            let h2_codec = Arc::new(crate::http2::H2Codec::new(http_router, global));
             *self.globals.h2_codec.write().unwrap() = Some(h2_codec);
         }
         self.http_versions = HttpVersions::v1_v2();
@@ -167,7 +164,7 @@ impl Server {
     }
 
     /// Sets the TCP router (with extractor set via router.extractor()).
-    pub fn tcp<F, C>(mut self, router: TcpRouter<F, C>) -> Self
+    pub fn tcp<F, C>(self, router: TcpRouter<F, C>) -> Self
     where
         F: crate::tcp::types::TCPFrame + 'static,
         C: crate::tcp::types::TCPCommand + 'static,
@@ -180,7 +177,7 @@ impl Server {
     }
 
     /// Sets the UDP router (with extractor set via router.extractor()).
-    pub fn udp<F, C>(mut self, router: UdpRouter<F, C>) -> Self
+    pub fn udp<F, C>(self, router: UdpRouter<F, C>) -> Self
     where
         F: crate::tcp::types::Frame + Send + Sync + Clone + 'static,
         C: crate::tcp::types::Command + Send + Sync + 'static,
@@ -196,15 +193,35 @@ impl Server {
     pub async fn start(&self) -> anyhow::Result<()> {
         let server = Arc::new(self.clone());
 
-        let has_tcp = self.globals.routers.get::<std::any::TypeId>(&std::any::TypeId::of::<crate::connection::context::TcpRouterKey>()).is_some();
-        let has_udp = self.globals.routers.get::<std::any::TypeId>(&std::any::TypeId::of::<crate::connection::context::UdpRouterKey>()).is_some();
-        let has_http = self.globals.routers.get_value::<Arc<HttpRouter>>().is_some();
+        let has_tcp = self
+            .globals
+            .routers
+            .get::<std::any::TypeId>(&std::any::TypeId::of::<
+                crate::connection::context::TcpRouterKey,
+            >())
+            .is_some();
+        let has_udp = self
+            .globals
+            .routers
+            .get::<std::any::TypeId>(&std::any::TypeId::of::<
+                crate::connection::context::UdpRouterKey,
+            >())
+            .is_some();
+        let has_http = self
+            .globals
+            .routers
+            .get_value::<Arc<HttpRouter>>()
+            .is_some();
 
         if !has_tcp && !has_udp && has_http {
-            let http_router = server.globals.routers.get_value::<Arc<HttpRouter>>().unwrap();
+            let http_router = server
+                .globals
+                .routers
+                .get_value::<Arc<HttpRouter>>()
+                .unwrap();
             let router = http_router.clone();
             let globals = server.globals.clone();
-            
+
             tokio::spawn(async move {
                 let listener = match TcpListener::bind(globals.addr).await {
                     Ok(l) => l,
@@ -222,15 +239,20 @@ impl Server {
                             let globals = globals.clone();
                             tokio::spawn(async move {
                                 use tokio::io::{BufReader, BufWriter};
-                                
+
                                 let (reader, writer) = socket.into_split();
-                                let reader = Box::new(BufReader::new(reader)) as Box<dyn tokio::io::AsyncBufRead + Send + Sync + Unpin>;
-                                let writer = Box::new(BufWriter::new(writer)) as Box<dyn tokio::io::AsyncWrite + Send + Sync + Unpin>;
-                                
+                                let reader = Box::new(BufReader::new(reader))
+                                    as Box<dyn tokio::io::AsyncBufRead + Send + Sync + Unpin>;
+                                let writer = Box::new(BufWriter::new(writer))
+                                    as Box<dyn tokio::io::AsyncWrite + Send + Sync + Unpin>;
+
                                 let mut ctx = crate::connection::context::Context::new(
-                                    Some(reader), Some(writer), globals, peer_addr,
+                                    Some(reader),
+                                    Some(writer),
+                                    globals,
+                                    peer_addr,
                                 );
-                                
+
                                 if ctx.req().parse_to_local().await.is_ok() {
                                     if router.on_request(&mut ctx).await {
                                         let _ = ctx.res().send_response().await;
@@ -260,7 +282,13 @@ impl Server {
         let server = Arc::new(self.clone());
 
         // --- UDP ---
-        let has_udp = self.globals.routers.get::<std::any::TypeId>(&std::any::TypeId::of::<crate::connection::context::UdpRouterKey>()).is_some();
+        let has_udp = self
+            .globals
+            .routers
+            .get::<std::any::TypeId>(&std::any::TypeId::of::<
+                crate::connection::context::UdpRouterKey,
+            >())
+            .is_some();
         if has_udp {
             let udp_token = CancellationToken::new();
             let udp_loop_token = udp_token.clone();
@@ -269,11 +297,20 @@ impl Server {
             let udp_handle = tokio::spawn(async move {
                 let _ = server_udp.start_udp::<F, C>(udp_loop_token).await;
             });
-            server.globals.add_exit("udp", udp_token, udp_handle.abort_handle()).await;
+            server
+                .globals
+                .add_exit("udp", udp_token, udp_handle.abort_handle())
+                .await;
         }
 
         // --- TCP ---
-        let has_tcp = self.globals.routers.get::<std::any::TypeId>(&std::any::TypeId::of::<crate::connection::context::TcpRouterKey>()).is_some();
+        let has_tcp = self
+            .globals
+            .routers
+            .get::<std::any::TypeId>(&std::any::TypeId::of::<
+                crate::connection::context::TcpRouterKey,
+            >())
+            .is_some();
         if has_tcp {
             let tcp_token = CancellationToken::new();
             let tcp_loop_token = tcp_token.clone();
@@ -282,7 +319,10 @@ impl Server {
             let tcp_handle = tokio::spawn(async move {
                 let _ = server_tcp.start_tcp::<F, C>(tcp_loop_token).await;
             });
-            server.globals.add_exit("tcp", tcp_token, tcp_handle.abort_handle()).await;
+            server
+                .globals
+                .add_exit("tcp", tcp_token, tcp_handle.abort_handle())
+                .await;
         }
 
         Ok(())
@@ -310,7 +350,7 @@ impl Server {
                     };
 
                     let is_h2 = {
-                        use tokio::io::AsyncReadExt;
+                        
                         let mut buf = [0u8; 24];
                         match socket.peek(&mut buf).await {
                             Ok(n) if n >= 24 => buf.starts_with(b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"),
@@ -354,7 +394,10 @@ impl Server {
         let socket = Arc::new(UdpSocket::bind(self.addr).await?);
         tracing::info!("UDP listener started on {}", self.addr);
 
-        let rt = self.globals.routers.get_value::<Arc<UdpRouter<F, C>>>()
+        let rt = self
+            .globals
+            .routers
+            .get_value::<Arc<UdpRouter<F, C>>>()
             .ok_or_else(|| anyhow::anyhow!("UDP router not found"))?;
 
         rt.handle(self.globals.clone(), socket).await

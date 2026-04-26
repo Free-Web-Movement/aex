@@ -4,8 +4,8 @@ use anyhow::{Context, bail};
 use tokio::io::AsyncBufReadExt;
 
 use crate::{
-    constants::http::*,
     connection::context::{BoxReader, LocalTypeMap},
+    constants::http::*,
     http::{
         meta::HttpMetadata,
         middlewares::websocket::WebSocket,
@@ -32,7 +32,7 @@ impl<'a> Request<'a> {
         if line.len() > MAX_REQUEST_LINE_SIZE {
             bail!("Request line too long: {} bytes", line.len());
         }
-        
+
         // Optimized: split by ' ' instead of split_whitespace
         let mut parts = line.split(|c| *c == b' ');
         let method_bytes = parts.next().context("Missing method")?;
@@ -43,7 +43,7 @@ impl<'a> Request<'a> {
         // Optimized: avoid to_string() - use &str for path
         let path_str = std::str::from_utf8(path_bytes).context("Invalid path")?;
         let version_str = b"HTTP/1.1";
-        
+
         let version = HttpVersion::Http11;
         let method = HttpMethod::from_str(method_str).context("Unknown method")?;
 
@@ -51,12 +51,13 @@ impl<'a> Request<'a> {
         let path = path_str.to_string();
 
         let headers_map = self.parse_headers_from_reader().await?;
-        
+
         if headers_map.len() > MAX_HEADER_COUNT {
             bail!("Too many headers: {}", headers_map.len());
         }
 
-        let header_size: usize = headers_map.iter()
+        let header_size: usize = headers_map
+            .iter()
             .map(|(k, v)| k.as_str().len() + v.len())
             .sum();
         if header_size > MAX_HEADER_SIZE {
@@ -162,7 +163,7 @@ impl<'a> Request<'a> {
             let line_bytes = self.read_line_with_limit().await?;
             let line = std::str::from_utf8(&line_bytes)?;
             let line = line.trim_end_matches(|c| c == '\r' || c == '\n');
-            
+
             if line.is_empty() {
                 break;
             }
@@ -177,7 +178,10 @@ impl<'a> Request<'a> {
 
     // --- 业务 Getter ---
     pub fn method(&self) -> HttpMethod {
-        self.local.get_value::<HttpMetadata>().map(|m| m.method).unwrap_or(HttpMethod::GET)
+        self.local
+            .get_value::<HttpMetadata>()
+            .map(|m| m.method)
+            .unwrap_or(HttpMethod::GET)
     }
 
     /// 快速获取所有的 Params
@@ -212,4 +216,3 @@ impl<'a> Request<'a> {
         Self { reader, local }
     }
 }
-

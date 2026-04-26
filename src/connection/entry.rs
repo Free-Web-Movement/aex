@@ -2,7 +2,7 @@ use crate::connection::context::{BoxReader, BoxWriter, Context};
 use crate::connection::global::GlobalContext;
 use crate::connection::heartbeat::{HeartbeatConfig, HeartbeatManager};
 use crate::connection::node::Node;
-use crate::tcp::types::{TCPFrame, TCPCommand};
+use crate::tcp::types::{TCPCommand, TCPFrame};
 use std::fmt;
 use std::future::Future;
 use std::net::SocketAddr;
@@ -67,7 +67,8 @@ impl ConnectionEntry {
     }
 
     pub fn is_deactivated(&self, current: u64, timeout_secs: u64, max_lifetime_secs: u64) -> bool {
-        self.uptime_secs() >= max_lifetime_secs || self.last_seen.load(Ordering::Relaxed) + timeout_secs < current
+        self.uptime_secs() >= max_lifetime_secs
+            || self.last_seen.load(Ordering::Relaxed) + timeout_secs < current
     }
 
     pub async fn update_node(&self, new_node: Node) {
@@ -85,7 +86,7 @@ impl ConnectionEntry {
             Some(c) => c.clone(),
             None => return,
         };
-        
+
         let heartbeat = HeartbeatManager::new(local_node).with_config(config);
         heartbeat.start_server_heartbeat(ctx, self.addr, self.cancel_token.clone());
     }
@@ -105,7 +106,11 @@ impl ConnectionEntry {
         addr: std::net::SocketAddr,
         global: Arc<GlobalContext>,
         f: FF,
-    ) -> (tokio_util::sync::CancellationToken, tokio::task::AbortHandle, Arc<Mutex<Context>>)
+    ) -> (
+        tokio_util::sync::CancellationToken,
+        tokio::task::AbortHandle,
+        Arc<Mutex<Context>>,
+    )
     where
         FF: FnOnce(Arc<Mutex<Context>>) -> Fut + Send + 'static,
         Fut: std::future::Future<Output = anyhow::Result<()>> + Send + 'static,
@@ -118,13 +123,8 @@ impl ConnectionEntry {
         let r_opt: Option<BoxReader> = Some(Box::new(BufReader::new(reader)));
         let w_opt: Option<BoxWriter> = Some(Box::new(BufWriter::new(writer)));
 
-        let mut raw_ctx = Context::new(
-            r_opt,
-            w_opt,
-            global,
-            addr
-        );
-        raw_ctx.set(task_token.clone()); 
+        let mut raw_ctx = Context::new(r_opt, w_opt, global, addr);
+        raw_ctx.set(task_token.clone());
         let ctx = Arc::new(Mutex::new(raw_ctx));
 
         let ctx_cloned = ctx.clone();
@@ -152,15 +152,15 @@ impl ConnectionEntry {
     pub fn default_pipeline<F, C>(
         peer_addr: SocketAddr,
         is_server: bool,
-    ) -> impl FnOnce(Arc<Mutex<Context>>) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>> + Send
+    ) -> impl FnOnce(Arc<Mutex<Context>>) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>>
+    + Send
     where
         F: TCPFrame + Send + 'static,
         C: TCPCommand + Send + 'static,
     {
         move |_ctx: Arc<Mutex<Context>>| {
-            Box::pin(async move {
-                Ok(())
-            }) as Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>>
+            Box::pin(async move { Ok(()) })
+                as Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>>
         }
     }
 }

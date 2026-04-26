@@ -15,15 +15,14 @@
 //!     .udp_handler(my_udp_handler);
 //! ```
 
-use std::any::TypeId;
-use std::net::SocketAddr;
-use std::sync::Arc;
-use tokio::io::{AsyncBufReadExt, AsyncReadExt};
-use tokio::net::{TcpListener, TcpStream, UdpSocket};
 use bytes::Bytes;
 use h2::server;
+use std::net::SocketAddr;
+use std::sync::Arc;
+use tokio::io::AsyncReadExt;
+use tokio::net::{TcpListener, TcpStream, UdpSocket};
 
-use crate::connection::context::{Context, BoxReader, BoxWriter};
+use crate::connection::context::{BoxReader, BoxWriter, Context};
 use crate::http::meta::HttpMetadata;
 use crate::http::middlewares::websocket::WebSocket;
 use crate::http::protocol::header::HeaderKey;
@@ -34,8 +33,15 @@ use crate::http::router::Router as HttpRouter;
 pub const H2_CONNECTION_PREFACE: &[u8] = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
 
 pub const HTTP_METHODS: &[&[u8]] = &[
-    b"GET ", b"POST ", b"PUT ", b"DELETE ", b"PATCH ",
-    b"HEAD ", b"OPTIONS ", b"CONNECT ", b"TRACE ",
+    b"GET ",
+    b"POST ",
+    b"PUT ",
+    b"DELETE ",
+    b"PATCH ",
+    b"HEAD ",
+    b"OPTIONS ",
+    b"CONNECT ",
+    b"TRACE ",
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -71,8 +77,10 @@ impl Protocol {
     }
 }
 
-pub type HttpHandler = Arc<dyn Fn(&mut Context) -> futures::future::BoxFuture<'_, bool> + Send + Sync>;
-pub type Http2Handler = Arc<dyn Fn(&mut Context) -> futures::future::BoxFuture<'static, bool> + Send + Sync>;
+pub type HttpHandler =
+    Arc<dyn Fn(&mut Context) -> futures::future::BoxFuture<'_, bool> + Send + Sync>;
+pub type Http2Handler =
+    Arc<dyn Fn(&mut Context) -> futures::future::BoxFuture<'static, bool> + Send + Sync>;
 pub type TCPHandler = Arc<dyn Fn(Context) -> tokio::task::JoinHandle<()> + Send + Sync>;
 pub type UDPHandler = Arc<dyn Fn(Context) -> tokio::task::JoinHandle<()> + Send + Sync>;
 
@@ -140,7 +148,9 @@ impl UnifiedServer {
             Ok(n) => n,
             Err(_) => return,
         };
-        if n == 0 { return; }
+        if n == 0 {
+            return;
+        }
 
         let protocol = Protocol::detect(&peek_buf[..n], false);
         let initial_data = peek_buf[..n].to_vec();
@@ -165,14 +175,24 @@ impl UnifiedServer {
         }
     }
 
-    async fn handle_http11(&self, socket: TcpStream, peer_addr: SocketAddr, initial_bytes: Vec<u8>) {
+    async fn handle_http11(
+        &self,
+        socket: TcpStream,
+        peer_addr: SocketAddr,
+        initial_bytes: Vec<u8>,
+    ) {
         let (reader, writer) = socket.into_split();
         let cursor = std::io::Cursor::new(initial_bytes);
         let reader_with_buf = tokio::io::BufReader::new(cursor.chain(reader));
         let boxed_reader: BoxReader = Box::new(reader_with_buf);
         let writer = Box::new(tokio::io::BufWriter::new(writer)) as BoxWriter;
 
-        let mut ctx = Context::new(Some(boxed_reader), Some(writer), self.globals.clone(), peer_addr);
+        let mut ctx = Context::new(
+            Some(boxed_reader),
+            Some(writer),
+            self.globals.clone(),
+            peer_addr,
+        );
 
         if ctx.req().parse_to_local().await.is_err() {
             let _ = ctx.res().send_failure().await;
@@ -266,7 +286,7 @@ impl UnifiedServer {
                                 resp_headers = m.headers.clone();
                             }
 
-                            let mut resp_builder = http::Response::builder().status(status);
+                            let resp_builder = http::Response::builder().status(status);
 
                             match resp_builder.body(()) {
                                 Ok(resp) => {
@@ -295,12 +315,20 @@ impl UnifiedServer {
         let boxed_reader: BoxReader = Box::new(reader);
         let writer = Box::new(writer) as BoxWriter;
 
-        let mut ctx = Context::new(Some(boxed_reader), Some(writer), self.globals.clone(), peer_addr);
+        let ctx = Context::new(
+            Some(boxed_reader),
+            Some(writer),
+            self.globals.clone(),
+            peer_addr,
+        );
 
         if let Some(handler) = &self.tcp_handler {
             handler(ctx);
         } else {
-            tracing::warn!("[Unified] No TCP handler registered, dropping connection from {}", peer_addr);
+            tracing::warn!(
+                "[Unified] No TCP handler registered, dropping connection from {}",
+                peer_addr
+            );
         }
     }
 
@@ -377,7 +405,8 @@ impl UnifiedServer {
                         let boxed_reader: BoxReader = Box::new(reader);
                         let writer = Box::new(writer) as BoxWriter;
 
-                        let mut ctx = Context::new(Some(boxed_reader), Some(writer), globals, peer_addr);
+                        let ctx =
+                            Context::new(Some(boxed_reader), Some(writer), globals, peer_addr);
                         if let Some(h) = handler {
                             h(ctx);
                         }
@@ -422,7 +451,7 @@ impl UnifiedServer {
                 }
             }
         }
-        
+
         Ok(())
     }
 }

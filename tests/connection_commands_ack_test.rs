@@ -1,5 +1,5 @@
-use aex::connection::commands::ack::AckCommand;
 use aex::connection::commands::CommandId;
+use aex::connection::commands::ack::AckCommand;
 
 #[test]
 fn test_ack_command_accepted() {

@@ -142,10 +142,7 @@ mod tests {
         let server = server.http(hr).clone();
 
         tokio::spawn(async move {
-            if let Err(e) = server
-                .start()
-                .await
-            {
+            if let Err(e) = server.start().await {
                 eprintln!("Server exit: {}", e);
             }
         });
@@ -246,9 +243,7 @@ mod tests {
         let server = server.http(hr).clone();
 
         tokio::spawn(async move {
-            let _ = server
-                .start()
-                .await;
+            let _ = server.start().await;
         });
 
         // --- 4. 发起真实请求验证 ---
@@ -327,9 +322,7 @@ mod tests {
         let server = HTTPServer::new(actual_addr, None);
         let server = server.http(hr).clone();
         tokio::spawn(async move {
-            let _ = server
-                .start()
-                .await;
+            let _ = server.start().await;
         });
 
         sleep(Duration::from_millis(200)).await;
@@ -358,9 +351,7 @@ mod tests {
         let server = Server::new(actual_addr, None);
         let server = server.http(hr).clone();
         tokio::spawn(async move {
-            let _ = server
-                .start()
-                .await;
+            let _ = server.start().await;
         });
 
         tokio::time::sleep(Duration::from_millis(200)).await;
@@ -439,9 +430,7 @@ mod tests {
         let server = HTTPServer::new(actual_addr, None);
         let server = server.http(hr).clone();
         tokio::spawn(async move {
-            let _ = server
-                .start()
-                .await;
+            let _ = server.start().await;
         });
 
         tokio::time::sleep(Duration::from_millis(200)).await;
@@ -499,9 +488,7 @@ mod tests {
         let server = HTTPServer::new(actual_addr, None);
         let server = server.http(hr).clone();
         tokio::spawn(async move {
-            let _ = server
-                .start()
-                .await;
+            let _ = server.start().await;
         });
 
         sleep(Duration::from_millis(200)).await;
@@ -564,9 +551,7 @@ mod tests {
         let server = HTTPServer::new(actual_addr, None);
         let server = server.http(hr).clone();
         tokio::spawn(async move {
-            let _ = server
-                .start()
-                .await;
+            let _ = server.start().await;
         });
 
         tokio::time::sleep(Duration::from_millis(200)).await;
@@ -630,9 +615,7 @@ mod tests {
 
         let server = server.http(hr);
         tokio::spawn(async move {
-            let _ = server
-                .start()
-                .await;
+            let _ = server.start().await;
         });
 
         tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
@@ -706,9 +689,7 @@ mod tests {
 
         let server = HTTPServer::new(actual_addr, None).http(hr).clone();
         tokio::spawn(async move {
-            let _ = server
-                .start()
-                .await;
+            let _ = server.start().await;
         });
 
         // 给服务器起步时间，避免 Connection Refused
@@ -768,17 +749,19 @@ mod tests {
         // --- 3. 使用 fluent API 注册 ---
 
         // 注册通配符方法路由到 /api/*
-        hr.all("/api/all", handler.clone()).middleware(mw_info.clone()).register();
+        hr.all("/api/all", handler.clone())
+            .middleware(mw_info.clone())
+            .register();
 
         // 注册特定 GET 路由
-        hr.get("/api/specific", handler).middleware(mw_info).register();
+        hr.get("/api/specific", handler)
+            .middleware(mw_info)
+            .register();
 
         // --- 4. 启动服务器 ---
         let server = HTTPServer::new(actual_addr, None).http(hr).clone();
         tokio::spawn(async move {
-            let _ = server
-                .start()
-                .await;
+            let _ = server.start().await;
         });
 
         tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
@@ -845,15 +828,17 @@ mod tests {
         });
 
         // --- 3. 注册路由 ---
-        hr.all("/api/all", handler.clone()).middleware(mw_info.clone()).register();
-        hr.get("/api/specific", handler).middleware(mw_info).register();
+        hr.all("/api/all", handler.clone())
+            .middleware(mw_info.clone())
+            .register();
+        hr.get("/api/specific", handler)
+            .middleware(mw_info)
+            .register();
 
         // --- 4. 启动服务器 ---
         let server = HTTPServer::new(actual_addr, None).http(hr).clone();
         tokio::spawn(async move {
-            let _ = server
-                .start()
-                .await;
+            let _ = server.start().await;
         });
 
         tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
@@ -899,17 +884,21 @@ mod tests {
             .unwrap();
 
         let mut hr = Router::new(NodeType::Static("root".into()));
-        
-        hr.put("/data", Arc::new(|ctx: &mut Context| {
-            async move {
-                let mut meta = ctx.local.get_value::<HttpMetadata>().unwrap();
-                meta.status = StatusCode::Ok;
-                meta.body = b"PUT OK".to_vec();
-                ctx.local.set_value(meta);
-                true
-            }
-            .boxed()
-        })).register();
+
+        hr.put(
+            "/data",
+            Arc::new(|ctx: &mut Context| {
+                async move {
+                    let mut meta = ctx.local.get_value::<HttpMetadata>().unwrap();
+                    meta.status = StatusCode::Ok;
+                    meta.body = b"PUT OK".to_vec();
+                    ctx.local.set_value(meta);
+                    true
+                }
+                .boxed()
+            }),
+        )
+        .register();
 
         let server = HTTPServer::new(actual_addr, None).http(hr).clone();
         tokio::spawn(async move {
@@ -917,10 +906,14 @@ mod tests {
         });
 
         tokio::time::sleep(Duration::from_millis(200)).await;
-        
+
         let client = reqwest::Client::new();
-        let res = client.put(format!("http://{}/data", actual_addr)).send().await.unwrap();
-        
+        let res = client
+            .put(format!("http://{}/data", actual_addr))
+            .send()
+            .await
+            .unwrap();
+
         assert_eq!(res.status().as_u16(), 200);
     }
 
@@ -934,17 +927,21 @@ mod tests {
             .unwrap();
 
         let mut hr = Router::new(NodeType::Static("root".into()));
-        
-        hr.delete("/item/:id", Arc::new(|ctx: &mut Context| {
-            async move {
-                let mut meta = ctx.local.get_value::<HttpMetadata>().unwrap();
-                meta.status = StatusCode::Ok;
-                meta.body = b"DELETED".to_vec();
-                ctx.local.set_value(meta);
-                true
-            }
-            .boxed()
-        })).register();
+
+        hr.delete(
+            "/item/:id",
+            Arc::new(|ctx: &mut Context| {
+                async move {
+                    let mut meta = ctx.local.get_value::<HttpMetadata>().unwrap();
+                    meta.status = StatusCode::Ok;
+                    meta.body = b"DELETED".to_vec();
+                    ctx.local.set_value(meta);
+                    true
+                }
+                .boxed()
+            }),
+        )
+        .register();
 
         let server = HTTPServer::new(actual_addr, None).http(hr).clone();
         tokio::spawn(async move {
@@ -952,10 +949,14 @@ mod tests {
         });
 
         tokio::time::sleep(Duration::from_millis(200)).await;
-        
+
         let client = reqwest::Client::new();
-        let res = client.delete(format!("http://{}/item/123", actual_addr)).send().await.unwrap();
-        
+        let res = client
+            .delete(format!("http://{}/item/123", actual_addr))
+            .send()
+            .await
+            .unwrap();
+
         assert_eq!(res.status().as_u16(), 200);
         assert_eq!(res.text().await.unwrap(), "DELETED");
     }
@@ -970,17 +971,21 @@ mod tests {
             .unwrap();
 
         let mut hr = Router::new(NodeType::Static("root".into()));
-        
-        hr.patch("/update", Arc::new(|ctx: &mut Context| {
-            async move {
-                let mut meta = ctx.local.get_value::<HttpMetadata>().unwrap();
-                meta.status = StatusCode::Ok;
-                meta.body = b"PATCHED".to_vec();
-                ctx.local.set_value(meta);
-                true
-            }
-            .boxed()
-        })).register();
+
+        hr.patch(
+            "/update",
+            Arc::new(|ctx: &mut Context| {
+                async move {
+                    let mut meta = ctx.local.get_value::<HttpMetadata>().unwrap();
+                    meta.status = StatusCode::Ok;
+                    meta.body = b"PATCHED".to_vec();
+                    ctx.local.set_value(meta);
+                    true
+                }
+                .boxed()
+            }),
+        )
+        .register();
 
         let server = HTTPServer::new(actual_addr, None).http(hr).clone();
         tokio::spawn(async move {
@@ -988,10 +993,14 @@ mod tests {
         });
 
         tokio::time::sleep(Duration::from_millis(200)).await;
-        
+
         let client = reqwest::Client::new();
-        let res = client.patch(format!("http://{}/update", actual_addr)).send().await.unwrap();
-        
+        let res = client
+            .patch(format!("http://{}/update", actual_addr))
+            .send()
+            .await
+            .unwrap();
+
         assert_eq!(res.status().as_u16(), 200);
     }
 
@@ -1005,17 +1014,21 @@ mod tests {
             .unwrap();
 
         let mut hr = Router::new(NodeType::Static("root".into()));
-        
-        hr.options("/api", Arc::new(|ctx: &mut Context| {
-            async move {
-                let mut meta = ctx.local.get_value::<HttpMetadata>().unwrap();
-                meta.status = StatusCode::Ok;
-                meta.body = b"OPTIONS OK".to_vec();
-                ctx.local.set_value(meta);
-                true
-            }
-            .boxed()
-        })).register();
+
+        hr.options(
+            "/api",
+            Arc::new(|ctx: &mut Context| {
+                async move {
+                    let mut meta = ctx.local.get_value::<HttpMetadata>().unwrap();
+                    meta.status = StatusCode::Ok;
+                    meta.body = b"OPTIONS OK".to_vec();
+                    ctx.local.set_value(meta);
+                    true
+                }
+                .boxed()
+            }),
+        )
+        .register();
 
         let server = HTTPServer::new(actual_addr, None).http(hr).clone();
         tokio::spawn(async move {
@@ -1023,10 +1036,17 @@ mod tests {
         });
 
         tokio::time::sleep(Duration::from_millis(200)).await;
-        
+
         let client = reqwest::Client::new();
-        let res = client.request(reqwest::Method::OPTIONS, format!("http://{}/api", actual_addr)).send().await.unwrap();
-        
+        let res = client
+            .request(
+                reqwest::Method::OPTIONS,
+                format!("http://{}/api", actual_addr),
+            )
+            .send()
+            .await
+            .unwrap();
+
         assert_eq!(res.status().as_u16(), 200);
     }
 
@@ -1040,16 +1060,20 @@ mod tests {
             .unwrap();
 
         let mut hr = Router::new(NodeType::Static("root".into()));
-        
-        hr.head("/head-test", Arc::new(|ctx: &mut Context| {
-            async move {
-                let mut meta = ctx.local.get_value::<HttpMetadata>().unwrap();
-                meta.status = StatusCode::Ok;
-                ctx.local.set_value(meta);
-                true
-            }
-            .boxed()
-        })).register();
+
+        hr.head(
+            "/head-test",
+            Arc::new(|ctx: &mut Context| {
+                async move {
+                    let mut meta = ctx.local.get_value::<HttpMetadata>().unwrap();
+                    meta.status = StatusCode::Ok;
+                    ctx.local.set_value(meta);
+                    true
+                }
+                .boxed()
+            }),
+        )
+        .register();
 
         let server = HTTPServer::new(actual_addr, None).http(hr).clone();
         tokio::spawn(async move {
@@ -1057,10 +1081,14 @@ mod tests {
         });
 
         tokio::time::sleep(Duration::from_millis(200)).await;
-        
+
         let client = reqwest::Client::new();
-        let res = client.head(format!("http://{}/head-test", actual_addr)).send().await.unwrap();
-        
+        let res = client
+            .head(format!("http://{}/head-test", actual_addr))
+            .send()
+            .await
+            .unwrap();
+
         assert_eq!(res.status().as_u16(), 200);
     }
 }

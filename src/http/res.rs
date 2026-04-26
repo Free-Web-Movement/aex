@@ -35,16 +35,19 @@ impl<'a> Response<'a> {
         status: StatusCode,
         version: HttpVersion,
     ) -> anyhow::Result<()> {
-        let w = self.writer.as_deref_mut().ok_or_else(|| anyhow::anyhow!("Writer not available"))?;
-        
+        let w = self
+            .writer
+            .as_deref_mut()
+            .ok_or_else(|| anyhow::anyhow!("Writer not available"))?;
+
         // Optimized: pre-allocate buffer
         let mut buf = Vec::with_capacity(256);
-        
+
         // Status line
         let status_line = build_status_line(status, version);
         buf.extend_from_slice(&status_line);
         buf.extend_from_slice(b"\r\n");
-        
+
         // Headers
         for (k, v) in headers {
             buf.extend_from_slice(k.as_str().as_bytes());
@@ -52,10 +55,10 @@ impl<'a> Response<'a> {
             buf.extend_from_slice(v.as_bytes());
             buf.extend_from_slice(b"\r\n");
         }
-        
+
         buf.extend_from_slice(b"\r\n");
         buf.extend_from_slice(body);
-        
+
         w.write_all(&buf).await?;
         w.flush().await?;
 
@@ -71,24 +74,42 @@ impl<'a> Response<'a> {
 
     pub async fn send_response(&mut self) -> anyhow::Result<()> {
         let (headers, body, status, version) = {
-            let meta = self.local.get_mut::<HttpMetadata>().ok_or_else(|| anyhow::anyhow!("HttpMetadata not found"))?;
-            meta.headers.insert(HeaderKey::ContentLength, meta.body.len().to_string());
-            (meta.headers.clone(), meta.body.clone(), meta.status, meta.version)
+            let meta = self
+                .local
+                .get_mut::<HttpMetadata>()
+                .ok_or_else(|| anyhow::anyhow!("HttpMetadata not found"))?;
+            meta.headers
+                .insert(HeaderKey::ContentLength, meta.body.len().to_string());
+            (
+                meta.headers.clone(),
+                meta.body.clone(),
+                meta.status,
+                meta.version,
+            )
         };
         self.send(&headers, &body, status, version).await
     }
 
     pub async fn send_failure(&mut self) -> anyhow::Result<()> {
         let (headers, body, status, version) = {
-            let meta = self.local.get_mut::<HttpMetadata>().ok_or_else(|| anyhow::anyhow!("HttpMetadata not found"))?;
+            let meta = self
+                .local
+                .get_mut::<HttpMetadata>()
+                .ok_or_else(|| anyhow::anyhow!("HttpMetadata not found"))?;
             if meta.status == StatusCode::Ok {
                 meta.status = StatusCode::BadRequest;
             }
             if meta.body.is_empty() {
                 meta.body = b"Error".to_vec();
             }
-            meta.headers.insert(HeaderKey::ContentLength, meta.body.len().to_string());
-            (meta.headers.clone(), meta.body.clone(), meta.status, meta.version)
+            meta.headers
+                .insert(HeaderKey::ContentLength, meta.body.len().to_string());
+            (
+                meta.headers.clone(),
+                meta.body.clone(),
+                meta.status,
+                meta.version,
+            )
         };
         self.send(&headers, &body, status, version).await
     }

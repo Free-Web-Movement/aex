@@ -26,7 +26,8 @@ macro_rules! exe {
         #[allow(unused_imports)]
         use $crate::http::types::Executor;
 
-        let executor: std::sync::Arc<$crate::http::types::Executor> = Arc::new(move |$ctx: &mut Context| async move { $body }.boxed());
+        let executor: std::sync::Arc<$crate::http::types::Executor> =
+            Arc::new(move |$ctx: &mut Context| async move { $body }.boxed());
         executor
     }};
 
@@ -39,17 +40,18 @@ macro_rules! exe {
         #[allow(unused_imports)]
         use $crate::http::types::Executor;
 
-        let executor: std::sync::Arc<$crate::http::types::Executor> = Arc::new(move |$ctx: &mut Context| {
-            let $data = {
-                let $pre_ctx: &mut Context = &mut *$ctx;
-                $pre
-            };
-            async move {
-                let _ = &$data;
-                $body
-            }
-            .boxed()
-        });
+        let executor: std::sync::Arc<$crate::http::types::Executor> =
+            Arc::new(move |$ctx: &mut Context| {
+                let $data = {
+                    let $pre_ctx: &mut Context = &mut *$ctx;
+                    $pre
+                };
+                async move {
+                    let _ = &$data;
+                    $body
+                }
+                .boxed()
+            });
         executor
     }};
 
@@ -62,18 +64,19 @@ macro_rules! exe {
         #[allow(unused_imports)]
         use $crate::http::types::Executor;
 
-        let executor: std::sync::Arc<$crate::http::types::Executor> = Arc::new(move |$ctx: &mut Context| {
-            let $data = {
-                let $pre_ctx: &mut Context = &mut *$ctx;
-                $pre
-            };
+        let executor: std::sync::Arc<$crate::http::types::Executor> =
+            Arc::new(move |$ctx: &mut Context| {
+                let $data = {
+                    let $pre_ctx: &mut Context = &mut *$ctx;
+                    $pre
+                };
 
-            async move {
-                let _ = &$data;
-                $body
-            }
-            .boxed()
-        });
+                async move {
+                    let _ = &$data;
+                    $body
+                }
+                .boxed()
+            });
         executor
     }};
 
@@ -86,7 +89,8 @@ macro_rules! exe {
         #[allow(unused_imports)]
         use $crate::http::types::Executor;
 
-        let executor: std::sync::Arc<$crate::http::types::Executor> = Arc::new(move |$ctx: &mut Context| async move { $body }.boxed());
+        let executor: std::sync::Arc<$crate::http::types::Executor> =
+            Arc::new(move |$ctx: &mut Context| async move { $body }.boxed());
         executor
     }};
 }

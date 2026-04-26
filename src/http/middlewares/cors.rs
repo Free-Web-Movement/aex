@@ -71,51 +71,54 @@ impl CorsConfig {
 
     pub fn build(self) -> Arc<Executor> {
         let config = Arc::new(self);
-        exe!(move |ctx, config| {
-            let mut is_options = false;
-            
-            if let Some(meta) = ctx.local.get_mut::<HttpMetadata>() {
-                let origin = meta.headers.get(&HeaderKey::Origin).cloned();
+        exe!(
+            move |ctx, config| {
+                let mut is_options = false;
 
-                if origin.is_some() || config.allow_origin_all {
-                    let origin_value = origin.as_deref().unwrap_or("*");
+                if let Some(meta) = ctx.local.get_mut::<HttpMetadata>() {
+                    let origin = meta.headers.get(&HeaderKey::Origin).cloned();
+
+                    if origin.is_some() || config.allow_origin_all {
+                        let origin_value = origin.as_deref().unwrap_or("*");
+                        meta.headers.insert(
+                            HeaderKey::AccessControlAllowOrigin,
+                            origin_value.to_string(),
+                        );
+                    }
+
                     meta.headers.insert(
-                        HeaderKey::AccessControlAllowOrigin,
-                        origin_value.to_string(),
+                        HeaderKey::AccessControlAllowMethods,
+                        config.allow_methods.join(", "),
                     );
+                    meta.headers.insert(
+                        HeaderKey::AccessControlAllowHeaders,
+                        config.allow_headers.join(", "),
+                    );
+
+                    if config.allow_credentials {
+                        meta.headers
+                            .insert(HeaderKey::AccessControlAllowCredentials, "true".to_string());
+                    }
+
+                    if let Some(max_age) = config.max_age {
+                        meta.headers
+                            .insert(HeaderKey::AccessControlMaxAge, max_age.to_string());
+                    }
+
+                    if meta.method.to_str() == "OPTIONS" {
+                        is_options = true;
+                    }
                 }
 
-                meta.headers.insert(
-                    HeaderKey::AccessControlAllowMethods,
-                    config.allow_methods.join(", "),
-                );
-                meta.headers.insert(
-                    HeaderKey::AccessControlAllowHeaders,
-                    config.allow_headers.join(", "),
-                );
-
-                if config.allow_credentials {
-                    meta.headers
-                        .insert(HeaderKey::AccessControlAllowCredentials, "true".to_string());
+                if is_options {
+                    ctx.status(StatusCode::Ok).send("", None);
+                    return false;
                 }
 
-                if let Some(max_age) = config.max_age {
-                    meta.headers
-                        .insert(HeaderKey::AccessControlMaxAge, max_age.to_string());
-                }
-
-                if meta.method.to_str() == "OPTIONS" {
-                    is_options = true;
-                }
-            }
-
-            if is_options {
-                ctx.status(StatusCode::Ok).send("", None);
-                return false;
-            }
-
-            true
-        }, |ctx| { config.clone() })
+                true
+            },
+            |ctx| { config.clone() }
+        )
     }
 }
 

@@ -1,5 +1,5 @@
-use aex::connection::commands::reject::RejectCommand;
 use aex::connection::commands::CommandId;
+use aex::connection::commands::reject::RejectCommand;
 
 #[test]
 fn test_reject_command_new() {

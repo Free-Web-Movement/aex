@@ -1,9 +1,9 @@
-use aex::connection::commands::router::CommandRouter;
 use aex::connection::commands::CommandId;
+use aex::connection::commands::router::CommandRouter;
 use aex::connection::context::Context;
+use async_lock::Mutex;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use async_lock::Mutex;
 
 #[test]
 fn test_command_router_new() {

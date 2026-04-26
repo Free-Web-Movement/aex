@@ -117,9 +117,21 @@ async fn test_server_communication_bus() {
 
     sleep(Duration::from_millis(100)).await;
 
-    assert_eq!(pipe_count.load(Ordering::SeqCst), 1, "Pipe callback should execute 1 time");
-    assert_eq!(spread_count.load(Ordering::SeqCst), 1, "Spread callback should execute 1 time");
-    assert_eq!(event_count.load(Ordering::SeqCst), 1, "Event callback should execute 1 time");
+    assert_eq!(
+        pipe_count.load(Ordering::SeqCst),
+        1,
+        "Pipe callback should execute 1 time"
+    );
+    assert_eq!(
+        spread_count.load(Ordering::SeqCst),
+        1,
+        "Spread callback should execute 1 time"
+    );
+    assert_eq!(
+        event_count.load(Ordering::SeqCst),
+        1,
+        "Event callback should execute 1 time"
+    );
 
     println!("Server communication bus test passed!");
 }

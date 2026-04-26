@@ -77,10 +77,16 @@ impl GlobalContext {
 
     pub fn init_heartbeat_manager(&mut self) {
         let local_node = futures::executor::block_on(self.local_node.read()).clone();
-        self.heartbeat_manager = Some(HeartbeatManager::new(local_node).with_config(self.heartbeat_config.clone()));
+        self.heartbeat_manager =
+            Some(HeartbeatManager::new(local_node).with_config(self.heartbeat_config.clone()));
     }
 
-    pub fn start_heartbeat(&self, ctx: Arc<tokio::sync::Mutex<crate::connection::context::Context>>, peer_addr: SocketAddr, cancel_token: CancellationToken) {
+    pub fn start_heartbeat(
+        &self,
+        ctx: Arc<tokio::sync::Mutex<crate::connection::context::Context>>,
+        peer_addr: SocketAddr,
+        cancel_token: CancellationToken,
+    ) {
         if let Some(ref manager) = self.heartbeat_manager {
             let manager = manager.clone();
             manager.start_server_heartbeat(ctx, peer_addr, cancel_token);
@@ -197,7 +203,7 @@ impl GlobalContext {
 
         for bucket_ref in self.manager.connections.iter() {
             let scope = bucket_ref.key().1;
-            
+
             for entry_ref in bucket_ref.servers.iter() {
                 let addr = *entry_ref.key();
                 let entry = entry_ref.value();
@@ -208,7 +214,7 @@ impl GlobalContext {
                     uptime_secs: entry.uptime_secs(),
                 });
             }
-            
+
             for entry_ref in bucket_ref.clients.iter() {
                 let addr = *entry_ref.key();
                 let entry = entry_ref.value();

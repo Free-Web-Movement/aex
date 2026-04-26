@@ -1,7 +1,7 @@
 //! Simple HTTP Benchmark - blocking multi-threaded
 
-use std::net::TcpListener;
 use std::io::{Read, Write};
+use std::net::TcpListener;
 use std::thread;
 
 fn handle_client(mut stream: std::net::TcpStream) {
@@ -18,7 +18,9 @@ fn handle_client(mut stream: std::net::TcpStream) {
                 } else {
                     "HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nHello"
                 };
-                if stream.write_all(response.as_bytes()).is_err() { break; }
+                if stream.write_all(response.as_bytes()).is_err() {
+                    break;
+                }
                 let _ = stream.flush();
             }
             Err(_) => break,
@@ -29,7 +31,7 @@ fn handle_client(mut stream: std::net::TcpStream) {
 fn main() {
     let listener = TcpListener::bind("127.0.0.1:8080").unwrap();
     println!("Simple HTTP listening on 127.0.0.1:8080");
-    
+
     for stream in listener.incoming() {
         if let Ok(stream) = stream {
             thread::spawn(|| handle_client(stream));

@@ -2,7 +2,7 @@
 //!
 //! Tests: no URL, static URL, dynamic URL
 
-use axum::{routing::get, Router};
+use axum::{Router, routing::get};
 use std::net::SocketAddr;
 
 #[tokio::main]
@@ -15,10 +15,9 @@ async fn main() {
         .route("/api/users/:id", get(handler_user_id));
 
     println!("Axum server on {}", addr);
-    axum::serve(
-        tokio::net::TcpListener::bind(addr).await.unwrap(),
-        app,
-    ).await.unwrap();
+    axum::serve(tokio::net::TcpListener::bind(addr).await.unwrap(), app)
+        .await
+        .unwrap();
 }
 
 async fn handler_root() -> &'static str {

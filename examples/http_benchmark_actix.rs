@@ -2,7 +2,7 @@
 //!
 //! Tests: no URL, static URL, dynamic URL
 
-use actix_web::{get, web, App, HttpServer, Responder};
+use actix_web::{App, HttpServer, Responder, get, web};
 
 #[get("/")]
 async fn root() -> impl Responder {
@@ -21,13 +21,8 @@ async fn user_id(id: web::Path<i32>) -> impl Responder {
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    HttpServer::new(|| {
-        App::new()
-            .service(root)
-            .service(users)
-            .service(user_id)
-    })
-    .bind("127.0.0.1:8082")?
-    .run()
-    .await
+    HttpServer::new(|| App::new().service(root).service(users).service(user_id))
+        .bind("127.0.0.1:8082")?
+        .run()
+        .await
 }

@@ -13,12 +13,8 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{
     connection::{
-        context::Context,
-        entry::ConnectionEntry,
-        global::GlobalContext,
-        scope::NetworkScope,
-        status::ConnectionStatus,
-        types::BiDirectionalConnections,
+        context::Context, entry::ConnectionEntry, global::GlobalContext, scope::NetworkScope,
+        status::ConnectionStatus, types::BiDirectionalConnections,
     },
     tcp::types::{TCPCommand, TCPFrame},
 };
@@ -143,7 +139,12 @@ impl ConnectionManager {
         }
 
         let timeout = timeout_secs.unwrap_or(10);
-        let socket = match tokio::time::timeout(std::time::Duration::from_secs(timeout), tokio::net::TcpStream::connect(addr)).await {
+        let socket = match tokio::time::timeout(
+            std::time::Duration::from_secs(timeout),
+            tokio::net::TcpStream::connect(addr),
+        )
+        .await
+        {
             Ok(Ok(socket)) => socket,
             Ok(Err(e)) => return Err(Box::new(e)),
             Err(_) => {
@@ -185,12 +186,12 @@ impl ConnectionManager {
         context: Option<Arc<Mutex<Context>>>, // writer: Option<Arc<Mutex<Option<BoxWriter>>>>,
     ) {
         let ip = addr.ip();
-        
+
         // 跳过 loopback 地址
         if ip.is_loopback() {
             return;
         }
-        
+
         let scope = NetworkScope::from_ip(&ip);
         let key = (ip, scope);
 

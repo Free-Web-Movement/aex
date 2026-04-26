@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 use std::sync::Arc;
 
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{Mutex, mpsc};
 
 use crate::connection::commands::CommandId;
 
@@ -115,7 +115,7 @@ impl MessageQueue {
     pub async fn confirm(&self, message_id: u64) {
         let mut confirmed = self.confirmed.lock().await;
         confirmed.insert(message_id);
-        
+
         let mut sent = self.sent.lock().await;
         sent.retain(|m| m.id != message_id);
     }
@@ -131,7 +131,7 @@ impl MessageQueue {
     pub async fn retry_failed(&self) -> Vec<Message> {
         let mut to_retry = VecDeque::new();
         let now = current_timestamp();
-        
+
         let mut sent = self.sent.lock().await;
         while let Some(msg) = sent.pop_front() {
             if msg.retries >= self.config.max_retries {
@@ -142,18 +142,18 @@ impl MessageQueue {
             }
             to_retry.push_back(msg);
         }
-        
+
         let mut pending = self.pending.lock().await;
         while let Some(msg) = to_retry.pop_front() {
             pending.push_back(msg);
         }
-        
+
         pending.iter().cloned().collect()
     }
 
     pub async fn clear_expired(&self) {
         let now = current_timestamp();
-        
+
         let mut sent = self.sent.lock().await;
         sent.retain(|m| now - m.timestamp <= self.config.ttl_secs);
     }

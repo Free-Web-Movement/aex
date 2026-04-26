@@ -6,7 +6,6 @@ use std::{collections::HashMap, sync::Arc};
 use tokio::net::UdpSocket;
 
 use crate::connection::global::GlobalContext;
-use crate::connection::types::IDExtractor;
 use crate::tcp::types::{Codec, Command, Frame};
 
 pub struct Router<F = (), C = ()> {
@@ -54,9 +53,18 @@ impl<F, C> Router<F, C> {
             extractor: None,
             _phantom: std::marker::PhantomData,
         };
-        router.handlers.insert(0, Box::new(|_global: Arc<GlobalContext>, _frame: (), _cmd: (), _addr: SocketAddr, _socket: Arc<UdpSocket>| {
-            Box::pin(async { Ok::<bool, anyhow::Error>(true) })
-        }) as Box<dyn Any + Send + Sync>);
+        router.handlers.insert(
+            0,
+            Box::new(
+                |_global: Arc<GlobalContext>,
+                 _frame: (),
+                 _cmd: (),
+                 _addr: SocketAddr,
+                 _socket: Arc<UdpSocket>| {
+                    Box::pin(async { Ok::<bool, anyhow::Error>(true) })
+                },
+            ) as Box<dyn Any + Send + Sync>,
+        );
         router
     }
 
@@ -91,9 +99,11 @@ impl<F, C> Router<F, C> {
         F: Frame + Send + Sync + Clone + 'static,
         C: Command + Send + Sync + 'static,
     {
-        let extractor = self.extractor.as_ref()
+        let extractor = self
+            .extractor
+            .as_ref()
             .ok_or_else(|| anyhow::anyhow!("UDP extractor not set"))?;
-        
+
         let mut buf = [0u8; 65535];
         loop {
             let (n, peer_addr) = socket.recv_from(&mut buf).await?;

@@ -136,7 +136,12 @@ impl ConnectionPoolLimits {
         };
         self.active_connections.write().await.insert(addr, info);
 
-        *self.connection_counts.write().await.entry(addr).or_insert(0) += 1;
+        *self
+            .connection_counts
+            .write()
+            .await
+            .entry(addr)
+            .or_insert(0) += 1;
 
         let subnet = Self::get_subnet(&addr);
         *self.subnet_counts.write().await.entry(subnet).or_insert(0) += 1;
@@ -171,9 +176,11 @@ impl ConnectionPoolLimits {
 
         if let Some(info) = removed {
             if info.is_outbound {
-                *self.outbound_count.write().await = self.outbound_count.read().await.saturating_sub(1);
+                *self.outbound_count.write().await =
+                    self.outbound_count.read().await.saturating_sub(1);
             } else {
-                *self.inbound_count.write().await = self.inbound_count.read().await.saturating_sub(1);
+                *self.inbound_count.write().await =
+                    self.inbound_count.read().await.saturating_sub(1);
             }
         }
     }

@@ -53,7 +53,12 @@ pub struct RouteBuilder<'a> {
 }
 
 impl<'a> RouteBuilder<'a> {
-    fn new(router: &'a mut Router, method: &'static str, path: String, handler: Arc<Executor>) -> Self {
+    fn new(
+        router: &'a mut Router,
+        method: &'static str,
+        path: String,
+        handler: Arc<Executor>,
+    ) -> Self {
         Self {
             router: Rc::new(RefCell::new(router)),
             method,
@@ -71,26 +76,31 @@ impl<'a> RouteBuilder<'a> {
 
     /// Register the route with the router.
     pub fn register(self) {
-        let segments: Vec<&str> = self.path
-            .split('/')
-            .filter(|s| !s.is_empty())
-            .collect();
-        
+        let segments: Vec<&str> = self.path.split('/').filter(|s| !s.is_empty()).collect();
+
         let method_key = self.method.to_uppercase();
-        
+
         {
             let mut router = self.router.borrow_mut();
-            
+
             if segments.is_empty() {
                 if router.handlers.is_none() {
                     router.handlers = Some(AHashMap::with_capacity(8));
                 }
-                router.handlers.as_mut().unwrap().insert(method_key.clone(), self.handler.clone());
+                router
+                    .handlers
+                    .as_mut()
+                    .unwrap()
+                    .insert(method_key.clone(), self.handler.clone());
                 if !self.middlewares.is_empty() {
                     if router.middlewares.is_none() {
                         router.middlewares = Some(AHashMap::with_capacity(4));
                     }
-                    router.middlewares.as_mut().unwrap().insert(method_key, self.middlewares.clone());
+                    router
+                        .middlewares
+                        .as_mut()
+                        .unwrap()
+                        .insert(method_key, self.middlewares.clone());
                 }
                 return;
             }
@@ -120,13 +130,21 @@ impl<'a> RouteBuilder<'a> {
             if current.handlers.is_none() {
                 current.handlers = Some(AHashMap::with_capacity(8));
             }
-            current.handlers.as_mut().unwrap().insert(method_key.clone(), self.handler.clone());
+            current
+                .handlers
+                .as_mut()
+                .unwrap()
+                .insert(method_key.clone(), self.handler.clone());
 
             if !self.middlewares.is_empty() {
                 if current.middlewares.is_none() {
                     current.middlewares = Some(AHashMap::with_capacity(4));
                 }
-                current.middlewares.as_mut().unwrap().insert(method_key, self.middlewares.clone());
+                current
+                    .middlewares
+                    .as_mut()
+                    .unwrap()
+                    .insert(method_key, self.middlewares.clone());
             }
         }
     }
@@ -178,7 +196,7 @@ impl Router {
     #[inline]
     pub fn match_route_fast<'a>(&'a self, segs: &'a [&str]) -> Option<&'a Router> {
         let mut current: &Router = self;
-        
+
         for seg in segs {
             let seg_str: &str = seg;
             match current.children.get(seg_str) {
@@ -207,7 +225,7 @@ impl Router {
                             }
                         }
                     }
-                    
+
                     if let Some(node) = current.children.get("*") {
                         return Some(node);
                     }
@@ -348,7 +366,7 @@ impl Router {
     /// 返回: bool - 路由是否存在
     pub fn has_route(&self, method: &str, path: &str) -> bool {
         let pure_path = path.split('?').next().unwrap_or("");
-        
+
         let segments: Vec<&str> = pure_path
             .trim_start_matches('/')
             .split('/')
@@ -356,14 +374,14 @@ impl Router {
             .collect();
 
         let mut params = crate::http::params::SmallParams::with_capacity(8.min(segments.len()));
-        
+
         let node = match self.match_route(&segments, &mut params) {
             Some(n) => n,
             None => return false,
         };
-        
+
         let method_key = method.to_uppercase();
-        
+
         // 检查是否有 handler
         node.handlers
             .as_ref()
@@ -403,8 +421,13 @@ impl Router {
             // 5. 处理 Form Body (如果是 x-www-form-urlencoded)
             let (is_form, length) = {
                 let meta = ctx.local.get_ref::<HttpMetadata>().unwrap();
-                let is_form = meta.content_type.to_string().contains(SubMediaType::UrlEncoded.as_str());
-                let length = meta.headers.get(&crate::http::protocol::header::HeaderKey::ContentLength)
+                let is_form = meta
+                    .content_type
+                    .to_string()
+                    .contains(SubMediaType::UrlEncoded.as_str());
+                let length = meta
+                    .headers
+                    .get(&crate::http::protocol::header::HeaderKey::ContentLength)
                     .and_then(|s| s.parse::<usize>().ok())
                     .unwrap_or(0);
                 (is_form, length)
@@ -482,7 +505,7 @@ impl Router {
 
         if let Some(mut inner_reader) = reader {
             let is_http = HttpMethod::is_http_connection(&mut inner_reader).await?;
-            
+
             // 将 Reader 放回 Context
             {
                 let mut guard = ctx.lock().await;

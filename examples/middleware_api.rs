@@ -1,11 +1,11 @@
 use aex::connection::context::TypeMapExt;
+use aex::exe;
 use aex::http::meta::HttpMetadata;
 use aex::http::protocol::header::HeaderKey;
 use aex::http::router::{NodeType, Router as HttpRouter};
 use aex::http::types::Executor;
 use aex::server::HTTPServer;
 use aex::tcp::types::{Command, RawCodec};
-use aex::exe;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
@@ -46,46 +46,72 @@ async fn main() -> anyhow::Result<()> {
     let auth = auth_middleware();
     let logger = logging_middleware();
 
-    router.get("/api/users", exe!(|ctx| {
-        ctx.send(r#"["user1", "user2", "user3"]"#, None);
-        true
-    })).middleware(logger.clone()).register();
+    router
+        .get(
+            "/api/users",
+            exe!(|ctx| {
+                ctx.send(r#"["user1", "user2", "user3"]"#, None);
+                true
+            }),
+        )
+        .middleware(logger.clone())
+        .register();
 
-    router.get("/api/users/:id", exe!(|ctx| {
-        let meta = ctx.local.get_value::<HttpMetadata>().unwrap();
-        let id = meta.params
-            .as_ref()
-            .and_then(|p| p.data.as_ref())
-            .and_then(|d| d.get("id"))
-            .map(|v| v.as_str())
-            .unwrap_or("unknown");
-        ctx.send(format!(r#"{{"id":"{}","name":"User {}"}}"#, id, id), None);
-        true
-    })).middleware(auth.clone()).middleware(logger.clone()).register();
+    router
+        .get(
+            "/api/users/:id",
+            exe!(|ctx| {
+                let meta = ctx.local.get_value::<HttpMetadata>().unwrap();
+                let id = meta
+                    .params
+                    .as_ref()
+                    .and_then(|p| p.data.as_ref())
+                    .and_then(|d| d.get("id"))
+                    .map(|v| v.as_str())
+                    .unwrap_or("unknown");
+                ctx.send(format!(r#"{{"id":"{}","name":"User {}"}}"#, id, id), None);
+                true
+            }),
+        )
+        .middleware(auth.clone())
+        .middleware(logger.clone())
+        .register();
 
-    router.post("/api/users", exe!(|ctx| {
-        let meta = ctx.local.get_value::<HttpMetadata>().unwrap();
-        let body = String::from_utf8_lossy(&meta.body);
-        println!("Create user: {}", body);
-        ctx.send(format!(r#"{{"status":"created","data":{}}}"#, body), None);
-        true
-    })).middleware(auth.clone()).middleware(logger.clone()).register();
+    router
+        .post(
+            "/api/users",
+            exe!(|ctx| {
+                let meta = ctx.local.get_value::<HttpMetadata>().unwrap();
+                let body = String::from_utf8_lossy(&meta.body);
+                println!("Create user: {}", body);
+                ctx.send(format!(r#"{{"status":"created","data":{}}}"#, body), None);
+                true
+            }),
+        )
+        .middleware(auth.clone())
+        .middleware(logger.clone())
+        .register();
 
-    router.get("/public/*", exe!(|ctx| {
-        let meta = ctx.local.get_value::<HttpMetadata>().unwrap();
-        ctx.send(format!(r#"{{"path":"{}"}}"#, meta.path), None);
-        true
-    })).register();
+    router
+        .get(
+            "/public/*",
+            exe!(|ctx| {
+                let meta = ctx.local.get_value::<HttpMetadata>().unwrap();
+                ctx.send(format!(r#"{{"path":"{}"}}"#, meta.path), None);
+                true
+            }),
+        )
+        .register();
 
     println!("Server running at http://{}", addr);
     println!("Try:");
     println!("  curl http://{}/public/info", addr);
     println!("  curl http://{}/api/users", addr);
-    println!("  curl -H 'Authorization: Bearer token' http://{}/api/users/123", addr);
+    println!(
+        "  curl -H 'Authorization: Bearer token' http://{}/api/users/123",
+        addr
+    );
 
-    HTTPServer::new(addr, None)
-        .http(router)
-        .start()
-        .await?;
+    HTTPServer::new(addr, None).http(router).start().await?;
     Ok(())
 }

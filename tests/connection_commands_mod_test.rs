@@ -1,4 +1,4 @@
-use aex::connection::commands::{detect_command, CommandId};
+use aex::connection::commands::{CommandId, detect_command};
 
 #[test]
 fn test_detect_command_valid() {

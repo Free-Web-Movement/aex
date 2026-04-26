@@ -5,12 +5,12 @@ use anyhow::{Ok, Result};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::Mutex;
 
-use crate::constants::tcp::MAX_HANDSHAKE_SIZE;
 use crate::connection::commands::{
-    HelloCommand, WelcomeCommand, AckCommand, RejectCommand, CommandId,
+    AckCommand, CommandId, HelloCommand, RejectCommand, WelcomeCommand,
 };
 use crate::connection::context::Context;
 use crate::connection::node::Node;
+use crate::constants::tcp::MAX_HANDSHAKE_SIZE;
 use crate::crypto::session_key_manager::PairedSessionKey;
 
 pub struct HandshakeHandler {
@@ -72,7 +72,7 @@ impl HandshakeHandler {
         } else {
             None
         };
-        
+
         HelloCommand::new(
             self.local_node.clone(),
             ephemeral_public,
@@ -80,12 +80,12 @@ impl HandshakeHandler {
         )
     }
 
-    pub fn create_welcome(&self, accepted: bool, ephemeral_public: Option<Vec<u8>>) -> WelcomeCommand {
-        WelcomeCommand::new(
-            self.local_node.clone(),
-            accepted,
-            ephemeral_public,
-        )
+    pub fn create_welcome(
+        &self,
+        accepted: bool,
+        ephemeral_public: Option<Vec<u8>>,
+    ) -> WelcomeCommand {
+        WelcomeCommand::new(self.local_node.clone(), accepted, ephemeral_public)
     }
 
     pub fn create_ack(&self, session_key_id: Option<Vec<u8>>) -> AckCommand {
@@ -103,7 +103,10 @@ impl HandshakeHandler {
     ) -> Result<Option<Node>> {
         {
             let mut guard = ctx.lock().await;
-            let reader = guard.reader.as_mut().ok_or_else(|| anyhow::anyhow!("no reader"))?;
+            let reader = guard
+                .reader
+                .as_mut()
+                .ok_or_else(|| anyhow::anyhow!("no reader"))?;
             let mut length_buf = [0u8; 4];
             reader.read_exact(&mut length_buf).await?;
             let len = u32::from_le_bytes(length_buf) as usize;
@@ -112,9 +115,9 @@ impl HandshakeHandler {
             }
             let mut data = vec![0u8; len];
             reader.read_exact(&mut data).await?;
-            
+
             let id = u32::from_le_bytes(data[0..4].try_into().unwrap());
-            
+
             match CommandId::from_u32(id) {
                 Some(CommandId::Hello) => {
                     let hello = HelloCommand::decode(&data).map_err(|e| anyhow::anyhow!(e))?;
@@ -123,20 +126,21 @@ impl HandshakeHandler {
                         self.send_frame(ctx.clone(), reject.encode()).await?;
                         return Err(anyhow::anyhow!("version mismatch"));
                     }
-                    
+
                     if let Some(callback) = &self.on_established {
                         callback(hello.node.clone(), peer_addr);
                     }
-                    
-                    let ephemeral_public = if hello.request_encryption && self.session_keys.is_some() {
-                        Some(vec![0u8; 32])
-                    } else {
-                        None
-                    };
-                    
+
+                    let ephemeral_public =
+                        if hello.request_encryption && self.session_keys.is_some() {
+                            Some(vec![0u8; 32])
+                        } else {
+                            None
+                        };
+
                     let welcome = self.create_welcome(true, ephemeral_public);
                     self.send_frame(ctx.clone(), welcome.encode()).await?;
-                    
+
                     return Ok(Some(hello.node));
                 }
                 Some(CommandId::Reject) => {
@@ -155,7 +159,10 @@ impl HandshakeHandler {
 
     async fn send_frame(&self, ctx: Arc<Mutex<Context>>, data: Vec<u8>) -> Result<()> {
         let mut guard = ctx.lock().await;
-        let writer = guard.writer.as_mut().ok_or_else(|| anyhow::anyhow!("no writer"))?;
+        let writer = guard
+            .writer
+            .as_mut()
+            .ok_or_else(|| anyhow::anyhow!("no writer"))?;
         writer.write_all(&(data.len() as u32).to_le_bytes()).await?;
         writer.write_all(&data).await?;
         Ok(())
@@ -168,7 +175,10 @@ impl HandshakeHandler {
 
     async fn send_frame_internal(ctx: &Arc<Mutex<Context>>, data: Vec<u8>) -> Result<()> {
         let mut guard = ctx.lock().await;
-        let writer = guard.writer.as_mut().ok_or_else(|| anyhow::anyhow!("no writer"))?;
+        let writer = guard
+            .writer
+            .as_mut()
+            .ok_or_else(|| anyhow::anyhow!("no writer"))?;
         writer.write_all(&(data.len() as u32).to_le_bytes()).await?;
         writer.write_all(&data).await?;
         Ok(())

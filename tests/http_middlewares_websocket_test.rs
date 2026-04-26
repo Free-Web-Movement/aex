@@ -4,17 +4,20 @@ mod websocket_tests {
         connection::{context::Context, global::GlobalContext},
         http::{
             middlewares::websocket::WebSocket,
-            protocol::{header::{HeaderKey, Headers}, method::HttpMethod},
+            protocol::{
+                header::{HeaderKey, Headers},
+                method::HttpMethod,
+            },
             websocket::{WSCodec, WSFrame},
         },
         tcp::types::{Command, Frame},
     };
+    use ahash::AHashMap;
     use bytes::BytesMut;
     use futures::{SinkExt, StreamExt};
     use std::{net::SocketAddr, sync::Arc};
     use tokio::io::{BufReader, duplex};
     use tokio_util::codec::{Decoder, Encoder, Framed};
-    use ahash::AHashMap;
 
     // 辅助工具：模拟客户端发送带 Mask 的 WebSocket 帧
     fn create_masked_frame(opcode: u8, payload: &[u8]) -> Vec<u8> {
@@ -84,15 +87,14 @@ mod websocket_tests {
         let (client, server) = duplex(1024);
 
         // 模拟业务逻辑：收到任何消息都回复 "ACK"
-        let ws = WebSocket::new()
-            .on_text(|_ws, _ctx, text| {
-                Box::pin(async move {
-                    match text.as_str() {
-                        "ping" => true,
-                        _ => false, // 收到非 ping 则断开
-                    }
-                })
-            });
+        let ws = WebSocket::new().on_text(|_ws, _ctx, text| {
+            Box::pin(async move {
+                match text.as_str() {
+                    "ping" => true,
+                    _ => false, // 收到非 ping 则断开
+                }
+            })
+        });
 
         // 启动服务器循环
         // 1. 拆分双工流

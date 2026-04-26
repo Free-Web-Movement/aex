@@ -1,5 +1,5 @@
-use aex::connection::commands::hello::HelloCommand;
 use aex::connection::commands::CommandId;
+use aex::connection::commands::hello::HelloCommand;
 use aex::connection::node::Node;
 
 #[test]

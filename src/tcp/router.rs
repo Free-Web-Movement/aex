@@ -7,7 +7,6 @@ use tokio::io::AsyncReadExt;
 use tokio::sync::Mutex;
 
 use crate::connection::context::Context;
-use crate::connection::types::IDExtractor;
 use crate::tcp::types::{Codec, TCPCommand, TCPFrame};
 
 pub type Doer<F, C> = Box<
@@ -65,16 +64,14 @@ impl<F, C> Router<F, C> {
     }
 
     /// 核心分发逻辑
-    pub async fn handle_frame(
-        &self,
-        ctx: Arc<Mutex<Context>>,
-        frame: F,
-    ) -> anyhow::Result<bool>
+    pub async fn handle_frame(&self, ctx: Arc<Mutex<Context>>, frame: F) -> anyhow::Result<bool>
     where
         F: TCPFrame,
         C: TCPCommand,
     {
-        let extractor = self.extractor.as_ref()
+        let extractor = self
+            .extractor
+            .as_ref()
             .ok_or_else(|| anyhow::anyhow!("TCP extractor not set"))?;
         if !frame.validate() {
             return Ok(false); // 校验失败，跳过此帧
@@ -114,17 +111,16 @@ impl<F, C> Router<F, C> {
         Ok(true)
     }
 
-    pub async fn handle(
-        &self,
-        ctx: Arc<Mutex<Context>>,
-    ) -> anyhow::Result<()>
+    pub async fn handle(&self, ctx: Arc<Mutex<Context>>) -> anyhow::Result<()>
     where
         F: TCPFrame,
         C: TCPCommand,
     {
-        let extractor = self.extractor.as_ref()
+        let extractor = self
+            .extractor
+            .as_ref()
             .ok_or_else(|| anyhow::anyhow!("TCP extractor not set"))?;
-        
+
         let mut session_buf: Vec<u8> = Vec::with_capacity(4096);
         let mut buf = vec![0u8; 1024];
 
@@ -159,9 +155,7 @@ impl<F, C> Router<F, C> {
             while !session_buf.is_empty() {
                 match <F as Codec>::decode_with_len(&session_buf) {
                     std::result::Result::Ok((frame, consumed)) => {
-                        let should_continue = self
-                            .handle_frame(ctx.clone(), frame)
-                            .await?;
+                        let should_continue = self.handle_frame(ctx.clone(), frame).await?;
 
                         session_buf.drain(0..consumed);
 

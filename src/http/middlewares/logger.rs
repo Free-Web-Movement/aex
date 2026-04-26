@@ -38,36 +38,39 @@ impl LogConfig {
 
     pub fn build(self) -> Arc<Executor> {
         let config = self;
-        exe!(move |ctx, config| {
-            if let Some(meta) = ctx.local.get_ref::<HttpMetadata>() {
-                let method = if config.log_method {
-                    Some(meta.method.to_str())
-                } else {
-                    None
-                };
+        exe!(
+            move |ctx, config| {
+                if let Some(meta) = ctx.local.get_ref::<HttpMetadata>() {
+                    let method = if config.log_method {
+                        Some(meta.method.to_str())
+                    } else {
+                        None
+                    };
 
-                let path = if config.log_path {
-                    Some(meta.path.as_str())
-                } else {
-                    None
-                };
+                    let path = if config.log_path {
+                        Some(meta.path.as_str())
+                    } else {
+                        None
+                    };
 
-                match (method, path) {
-                    (Some(m), Some(p)) => {
-                        tracing::info!(target: "aex", "{} {} [AEX]", m, p);
+                    match (method, path) {
+                        (Some(m), Some(p)) => {
+                            tracing::info!(target: "aex", "{} {} [AEX]", m, p);
+                        }
+                        (Some(m), None) => {
+                            tracing::info!(target: "aex", "{} [AEX]", m);
+                        }
+                        (None, Some(p)) => {
+                            tracing::info!(target: "aex", "{} [AEX]", p);
+                        }
+                        (None, None) => {}
                     }
-                    (Some(m), None) => {
-                        tracing::info!(target: "aex", "{} [AEX]", m);
-                    }
-                    (None, Some(p)) => {
-                        tracing::info!(target: "aex", "{} [AEX]", p);
-                    }
-                    (None, None) => {}
                 }
-            }
 
-            true
-        }, |ctx| { config.clone() })
+                true
+            },
+            |ctx| { config.clone() }
+        )
     }
 }
 

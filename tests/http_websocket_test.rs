@@ -1,8 +1,8 @@
 #[cfg(test)]
 mod tests {
-    use bytes::BytesMut;
-    use aex::http::websocket::{WSFrame, WSCodec};
+    use aex::http::websocket::{WSCodec, WSFrame};
     use aex::tcp::types::{Codec, Command, Frame};
+    use bytes::BytesMut;
     use tokio_util::codec::{Decoder, Encoder};
 
     #[test]
@@ -45,11 +45,14 @@ mod tests {
 
     #[test]
     fn test_ws_frame_payload() {
-        assert_eq!(WSFrame::Text("hello".to_string()).payload(), Some(b"hello".to_vec()));
+        assert_eq!(
+            WSFrame::Text("hello".to_string()).payload(),
+            Some(b"hello".to_vec())
+        );
         assert_eq!(WSFrame::Binary(vec![1, 2]).payload(), Some(vec![1, 2]));
         assert_eq!(WSFrame::Ping(vec![1]).payload(), Some(vec![1]));
         assert_eq!(WSFrame::Pong(vec![2]).payload(), Some(vec![2]));
-        
+
         // Close frame has no payload
         assert!(WSFrame::Close(0, None).payload().is_none());
     }
@@ -203,7 +206,8 @@ mod tests {
     #[tokio::test]
     async fn test_ws_codec_decode_extended_length_64() {
         let mut codec = WSCodec {};
-        let mut src = BytesMut::from(&[0x82, 0x7F, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01][..]); // length = 1
+        let mut src =
+            BytesMut::from(&[0x82, 0x7F, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01][..]); // length = 1
         src.extend(vec![0u8; 1]);
 
         let result = codec.decode(&mut src);
@@ -219,7 +223,7 @@ mod tests {
         assert!(result.unwrap().is_none());
     }
 
-#[tokio::test]
+    #[tokio::test]
     async fn test_ws_codec_decode_masked() {
         let mut codec = WSCodec {};
         // Mask bit set (0x80), length 5, mask key 0x01020304
@@ -240,7 +244,9 @@ mod tests {
         let mut codec = WSCodec {};
         let mut dst = BytesMut::new();
 
-        codec.encode(WSFrame::Text("hello".to_string()), &mut dst).unwrap();
+        codec
+            .encode(WSFrame::Text("hello".to_string()), &mut dst)
+            .unwrap();
 
         assert_eq!(dst[0], 0x81); // FIN + text opcode
         assert_eq!(dst[1], 0x05); // length 5
@@ -252,7 +258,9 @@ mod tests {
         let mut codec = WSCodec {};
         let mut dst = BytesMut::new();
 
-        codec.encode(WSFrame::Binary(vec![0xFF, 0x00]), &mut dst).unwrap();
+        codec
+            .encode(WSFrame::Binary(vec![0xFF, 0x00]), &mut dst)
+            .unwrap();
 
         assert_eq!(dst[0], 0x82); // FIN + binary opcode
         assert_eq!(dst[1], 0x02); // length 2
@@ -286,7 +294,9 @@ mod tests {
         let mut codec = WSCodec {};
         let mut dst = BytesMut::new();
 
-        codec.encode(WSFrame::Close(1000, Some("bye".to_string())), &mut dst).unwrap();
+        codec
+            .encode(WSFrame::Close(1000, Some("bye".to_string())), &mut dst)
+            .unwrap();
 
         assert_eq!(dst[0], 0x88); // FIN + close opcode
         assert_eq!(dst[1], 0x05); // length 5 (2 for code + 3 for "bye")

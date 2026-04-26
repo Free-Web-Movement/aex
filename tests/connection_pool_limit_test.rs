@@ -1,6 +1,8 @@
 #[cfg(test)]
 mod tests {
-    use aex::connection::pool_limit::{ConnectionPoolConfig, ConnectionPoolLimits, PoolAllowResult};
+    use aex::connection::pool_limit::{
+        ConnectionPoolConfig, ConnectionPoolLimits, PoolAllowResult,
+    };
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
     #[test]
@@ -44,7 +46,7 @@ mod tests {
     async fn test_connection_pool_can_connect_allowed() {
         let config = ConnectionPoolConfig::new(100);
         let limits = ConnectionPoolLimits::new(config);
-        
+
         let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
         let result = limits.can_connect(&addr, true).await;
         assert!(result.is_allowed());
@@ -54,10 +56,10 @@ mod tests {
     async fn test_connection_pool_total_limit() {
         let config = ConnectionPoolConfig::new(1);
         let limits = ConnectionPoolLimits::new(config);
-        
+
         let addr1 = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
         let addr2 = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 2)), 8080);
-        
+
         limits.add_connection(addr1, true).await;
         let result = limits.can_connect(&addr2, true).await;
         assert!(matches!(result, PoolAllowResult::TotalLimit));
@@ -67,12 +69,12 @@ mod tests {
     async fn test_connection_pool_per_ip_limit() {
         let config = ConnectionPoolConfig::new(100).with_per_ip_limit(2);
         let limits = ConnectionPoolLimits::new(config);
-        
+
         let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
-        
+
         limits.add_connection(addr, true).await;
         limits.add_connection(addr, true).await;
-        
+
         let result = limits.can_connect(&addr, true).await;
         assert!(matches!(result, PoolAllowResult::PerIpLimit));
     }
@@ -81,11 +83,11 @@ mod tests {
     // async fn test_connection_pool_remove_connection() {
     //     let config = ConnectionPoolConfig::new(100);
     //     let limits = ConnectionPoolLimits::new(config);
-    //     
+    //
     //     let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
     //     limits.add_connection(addr, true).await;
     //     assert_eq!(limits.total_connections().await, 1);
-    //     
+    //
     //     limits.remove_connection(&addr).await;
     //     assert_eq!(limits.total_connections().await, 0);
     // }
@@ -94,13 +96,13 @@ mod tests {
     async fn test_connection_pool_outbound_inbound_limits() {
         let config = ConnectionPoolConfig::new(100).with_per_ip_limit(100);
         let limits = ConnectionPoolLimits::new(config);
-        
+
         let addr1 = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
-        
+
         for _ in 0..50 {
             limits.add_connection(addr1, true).await;
         }
-        
+
         let addr2 = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 2)), 8080);
         let result = limits.can_connect(&addr2, true).await;
         assert!(matches!(result, PoolAllowResult::OutboundLimit));
@@ -110,12 +112,12 @@ mod tests {
     async fn test_connection_pool_cleanup_idle() {
         let config = ConnectionPoolConfig::new(100).with_idle_timeout(1);
         let limits = ConnectionPoolLimits::new(config);
-        
+
         let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
         limits.add_connection(addr, true).await;
-        
+
         tokio::time::sleep(std::time::Duration::from_millis(2100)).await;
-        
+
         let removed = limits.cleanup_idle().await;
         assert!(!removed.is_empty());
     }
@@ -134,10 +136,10 @@ mod tests {
     async fn test_per_ip_count() {
         let config = ConnectionPoolConfig::new(100);
         let limits = ConnectionPoolLimits::new(config);
-        
+
         let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
         limits.add_connection(addr, true).await;
-        
+
         assert_eq!(limits.per_ip_count(&addr).await, 1);
     }
 
@@ -145,15 +147,15 @@ mod tests {
     async fn test_outbound_inbound_count() {
         let config = ConnectionPoolConfig::new(100).with_per_ip_limit(100);
         let limits = ConnectionPoolLimits::new(config);
-        
+
         let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
         limits.add_connection(addr, true).await;
-        
+
         assert_eq!(limits.outbound_count().await, 1);
-        
+
         let addr2 = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 2)), 8080);
         limits.add_connection(addr2, false).await;
-        
+
         assert_eq!(limits.inbound_count().await, 1);
     }
 }

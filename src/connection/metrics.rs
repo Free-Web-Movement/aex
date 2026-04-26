@@ -93,11 +93,7 @@ impl ConnectionMetrics {
 
     pub fn latency_min_ns(&self) -> u64 {
         let val = self.latency_min_ns.load(Ordering::SeqCst);
-        if val == u64::MAX {
-            0
-        } else {
-            val
-        }
+        if val == u64::MAX { 0 } else { val }
     }
 
     pub fn latency_max_ns(&self) -> u64 {
