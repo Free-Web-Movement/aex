@@ -1,6 +1,6 @@
 //! # Unified Protocol Server
 //!
-//! Unified server supporting HTTP/1.1, HTTP/2, WebSocket, and P2P protocols on the same port.
+//! Unified server supporting HTTP/1.1, HTTP/2, WebSocket, TCP, and UDP protocols on the same port.
 //!
 //! ## Usage
 //!
@@ -9,29 +9,21 @@
 //! use aex::http::router::Router as HttpRouter;
 //! use aex::exe;
 //!
-//! let mut http_router = HttpRouter::new(NodeType::Static("root".into()));
-//! http_router.get("/", exe!(|ctx| {
-//!     ctx.send("Hello!");
-//!     true
-//! })).register();
-//!
 //! let server = UnifiedServer::new(addr, globals)
-//!     .http_router(http_router)
-//!     .enable_http2()
-//!     .p2p_handler(Arc::new(|socket, addr| {
-//!         tokio::spawn(handle_p2p_connection(socket, addr))
-//!     }));
+//!     .http_handler(my_http_handler)
+//!     .tcp_handler(my_tcp_handler)
+//!     .udp_handler(my_udp_handler);
 //! ```
 
+use std::any::TypeId;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt};
-use tokio::net::TcpStream;
+use tokio::net::{TcpListener, TcpStream, UdpSocket};
 use bytes::Bytes;
 use h2::server;
 
 use crate::connection::context::{Context, BoxReader, BoxWriter};
-use crate::connection::entry::ConnectionEntry;
 use crate::http::meta::HttpMetadata;
 use crate::http::middlewares::websocket::WebSocket;
 use crate::http::protocol::header::HeaderKey;
@@ -50,12 +42,17 @@ pub const HTTP_METHODS: &[&[u8]] = &[
 pub enum Protocol {
     Http11,
     Http2,
-    P2P,
+    TCP,
+    UDP,
     Unknown,
 }
 
 impl Protocol {
-    pub fn detect(bytes: &[u8]) -> Self {
+    pub fn detect(bytes: &[u8], is_udp: bool) -> Self {
+        if is_udp {
+            return Protocol::UDP;
+        }
+
         if bytes.is_empty() {
             return Protocol::Unknown;
         }
@@ -70,18 +67,26 @@ impl Protocol {
             }
         }
 
-        Protocol::P2P
+        Protocol::TCP
     }
 }
 
-pub type P2PHandler = Arc<dyn Fn(TcpStream, SocketAddr) + Send + Sync>;
+pub type HttpHandler = Arc<dyn Fn(&mut Context) -> futures::future::BoxFuture<'_, bool> + Send + Sync>;
+pub type Http2Handler = Arc<dyn Fn(&mut Context) -> futures::future::BoxFuture<'static, bool> + Send + Sync>;
+pub type TCPHandler = Arc<dyn Fn(Context) -> tokio::task::JoinHandle<()> + Send + Sync>;
+pub type UDPHandler = Arc<dyn Fn(Context) -> tokio::task::JoinHandle<()> + Send + Sync>;
 
 pub struct UnifiedServer {
     pub addr: SocketAddr,
     pub globals: Arc<crate::connection::global::GlobalContext>,
     pub http_router: Option<Arc<HttpRouter>>,
+    pub http_handler: Option<HttpHandler>,
     pub enable_http2: bool,
-    pub p2p_handler: Option<P2PHandler>,
+    pub http2_handler: Option<Http2Handler>,
+    pub tcp_handler: Option<TCPHandler>,
+    pub udp_handler: Option<UDPHandler>,
+    #[doc(hidden)]
+    pub _udp_socket: Option<UdpSocket>,
 }
 
 impl UnifiedServer {
@@ -90,8 +95,12 @@ impl UnifiedServer {
             addr,
             globals,
             http_router: None,
+            http_handler: None,
             enable_http2: false,
-            p2p_handler: None,
+            http2_handler: None,
+            tcp_handler: None,
+            udp_handler: None,
+            _udp_socket: None,
         }
     }
 
@@ -100,17 +109,32 @@ impl UnifiedServer {
         self
     }
 
+    pub fn http_handler(mut self, handler: HttpHandler) -> Self {
+        self.http_handler = Some(handler);
+        self
+    }
+
     pub fn enable_http2(mut self) -> Self {
         self.enable_http2 = true;
         self
     }
 
-    pub fn p2p_handler(mut self, handler: P2PHandler) -> Self {
-        self.p2p_handler = Some(handler);
+    pub fn http2_handler(mut self, handler: Http2Handler) -> Self {
+        self.http2_handler = Some(handler);
         self
     }
 
-    pub async fn handle_connection(&self, mut socket: TcpStream, peer_addr: SocketAddr) {
+    pub fn tcp_handler(mut self, handler: TCPHandler) -> Self {
+        self.tcp_handler = Some(handler);
+        self
+    }
+
+    pub fn udp_handler(mut self, handler: UDPHandler) -> Self {
+        self.udp_handler = Some(handler);
+        self
+    }
+
+    pub async fn handle_tcp_connection(&self, mut socket: TcpStream, peer_addr: SocketAddr) {
         let mut peek_buf = [0u8; 24];
         let n = match socket.read(&mut peek_buf).await {
             Ok(n) => n,
@@ -118,7 +142,7 @@ impl UnifiedServer {
         };
         if n == 0 { return; }
 
-        let protocol = Protocol::detect(&peek_buf[..n]);
+        let protocol = Protocol::detect(&peek_buf[..n], false);
         let initial_data = peek_buf[..n].to_vec();
 
         match protocol {
@@ -126,14 +150,17 @@ impl UnifiedServer {
                 if self.enable_http2 {
                     self.handle_http2(socket, peer_addr).await;
                 } else {
-                    self.handle_p2p(socket, peer_addr).await;
+                    self.handle_tcp(socket, peer_addr).await;
                 }
             }
             Protocol::Http11 => {
                 self.handle_http11(socket, peer_addr, initial_data).await;
             }
-            Protocol::P2P | Protocol::Unknown => {
-                self.handle_p2p(socket, peer_addr).await;
+            Protocol::TCP | Protocol::Unknown => {
+                self.handle_tcp(socket, peer_addr).await;
+            }
+            Protocol::UDP => {
+                self.handle_tcp(socket, peer_addr).await;
             }
         }
     }
@@ -152,24 +179,26 @@ impl UnifiedServer {
             return;
         }
 
-        let router = match &self.http_router {
-            Some(r) => r.clone(),
-            None => {
-                let _ = ctx.res().send_failure().await;
-                return;
-            }
-        };
-
         let is_ws = {
             let meta = ctx.local.get_ref::<HttpMetadata>();
             meta.map(|m| m.is_websocket).unwrap_or(false)
         };
 
-        if is_ws {
-            tracing::debug!("[WS] Upgrade request for {}", peer_addr);
-        }
+        let handled = if is_ws {
+            if let Some(router) = &self.http_router {
+                router.on_request(&mut ctx).await
+            } else {
+                false
+            }
+        } else if let Some(handler) = &self.http_handler {
+            handler(&mut ctx).await
+        } else if let Some(router) = &self.http_router {
+            router.on_request(&mut ctx).await
+        } else {
+            false
+        };
 
-        if router.on_request(&mut ctx).await {
+        if handled {
             let _ = ctx.res().send_response().await;
         } else {
             let _ = ctx.res().send_failure().await;
@@ -177,8 +206,6 @@ impl UnifiedServer {
     }
 
     async fn handle_http2(&self, socket: TcpStream, peer_addr: SocketAddr) {
-        tracing::info!("[H2] Connection from {}", peer_addr);
-
         let mut conn = match server::handshake(socket).await {
             Ok(c) => c,
             Err(e) => {
@@ -187,11 +214,8 @@ impl UnifiedServer {
             }
         };
 
-        let router = match &self.http_router {
-            Some(r) => r.clone(),
-            None => return,
-        };
         let globals = self.globals.clone();
+        let handler = self.http2_handler.clone();
 
         loop {
             tokio::select! {
@@ -223,24 +247,31 @@ impl UnifiedServer {
                             let mut ctx = Context::new(None, None, globals.clone(), peer_addr);
                             ctx.set(meta);
 
-                            let _route_found = router.on_request(&mut ctx).await;
+                            if let Some(h) = &handler {
+                                h(&mut ctx).await;
+                            } else {
+                                tracing::warn!("[H2] No HTTP/2 handler registered");
+                            }
 
-                            let (status, body, headers) = {
-                                let meta = ctx.local.get_ref::<HttpMetadata>().unwrap();
-                                (meta.status.to_http_status(), meta.body.clone(), meta.headers.clone())
+                            let meta = ctx.local.get_ref::<HttpMetadata>();
+                            let status = if let Some(m) = meta {
+                                m.status.to_http_status()
+                            } else {
+                                http::StatusCode::OK
                             };
+                            let mut body_str = String::new();
+                            let mut resp_headers: crate::http::protocol::header::Headers = crate::http::protocol::header::Headers::new();
+                            if let Some(m) = meta {
+                                body_str = String::from_utf8_lossy(&m.body).to_string();
+                                resp_headers = m.headers.clone();
+                            }
 
                             let mut resp_builder = http::Response::builder().status(status);
-                            for (key, val) in headers.iter() {
-                                if let Ok(h2_name) = http::header::HeaderName::from_bytes(key.as_str().as_bytes()) {
-                                    resp_builder = resp_builder.header(h2_name, val.as_str());
-                                }
-                            }
 
                             match resp_builder.body(()) {
                                 Ok(resp) => {
                                     if let Ok(mut send_stream) = responder.send_response(resp, false) {
-                                        let _ = send_stream.send_data(Bytes::from(body), true);
+                                        let _ = send_stream.send_data(Bytes::from(body_str), true);
                                     }
                                 }
                                 Err(e) => {
@@ -258,24 +289,98 @@ impl UnifiedServer {
         }
     }
 
-    async fn handle_p2p(&self, socket: TcpStream, peer_addr: SocketAddr) {
-        if let Some(handler) = &self.p2p_handler {
-            handler(socket, peer_addr);
+    async fn handle_tcp(&self, socket: TcpStream, peer_addr: SocketAddr) {
+        let (reader, writer) = socket.into_split();
+        let reader = tokio::io::BufReader::new(reader);
+        let boxed_reader: BoxReader = Box::new(reader);
+        let writer = Box::new(writer) as BoxWriter;
+
+        let mut ctx = Context::new(Some(boxed_reader), Some(writer), self.globals.clone(), peer_addr);
+
+        if let Some(handler) = &self.tcp_handler {
+            handler(ctx);
         } else {
-            tracing::warn!("[P2P] No handler registered, dropping connection from {}", peer_addr);
+            tracing::warn!("[Unified] No TCP handler registered, dropping connection from {}", peer_addr);
         }
     }
 
     pub async fn start(&self) -> anyhow::Result<()> {
-        let listener = tokio::net::TcpListener::bind(self.addr).await?;
-        tracing::info!("[Unified] Server listening on {}", self.addr);
+        let tcp_listener = TcpListener::bind(self.addr).await?;
+        tracing::info!("[Unified] TCP listening on {}", self.addr);
+
+        if let Some(udp_handler) = &self.udp_handler {
+            let sock = Arc::new(UdpSocket::bind(self.addr).await?);
+            tracing::info!("[Unified] UDP listening on {}", sock.local_addr()?);
+
+            let handler = udp_handler.clone();
+            let globals = self.globals.clone();
+            tokio::spawn(async move {
+                let mut buf = [0u8; 65535];
+                loop {
+                    match sock.recv_from(&mut buf).await {
+                        Ok((n, peer)) => {
+                            let data = buf[..n].to_vec();
+                            let mut ctx = Context::new(None, None, globals.clone(), peer);
+                            ctx.set(data);
+                            let handler = handler.clone();
+                            handler(ctx);
+                        }
+                        Err(e) => {
+                            tracing::warn!("[Unified] UDP recv error: {}", e);
+                            break;
+                        }
+                    }
+                }
+            });
+        }
+
+        let server = self.clone();
 
         loop {
-            match listener.accept().await {
+            tokio::select! {
+                result = tcp_listener.accept() => {
+                    match result {
+                        Ok((socket, peer_addr)) => {
+                            let srv = server.clone();
+                            tokio::spawn(async move {
+                                srv.handle_tcp_connection(socket, peer_addr).await;
+                            });
+                        }
+                        Err(e) => {
+                            tracing::warn!("[Unified] Accept error: {}", e);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    pub async fn start_tcp<F, C>(&self) -> anyhow::Result<()>
+    where
+        F: crate::tcp::types::TCPFrame + Send + Sync + 'static,
+        C: crate::tcp::types::TCPCommand + Send + Sync + 'static,
+    {
+        let tcp_listener = TcpListener::bind(self.addr).await?;
+        tracing::info!("[Unified] TCP listening on {}", self.addr);
+
+        let globals = self.globals.clone();
+        let tcp_handler = self.tcp_handler.clone();
+
+        loop {
+            match tcp_listener.accept().await {
                 Ok((socket, peer_addr)) => {
-                    let server = self.clone();
+                    let handler = tcp_handler.clone();
+                    let globals = globals.clone();
                     tokio::spawn(async move {
-                        server.handle_connection(socket, peer_addr).await;
+                        let (reader, writer) = socket.into_split();
+                        let reader = tokio::io::BufReader::new(reader);
+                        let boxed_reader: BoxReader = Box::new(reader);
+                        let writer = Box::new(writer) as BoxWriter;
+
+                        let mut ctx = Context::new(Some(boxed_reader), Some(writer), globals, peer_addr);
+                        if let Some(h) = handler {
+                            h(ctx);
+                        }
                     });
                 }
                 Err(e) => {
@@ -283,6 +388,42 @@ impl UnifiedServer {
                 }
             }
         }
+    }
+
+    pub async fn start_udp<F, C>(&self) -> anyhow::Result<()>
+    where
+        F: crate::tcp::types::Frame + Send + Sync + Clone + 'static,
+        C: crate::tcp::types::Command + Send + Sync + 'static,
+    {
+        let sock = Arc::new(UdpSocket::bind(self.addr).await?);
+        tracing::info!("[Unified] UDP listening on {}", sock.local_addr()?);
+
+        let globals = self.globals.clone();
+        let udp_handler = self.udp_handler.clone();
+
+        let mut buf = [0u8; 65535];
+        loop {
+            match sock.recv_from(&mut buf).await {
+                Ok((n, peer)) => {
+                    let data = buf[..n].to_vec();
+                    let handler = udp_handler.clone();
+                    let globals = globals.clone();
+                    let sock = sock.clone();
+                    tokio::spawn(async move {
+                        let mut ctx = Context::new(None, None, globals, peer);
+                        ctx.set(data);
+                        if let Some(h) = handler {
+                            h(ctx);
+                        }
+                    });
+                }
+                Err(e) => {
+                    tracing::warn!("[Unified] UDP recv error: {}", e);
+                }
+            }
+        }
+        
+        Ok(())
     }
 }
 
@@ -292,8 +433,12 @@ impl Clone for UnifiedServer {
             addr: self.addr,
             globals: self.globals.clone(),
             http_router: self.http_router.clone(),
+            http_handler: self.http_handler.clone(),
             enable_http2: self.enable_http2,
-            p2p_handler: self.p2p_handler.clone(),
+            http2_handler: self.http2_handler.clone(),
+            tcp_handler: self.tcp_handler.clone(),
+            udp_handler: self.udp_handler.clone(),
+            _udp_socket: None,
         }
     }
 }

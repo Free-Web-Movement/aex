@@ -190,4 +190,51 @@ impl GlobalContext {
         // 3. 联动清理 ConnectionManager 里的所有 Peer 连接
         self.manager.shutdown();
     }
+
+    pub fn get_connection_info(&self) -> ConnectionInfo {
+        let mut inbound = Vec::new();
+        let mut outbound = Vec::new();
+
+        for bucket_ref in self.manager.connections.iter() {
+            let scope = bucket_ref.key().1;
+            
+            for entry_ref in bucket_ref.servers.iter() {
+                let addr = *entry_ref.key();
+                let entry = entry_ref.value();
+                inbound.push(PeerInfo {
+                    addr: addr.to_string(),
+                    direction: "inbound".to_string(),
+                    scope: format!("{:?}", scope),
+                    uptime_secs: entry.uptime_secs(),
+                });
+            }
+            
+            for entry_ref in bucket_ref.clients.iter() {
+                let addr = *entry_ref.key();
+                let entry = entry_ref.value();
+                outbound.push(PeerInfo {
+                    addr: addr.to_string(),
+                    direction: "outbound".to_string(),
+                    scope: format!("{:?}", scope),
+                    uptime_secs: entry.uptime_secs(),
+                });
+            }
+        }
+
+        ConnectionInfo { inbound, outbound }
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ConnectionInfo {
+    pub inbound: Vec<PeerInfo>,
+    pub outbound: Vec<PeerInfo>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct PeerInfo {
+    pub addr: String,
+    pub direction: String,
+    pub scope: String,
+    pub uptime_secs: u64,
 }
