@@ -42,7 +42,6 @@ impl<'a> Request<'a> {
         let method_str = std::str::from_utf8(method_bytes).context("Invalid method")?;
         // Optimized: avoid to_string() - use &str for path
         let path_str = std::str::from_utf8(path_bytes).context("Invalid path")?;
-        let version_str = b"HTTP/1.1";
 
         let version = HttpVersion::Http11;
         let method = HttpMethod::from_str(method_str).context("Unknown method")?;

@@ -1,6 +1,6 @@
 use aex::connection::global::GlobalContext;
-use aex::http::router::Router as HttpRouter;
 use aex::http::middlewares::websocket::WebSocket;
+use aex::http::router::Router as HttpRouter;
 use aex::http::types::Executor;
 use aex::tcp::types::{Codec, Command, Frame};
 use aex::unified::UnifiedServer;
@@ -56,23 +56,37 @@ async fn main() -> anyhow::Result<()> {
 
     let mut router = HttpRouter::new(aex::http::router::NodeType::Static("root".into()));
 
-    router.get("/", aex::exe!(|ctx| {
-        ctx.send("AEX Unified Server + TCP Frame!", None);
-        true
-    })).register();
+    router
+        .get(
+            "/",
+            aex::exe!(|ctx| {
+                ctx.send("AEX Unified Server + TCP Frame!", None);
+                true
+            }),
+        )
+        .register();
 
-    router.get("/info", aex::exe!(|ctx| {
-        let info = serde_json::json!({
-            "protocols": ["http1", "http2", "ws", "tcp_frame", "udp"],
-            "frame_format": "MyFrame (id:u32, data:Vec<u8>)"
-        });
-        ctx.send(info.to_string(), None);
-        ctx.res().set_header("Content-Type", "application/json");
-        true
-    })).register();
+    router
+        .get(
+            "/info",
+            aex::exe!(|ctx| {
+                let info = serde_json::json!({
+                    "protocols": ["http1", "http2", "ws", "tcp_frame", "udp"],
+                    "frame_format": "MyFrame (id:u32, data:Vec<u8>)"
+                });
+                ctx.send(info.to_string(), None);
+                ctx.res().set_header("Content-Type", "application/json");
+                true
+            }),
+        )
+        .register();
 
-    router.get("/test", aex::exe!(|ctx| {
-        ctx.send(r#"<!DOCTYPE html>
+    router
+        .get(
+            "/test",
+            aex::exe!(|ctx| {
+                ctx.send(
+                    r#"<!DOCTYPE html>
 <html><body>
 <h1>TCP Frame Test</h1>
 <p>Send binary frame with Python:</p>
@@ -84,10 +98,14 @@ s.send(struct.pack('<I', 1) + b'hello')
 print(s.recv(1024))
 s.close()
 "</pre>
-</body></html>"#, None);
-        ctx.res().set_header("Content-Type", "text/html");
-        true
-    })).register();
+</body></html>"#,
+                    None,
+                );
+                ctx.res().set_header("Content-Type", "text/html");
+                true
+            }),
+        )
+        .register();
 
     let ws_handler = WebSocket::new()
         .on_text(|_ws, _ctx, text| {
@@ -105,7 +123,8 @@ s.close()
 
     let ws_middleware: Arc<Executor> = Arc::from(WebSocket::to_middleware(ws_handler));
 
-    router.get("/ws", aex::exe!(|_ctx| { true }))
+    router
+        .get("/ws", aex::exe!(|_ctx| { true }))
         .middleware(ws_middleware)
         .register();
 
@@ -125,14 +144,18 @@ s.close()
                             let data = &buf[..n];
                             match MyFrame::decode(data) {
                                 Ok(frame) => {
-                                    println!("[TCP Frame] id={}, data={:?}", frame.id, String::from_utf8_lossy(&frame.data));
-                                    
+                                    println!(
+                                        "[TCP Frame] id={}, data={:?}",
+                                        frame.id,
+                                        String::from_utf8_lossy(&frame.data)
+                                    );
+
                                     let response = MyCommand {
                                         id: frame.id,
                                         data: b"ACK".to_vec(),
                                     };
                                     let encoded = Codec::encode(&response);
-                                    
+
                                     if let Some(mut w) = ctx.writer.take() {
                                         let _ = w.write_all(&encoded).await;
                                         let _ = w.flush().await;
@@ -172,7 +195,9 @@ s.close()
     println!("  WebSocket:   wscat ws://{}/ws", addr);
     println!();
     println!("  TCP Frame:  MyFrame with bincode codec");
-    println!("  Test:     python3 -c \"import struct,socket; s=socket.socket(); s.connect(('localhost',8080)); s.send(struct.pack('<I',1)+b'hello'); print(s.recv(1024))\"");
+    println!(
+        "  Test:     python3 -c \"import struct,socket; s=socket.socket(); s.connect(('localhost',8080)); s.send(struct.pack('<I',1)+b'hello'); print(s.recv(1024))\""
+    );
     println!("  UDP:      echo 'data' | nc -u {} 8080", addr.ip());
     println!();
     println!("  API:      curl http://{}/info", addr);

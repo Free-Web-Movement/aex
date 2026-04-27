@@ -19,7 +19,7 @@ use anyhow::Result;
 
 fn setup_http() -> HttpRouter {
     let mut router = HttpRouter::new(NodeType::Static("root".into()));
-    
+
     router
         .get(
             "/",
@@ -49,17 +49,23 @@ fn setup_framed_tcp() -> TcpRouter<RawCodec, RawCodec> {
             let mut arr = [0u8; 4];
             arr.copy_from_slice(&cmd.0[0..4]);
             u32::from_le_bytes(arr)
-        } else { 0 }
+        } else {
+            0
+        }
     });
-    router.on(1, Box::new(|ctx, _frame: RawCodec, _cmd: RawCodec| {
-        Box::pin(async move {
-            let mut g = ctx.lock().await;
-            if let Some(_w) = g.writer.as_mut() {
-                // write_all omitted for compilation
-            }
-            Ok(true)
-        })
-    }), vec![]);
+    router.on(
+        1,
+        Box::new(|ctx, _frame: RawCodec, _cmd: RawCodec| {
+            Box::pin(async move {
+                let mut g = ctx.lock().await;
+                if let Some(_w) = g.writer.as_mut() {
+                    // write_all omitted for compilation
+                }
+                Ok(true)
+            })
+        }),
+        vec![],
+    );
     router
 }
 
@@ -70,11 +76,15 @@ fn setup_framed_udp() -> UdpRouter<RawCodec, RawCodec> {
             let mut arr = [0u8; 4];
             arr.copy_from_slice(&cmd.0[0..4]);
             u32::from_le_bytes(arr)
-        } else { 0 }
+        } else {
+            0
+        }
     });
     router.on(1, |_g, _f, _c, addr, sock| {
         Box::pin(async move {
-            let _ = sock.send_to(&Codec::encode(&RawCodec(b"PONG".to_vec())), addr).await;
+            let _ = sock
+                .send_to(&Codec::encode(&RawCodec(b"PONG".to_vec())), addr)
+                .await;
             Ok(true)
         })
     });
@@ -100,11 +110,15 @@ async fn main() -> Result<()> {
         .http(http)
         .http2()
         .tcp(setup_framed_tcp());
-    tokio::spawn(async move { let _ = srv.start_with_protocols::<RawCodec, RawCodec>().await; });
+    tokio::spawn(async move {
+        let _ = srv.start_with_protocols::<RawCodec, RawCodec>().await;
+    });
 
     // Framed UDP
     let udp_srv = Server::new(addr, None).udp(setup_framed_udp());
-    tokio::spawn(async move { let _ = udp_srv.start_with_protocols::<RawCodec, RawCodec>().await; });
+    tokio::spawn(async move {
+        let _ = udp_srv.start_with_protocols::<RawCodec, RawCodec>().await;
+    });
 
     println!("Started. Ctrl+C to stop.\n");
     tokio::signal::ctrl_c().await?;

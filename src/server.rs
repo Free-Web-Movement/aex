@@ -350,7 +350,7 @@ impl Server {
                     };
 
                     let is_h2 = {
-                        
+
                         let mut buf = [0u8; 24];
                         match socket.peek(&mut buf).await {
                             Ok(n) if n >= 24 => buf.starts_with(b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"),
@@ -386,7 +386,7 @@ impl Server {
     }
 
     /// UDP 核心分发循环
-    pub async fn start_udp<F, C>(&self, loop_token: CancellationToken) -> anyhow::Result<()>
+    pub async fn start_udp<F, C>(&self, _loop_token: CancellationToken) -> anyhow::Result<()>
     where
         F: crate::tcp::types::Frame + Send + Sync + Clone + 'static,
         C: crate::tcp::types::Command + Send + Sync + 'static,

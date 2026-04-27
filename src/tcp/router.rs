@@ -116,7 +116,7 @@ impl<F, C> Router<F, C> {
         F: TCPFrame,
         C: TCPCommand,
     {
-        let extractor = self
+        let _ = self
             .extractor
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("TCP extractor not set"))?;

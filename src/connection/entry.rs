@@ -88,7 +88,7 @@ impl ConnectionEntry {
         };
 
         let heartbeat = HeartbeatManager::new(local_node).with_config(config);
-        heartbeat.start_server_heartbeat(ctx, self.addr, self.cancel_token.clone());
+        let _ = heartbeat.start_server_heartbeat(ctx, self.addr, self.cancel_token.clone());
     }
 
     pub async fn start_heartbeat_with_global(&self, global: &Arc<GlobalContext>) {
@@ -150,8 +150,8 @@ impl ConnectionEntry {
     }
 
     pub fn default_pipeline<F, C>(
-        peer_addr: SocketAddr,
-        is_server: bool,
+        _peer_addr: SocketAddr,
+        _is_server: bool,
     ) -> impl FnOnce(Arc<Mutex<Context>>) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>>
     + Send
     where

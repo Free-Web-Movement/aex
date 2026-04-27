@@ -280,10 +280,8 @@ impl UnifiedServer {
                                 http::StatusCode::OK
                             };
                             let mut body_str = String::new();
-                            let mut resp_headers: crate::http::protocol::header::Headers = crate::http::protocol::header::Headers::new();
                             if let Some(m) = meta {
                                 body_str = String::from_utf8_lossy(&m.body).to_string();
-                                resp_headers = m.headers.clone();
                             }
 
                             let resp_builder = http::Response::builder().status(status);
@@ -437,7 +435,6 @@ impl UnifiedServer {
                     let data = buf[..n].to_vec();
                     let handler = udp_handler.clone();
                     let globals = globals.clone();
-                    let sock = sock.clone();
                     tokio::spawn(async move {
                         let mut ctx = Context::new(None, None, globals, peer);
                         ctx.set(data);
@@ -451,8 +448,6 @@ impl UnifiedServer {
                 }
             }
         }
-
-        Ok(())
     }
 }
 

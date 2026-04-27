@@ -1,6 +1,6 @@
 use aex::connection::global::GlobalContext;
-use aex::http::router::Router as HttpRouter;
 use aex::http::middlewares::websocket::WebSocket;
+use aex::http::router::Router as HttpRouter;
 use aex::http::types::Executor;
 use aex::unified::UnifiedServer;
 use std::net::SocketAddr;
@@ -20,16 +20,29 @@ async fn main() -> anyhow::Result<()> {
 
     let mut router = HttpRouter::new(aex::http::router::NodeType::Static("root".into()));
 
-    router.get("/", aex::exe!(|ctx| {
-        ctx.send("Hello from HTTP/1.1!", None);
-        true
-    })).register();
+    router
+        .get(
+            "/",
+            aex::exe!(|ctx| {
+                ctx.send("Hello from HTTP/1.1!", None);
+                true
+            }),
+        )
+        .register();
 
-    router.get("/info", aex::exe!(|ctx| {
-        ctx.send(r#"{"protocol":"HTTP/1.1","message":"Welcome to AEX Unified Server"}"#, None);
-        ctx.res().set_header("Content-Type", "application/json");
-        true
-    })).register();
+    router
+        .get(
+            "/info",
+            aex::exe!(|ctx| {
+                ctx.send(
+                    r#"{"protocol":"HTTP/1.1","message":"Welcome to AEX Unified Server"}"#,
+                    None,
+                );
+                ctx.res().set_header("Content-Type", "application/json");
+                true
+            }),
+        )
+        .register();
 
     let ws_handler = WebSocket::new()
         .on_text(|_ws, _ctx, text| {
@@ -47,7 +60,8 @@ async fn main() -> anyhow::Result<()> {
 
     let ws_middleware: Arc<Executor> = Arc::from(WebSocket::to_middleware(ws_handler));
 
-    router.get("/ws", aex::exe!(|_ctx| { true }))
+    router
+        .get("/ws", aex::exe!(|_ctx| { true }))
         .middleware(ws_middleware)
         .register();
 
@@ -113,7 +127,11 @@ async fn main() -> anyhow::Result<()> {
                 match reader.read(&mut buf).await {
                     Ok(n) => {
                         let data = &buf[..n];
-                        println!("[TCP] Received {} bytes: {:?}", n, String::from_utf8_lossy(data));
+                        println!(
+                            "[TCP] Received {} bytes: {:?}",
+                            n,
+                            String::from_utf8_lossy(data)
+                        );
                         let writer = ctx.writer.as_mut().unwrap();
                         let _ = writer.write_all(b"[TCP] ACK\n").await;
                         let _ = writer.flush().await;

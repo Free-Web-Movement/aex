@@ -78,6 +78,7 @@ pub struct MessageQueue {
     pending: Arc<Mutex<VecDeque<Message>>>,
     sent: Arc<Mutex<VecDeque<Message>>>,
     confirmed: Arc<Mutex<std::collections::HashSet<u64>>>,
+    #[allow(dead_code)]
     tx: mpsc::Sender<Message>,
 }
 

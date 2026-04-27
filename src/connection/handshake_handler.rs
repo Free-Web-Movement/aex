@@ -173,6 +173,7 @@ impl HandshakeHandler {
         Self::send_frame_internal(&ctx, data).await
     }
 
+    #[cfg(test)]
     async fn send_frame_internal(ctx: &Arc<Mutex<Context>>, data: Vec<u8>) -> Result<()> {
         let mut guard = ctx.lock().await;
         let writer = guard

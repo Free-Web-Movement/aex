@@ -2,8 +2,9 @@ use aex::connection::context::Context;
 use aex::connection::global::GlobalContext;
 use aex::http::router::Router as HttpRouter;
 use aex::http::types::Executor;
-use aex::unified::{UnifiedServer, Protocol};
 use aex::http::websocket::{WSCodec, WSFrame};
+use aex::unified::{Protocol, UnifiedServer};
+use bytes::BytesMut;
 use futures::FutureExt;
 use std::net::SocketAddr;
 use std::pin::Pin;
@@ -13,22 +14,27 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::time::{Duration, sleep};
 use tokio_util::codec::{Decoder, Encoder};
-use bytes::BytesMut;
 
 fn make_http_router() -> HttpRouter {
     let mut router = HttpRouter::new(aex::http::router::NodeType::Static("root".into()));
 
     let handler: Arc<Executor> = Arc::new(|_ctx: &mut Context| {
-        Box::pin(async move {
-            true
-        }) as Pin<Box<dyn futures::Future<Output = bool> + Send>>
+        Box::pin(async move { true }) as Pin<Box<dyn futures::Future<Output = bool> + Send>>
     });
 
     router.get("/", handler).register();
     router
 }
 
-fn setup_unified_server(addr: SocketAddr, enable_http2: bool) -> (UnifiedServer, Arc<AtomicUsize>, Arc<AtomicUsize>, Arc<AtomicUsize>) {
+fn setup_unified_server(
+    addr: SocketAddr,
+    enable_http2: bool,
+) -> (
+    UnifiedServer,
+    Arc<AtomicUsize>,
+    Arc<AtomicUsize>,
+    Arc<AtomicUsize>,
+) {
     let http_counter = Arc::new(AtomicUsize::new(0));
     let ws_counter = Arc::new(AtomicUsize::new(0));
     let tcp_counter = Arc::new(AtomicUsize::new(0));
@@ -87,13 +93,13 @@ async fn test_protocol_detection_http1() {
     conn.write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n")
         .await
         .unwrap();
-    
+
     let mut buf = [0u8; 1024];
     let n = conn.read(&mut buf).await.unwrap();
-    
+
     assert!(n > 0, "Should receive HTTP response");
     assert!(buf.starts_with(b"HTTP/1.1"), "Should be HTTP/1.1 response");
-    
+
     println!("[Test] HTTP/1.1 protocol detection: OK");
 }
 
@@ -121,9 +127,9 @@ async fn test_protocol_detection_http2() {
 
     let mut buf = [0u8; 24];
     let result = tokio::time::timeout(Duration::from_millis(500), conn.read(&mut buf)).await;
-    
+
     assert!(result.is_ok(), "HTTP/2 connection should be handled");
-    
+
     println!("[Test] HTTP/2 protocol detection: OK");
 }
 
@@ -159,7 +165,7 @@ async fn test_protocol_detection_websocket() {
     let n = conn.read(&mut buf).await.unwrap();
 
     assert!(n > 0, "Should receive WebSocket response");
-    
+
     println!("[Test] WebSocket protocol detection: OK");
 }
 
@@ -186,7 +192,7 @@ async fn test_protocol_detection_tcp() {
     conn.shutdown().await.ok();
 
     sleep(Duration::from_millis(200)).await;
-    
+
     println!("[Test] TCP protocol detection: OK");
 }
 
@@ -267,33 +273,44 @@ async fn test_unified_all_protocols_same_listener() {
     let ws_count = ws_counter.load(Ordering::SeqCst);
     let tcp_count = tcp_counter.load(Ordering::SeqCst);
 
-    println!("[Test] HTTP counters - HTTP: {}, WebSocket: {}, TCP: {}", http_count, ws_count, tcp_count);
+    println!(
+        "[Test] HTTP counters - HTTP: {}, WebSocket: {}, TCP: {}",
+        http_count, ws_count, tcp_count
+    );
 
-    assert!(success_count >= 3, "At least 3 protocols should work (HTTP/1.1, WebSocket, HTTP/2)");
-    
+    assert!(
+        success_count >= 3,
+        "At least 3 protocols should work (HTTP/1.1, WebSocket, HTTP/2)"
+    );
+
     server_handle.abort();
-    
-    println!("[Test] Unified all protocols same listener: {}/4 passed", success_count);
+
+    println!(
+        "[Test] Unified all protocols same listener: {}/4 passed",
+        success_count
+    );
 }
 
 #[tokio::test]
 async fn test_websocket_frame_codec() {
     let mut codec = WSCodec {};
-    
+
     let mut src = BytesMut::from(&[0x81, 0x05][..]);
     src.extend_from_slice(b"hello");
-    
+
     let result = codec.decode(&mut src);
     assert!(result.is_ok());
     let frame = result.unwrap().unwrap();
     assert_eq!(frame, WSFrame::Text("hello".to_string()));
-    
+
     let mut dst = BytesMut::new();
-    codec.encode(WSFrame::Text("hello".to_string()), &mut dst).unwrap();
+    codec
+        .encode(WSFrame::Text("hello".to_string()), &mut dst)
+        .unwrap();
     assert_eq!(dst[0], 0x81); // FIN + text opcode
     assert_eq!(dst[1], 0x05); // length 5
     assert_eq!(&dst[2..], b"hello");
-    
+
     println!("[Test] WebSocket frame codec: OK");
 }
 
@@ -302,11 +319,11 @@ fn test_protocol_detect_http1() {
     let bytes = b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n";
     let protocol = Protocol::detect(bytes, false);
     assert_eq!(protocol, Protocol::Http11);
-    
+
     let bytes = b"POST /api/data HTTP/1.1\r\nHost: example.com\r\n\r\n";
     let protocol = Protocol::detect(bytes, false);
     assert_eq!(protocol, Protocol::Http11);
-    
+
     println!("[Test] Protocol::detect HTTP/1.1: OK");
 }
 
@@ -315,7 +332,7 @@ fn test_protocol_detect_http2() {
     let bytes = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
     let protocol = Protocol::detect(bytes, false);
     assert_eq!(protocol, Protocol::Http2);
-    
+
     println!("[Test] Protocol::detect HTTP/2: OK");
 }
 
@@ -324,7 +341,7 @@ fn test_protocol_detect_tcp() {
     let bytes = b"\x00\x01\x02\x03custom_tcp_data";
     let protocol = Protocol::detect(bytes, false);
     assert_eq!(protocol, Protocol::TCP);
-    
+
     println!("[Test] Protocol::detect TCP: OK");
 }
 
@@ -333,7 +350,7 @@ fn test_protocol_detect_udp() {
     let bytes = b"some data";
     let protocol = Protocol::detect(bytes, true);
     assert_eq!(protocol, Protocol::UDP);
-    
+
     println!("[Test] Protocol::detect UDP: OK");
 }
 
@@ -342,6 +359,6 @@ fn test_protocol_detect_empty() {
     let bytes: &[u8] = b"";
     let protocol = Protocol::detect(bytes, false);
     assert_eq!(protocol, Protocol::Unknown);
-    
+
     println!("[Test] Protocol::detect empty: OK");
 }

@@ -87,7 +87,8 @@ pub struct HeartbeatManager {
         Arc<tokio::sync::RwLock<std::collections::HashMap<SocketAddr, HeartbeatState>>>,
 }
 
-struct HeartbeatState {
+#[allow(dead_code)]
+pub(crate) struct HeartbeatState {
     last_ping: u64,
     last_pong: u64,
     latency_ns: u64,
@@ -108,7 +109,8 @@ impl HeartbeatManager {
         }
     }
 
-    pub fn new_with_arc(
+    #[allow(dead_code)]
+    pub(crate) fn new_with_arc(
         local_node: Node,
         active: Arc<tokio::sync::RwLock<std::collections::HashMap<SocketAddr, HeartbeatState>>>,
     ) -> Self {
@@ -193,7 +195,7 @@ impl HeartbeatManager {
     }
 
     async fn send_ping_internal(
-        local_node: &Node,
+        _local_node: &Node,
         ctx: &Arc<Mutex<Context>>,
         ping: PingCommand,
     ) -> Result<()> {

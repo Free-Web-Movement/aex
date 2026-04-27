@@ -16,82 +16,97 @@
 // for `.boxed()`
 
 #[macro_export]
+#[allow(unused_variables)]
 macro_rules! exe {
     // 支持 move 闭包
     (move | $ctx:ident | $body:block) => {{
-        use futures::future::FutureExt;
-        use std::sync::Arc;
-        use $crate::connection::context::Context;
+        #[allow(unused_variables)]
+        {
+            use futures::future::FutureExt;
+            use std::sync::Arc;
+            use $crate::connection::context::Context;
 
-        #[allow(unused_imports)]
-        use $crate::http::types::Executor;
+            #[allow(unused_imports)]
+            use $crate::http::types::Executor;
 
-        let executor: std::sync::Arc<$crate::http::types::Executor> =
-            Arc::new(move |$ctx: &mut Context| async move { $body }.boxed());
-        executor
+            let executor: std::sync::Arc<$crate::http::types::Executor> =
+                Arc::new(move |$ctx: &mut Context| async move { $body }.boxed());
+            executor
+        }
     }};
 
     // 支持 move 闭包 + pre 处理
     (move | $ctx:ident, $data:ident | $body:block, | $pre_ctx:ident | $pre:block) => {{
-        use futures::future::FutureExt;
-        use std::sync::Arc;
-        use $crate::connection::context::Context;
+        #[allow(unused_variables)]
+        {
+            use futures::future::FutureExt;
+            use std::sync::Arc;
+            use $crate::connection::context::Context;
 
-        #[allow(unused_imports)]
-        use $crate::http::types::Executor;
+            #[allow(unused_imports)]
+            use $crate::http::types::Executor;
 
-        let executor: std::sync::Arc<$crate::http::types::Executor> =
-            Arc::new(move |$ctx: &mut Context| {
-                let $data = {
-                    let $pre_ctx: &mut Context = &mut *$ctx;
-                    $pre
-                };
-                async move {
-                    let _ = &$data;
-                    $body
-                }
-                .boxed()
-            });
-        executor
+            let executor: std::sync::Arc<$crate::http::types::Executor> =
+                Arc::new(move |$ctx: &mut Context| {
+                    let _ = $ctx;
+                    let $data = {
+                        let $pre_ctx: &mut Context = &mut *$ctx;
+                        $pre
+                    };
+                    async move {
+                        let _ = &$data;
+                        $body
+                    }
+                    .boxed()
+                });
+            executor
+        }
     }};
 
     // 带有 pre 处理的分支
     (| $ctx:ident, $data:ident | $body:block, | $pre_ctx:ident | $pre:block) => {{
-        use futures::future::FutureExt;
-        use std::sync::Arc;
-        use $crate::connection::context::Context;
+        #[allow(unused_variables)]
+        {
+            use futures::future::FutureExt;
+            use std::sync::Arc;
+            use $crate::connection::context::Context;
 
-        #[allow(unused_imports)]
-        use $crate::http::types::Executor;
+            #[allow(unused_imports)]
+            use $crate::http::types::Executor;
 
-        let executor: std::sync::Arc<$crate::http::types::Executor> =
-            Arc::new(move |$ctx: &mut Context| {
-                let $data = {
-                    let $pre_ctx: &mut Context = &mut *$ctx;
-                    $pre
-                };
+            let executor: std::sync::Arc<$crate::http::types::Executor> =
+                Arc::new(move |$ctx: &mut Context| {
+                    let _ = $ctx;
+                    let $data = {
+                        let $pre_ctx: &mut Context = &mut *$ctx;
+                        $pre
+                    };
 
-                async move {
-                    let _ = &$data;
-                    $body
-                }
-                .boxed()
-            });
-        executor
+                    async move {
+                        let _ = &$data;
+                        $body
+                    }
+                    .boxed()
+                });
+            executor
+        }
     }};
 
     // 仅 body 的分支
     (| $ctx:ident | $body:block) => {{
-        use futures::future::FutureExt;
-        use std::sync::Arc;
-        use $crate::connection::context::Context;
+        #[allow(unused_variables)]
+        {
+            use futures::future::FutureExt;
+            use std::sync::Arc;
+            use $crate::connection::context::Context;
 
-        #[allow(unused_imports)]
-        use $crate::http::types::Executor;
+            #[allow(unused_imports)]
+            use $crate::http::types::Executor;
 
-        let executor: std::sync::Arc<$crate::http::types::Executor> =
-            Arc::new(move |$ctx: &mut Context| async move { $body }.boxed());
-        executor
+            let executor: std::sync::Arc<$crate::http::types::Executor> =
+                Arc::new(move |$ctx: &mut Context| async move { $body }.boxed());
+            executor
+        }
     }};
 }
 

@@ -89,7 +89,7 @@ impl GlobalContext {
     ) {
         if let Some(ref manager) = self.heartbeat_manager {
             let manager = manager.clone();
-            manager.start_server_heartbeat(ctx, peer_addr, cancel_token);
+            let _ = manager.start_server_heartbeat(ctx, peer_addr, cancel_token);
         }
     }
 

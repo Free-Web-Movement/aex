@@ -17,7 +17,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 fn setup_http() -> HttpRouter {
     let mut router = HttpRouter::new(NodeType::Static("root".into()));
-    
+
     router
         .get(
             "/",
@@ -27,7 +27,7 @@ fn setup_http() -> HttpRouter {
             }),
         )
         .register();
-    
+
     router
         .get(
             "/health",
@@ -37,7 +37,7 @@ fn setup_http() -> HttpRouter {
             }),
         )
         .register();
-    
+
     router
 }
 
@@ -67,7 +67,9 @@ async fn main() -> Result<()> {
         .register();
 
     let srv = Server::new(addr, None).http(http).http2();
-    tokio::spawn(async move { let _ = srv.start().await; });
+    tokio::spawn(async move {
+        let _ = srv.start().await;
+    });
 
     // Raw TCP
     tokio::spawn(async move {
@@ -81,7 +83,9 @@ async fn main() -> Result<()> {
                     loop {
                         match sock.read(&mut buf).await {
                             Ok(0) => break,
-                            Ok(n) => { let _ = sock.write_all(&buf[..n]).await; }
+                            Ok(n) => {
+                                let _ = sock.write_all(&buf[..n]).await;
+                            }
                             Err(_) => break,
                         }
                     }
