@@ -41,6 +41,19 @@ impl ConnectionManager {
         }
     }
 
+    pub fn get_all_entries(&self) -> Vec<SocketAddr> {
+        let mut addrs = Vec::new();
+        for bucket_ref in self.connections.iter() {
+            for entry in bucket_ref.servers.iter() {
+                addrs.push(*entry.key());
+            }
+            for entry in bucket_ref.clients.iter() {
+                addrs.push(*entry.key());
+            }
+        }
+        addrs
+    }
+
     /// 发起外联连接并自动拆分读写流
     ///
     /// # 参数
