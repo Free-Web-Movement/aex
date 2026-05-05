@@ -160,17 +160,17 @@ impl UnifiedServer {
                 if self.enable_http2 {
                     self.handle_http2(socket, peer_addr).await;
                 } else {
-                    self.handle_tcp(socket, peer_addr).await;
+                    self.handle_tcp(socket, peer_addr, initial_data).await;
                 }
             }
             Protocol::Http11 => {
                 self.handle_http11(socket, peer_addr, initial_data).await;
             }
             Protocol::TCP | Protocol::Unknown => {
-                self.handle_tcp(socket, peer_addr).await;
+                self.handle_tcp(socket, peer_addr, initial_data).await;
             }
             Protocol::UDP => {
-                self.handle_tcp(socket, peer_addr).await;
+                self.handle_tcp(socket, peer_addr, initial_data).await;
             }
         }
     }
@@ -307,10 +307,11 @@ impl UnifiedServer {
         }
     }
 
-    async fn handle_tcp(&self, socket: TcpStream, peer_addr: SocketAddr) {
+    async fn handle_tcp(&self, socket: TcpStream, peer_addr: SocketAddr, initial_data: Vec<u8>) {
         let (reader, writer) = socket.into_split();
-        let reader = tokio::io::BufReader::new(reader);
-        let boxed_reader: BoxReader = Box::new(reader);
+        let cursor = std::io::Cursor::new(initial_data);
+        let reader_with_buf = tokio::io::BufReader::new(cursor.chain(reader));
+        let boxed_reader: BoxReader = Box::new(reader_with_buf);
         let writer = Box::new(writer) as BoxWriter;
 
         let ctx = Context::new(
@@ -319,6 +320,8 @@ impl UnifiedServer {
             self.globals.clone(),
             peer_addr,
         );
+
+        tracing::info!("[Unified] TCP handler invoked for connection from {}", peer_addr);
 
         if let Some(handler) = &self.tcp_handler {
             handler(ctx);

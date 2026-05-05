@@ -199,12 +199,6 @@ impl ConnectionManager {
         context: Option<Arc<Mutex<Context>>>, // writer: Option<Arc<Mutex<Option<BoxWriter>>>>,
     ) {
         let ip = addr.ip();
-
-        // 跳过 loopback 地址
-        if ip.is_loopback() {
-            return;
-        }
-
         let scope = NetworkScope::from_ip(&ip);
         let key = (ip, scope);
 
