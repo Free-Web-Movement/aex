@@ -204,7 +204,8 @@ impl GlobalContext {
         for bucket_ref in self.manager.connections.iter() {
             let scope = bucket_ref.key().1;
 
-            for entry_ref in bucket_ref.servers.iter() {
+            // clients = inbound (other nodes connected to us as server)
+            for entry_ref in bucket_ref.clients.iter() {
                 let addr = *entry_ref.key();
                 let entry = entry_ref.value();
                 inbound.push(PeerInfo {
@@ -215,7 +216,8 @@ impl GlobalContext {
                 });
             }
 
-            for entry_ref in bucket_ref.clients.iter() {
+            // servers = outbound (we connected to other nodes as client)
+            for entry_ref in bucket_ref.servers.iter() {
                 let addr = *entry_ref.key();
                 let entry = entry_ref.value();
                 outbound.push(PeerInfo {
