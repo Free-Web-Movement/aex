@@ -146,7 +146,7 @@ impl ConnectionManager {
         let ip = addr.ip();
         let scope = NetworkScope::from_ip(&ip);
         if let Some(bi_conn) = self.connections.get(&(ip, scope)) {
-            if bi_conn.servers.contains_key(&addr) {
+            if bi_conn.servers.contains_key(&addr) || bi_conn.clients.contains_key(&addr) {
                 return Ok(());
             }
         }
