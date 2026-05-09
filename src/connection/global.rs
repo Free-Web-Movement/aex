@@ -14,6 +14,7 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 
 use crate::constants::server::SERVER_NAME;
+use crate::connection::scope::NetworkScope;
 use crate::{
     communicators::{
         event::{Event, EventCallback, EventEmitter},
@@ -208,24 +209,64 @@ impl GlobalContext {
             for entry_ref in bucket_ref.clients.iter() {
                 let addr = *entry_ref.key();
                 let entry = entry_ref.value();
-                inbound.push(PeerInfo {
-                    addr: addr.to_string(),
-                    direction: "inbound".to_string(),
-                    scope: format!("{:?}", scope),
-                    uptime_secs: entry.uptime_secs(),
-                });
+                let (node_id, intranet_ips, wan_ips) = if let Ok(guard) = entry.node.try_read() {
+                    if let Some(n) = guard.as_ref() {
+                        let mut intranet = Vec::new();
+                        let mut wan = Vec::new();
+                        for (s, ip) in &n.ips {
+                            match s {
+                                NetworkScope::Intranet => intranet.push(format!("{}:{}", ip, n.port)),
+                                NetworkScope::Extranet => wan.push(format!("{}:{}", ip, n.port)),
+                            }
+                        }
+                        (Some(String::from_utf8_lossy(&n.id).to_string()), intranet, wan)
+                    } else {
+                        (None, vec![], vec![])
+                    }
+                } else {
+                    (None, vec![], vec![])
+                };
+                    inbound.push(PeerInfo {
+                        addr: addr.to_string(),
+                        direction: "inbound".to_string(),
+                        scope: format!("{:?}", scope),
+                        uptime_secs: entry.uptime_secs(),
+                        node_id,
+                        intranet_ips,
+                        wan_ips,
+                    });
             }
 
             // servers = outbound (we connected to other nodes as client)
             for entry_ref in bucket_ref.servers.iter() {
                 let addr = *entry_ref.key();
                 let entry = entry_ref.value();
-                outbound.push(PeerInfo {
-                    addr: addr.to_string(),
-                    direction: "outbound".to_string(),
-                    scope: format!("{:?}", scope),
-                    uptime_secs: entry.uptime_secs(),
-                });
+                let (node_id, intranet_ips, wan_ips) = if let Ok(guard) = entry.node.try_read() {
+                    if let Some(n) = guard.as_ref() {
+                        let mut intranet = Vec::new();
+                        let mut wan = Vec::new();
+                        for (s, ip) in &n.ips {
+                            match s {
+                                NetworkScope::Intranet => intranet.push(format!("{}:{}", ip, n.port)),
+                                NetworkScope::Extranet => wan.push(format!("{}:{}", ip, n.port)),
+                            }
+                        }
+                        (Some(String::from_utf8_lossy(&n.id).to_string()), intranet, wan)
+                    } else {
+                        (None, vec![], vec![])
+                    }
+                } else {
+                    (None, vec![], vec![])
+                };
+                    outbound.push(PeerInfo {
+                        addr: addr.to_string(),
+                        direction: "outbound".to_string(),
+                        scope: format!("{:?}", scope),
+                        uptime_secs: entry.uptime_secs(),
+                        node_id,
+                        intranet_ips,
+                        wan_ips,
+                    });
             }
         }
 
@@ -245,4 +286,10 @@ pub struct PeerInfo {
     pub direction: String,
     pub scope: String,
     pub uptime_secs: u64,
+    /// 握手后填充的 peer node_id（FreeWebMovementAddress 字符串），未完成握手则为 None
+    pub node_id: Option<String>,
+    /// peer 宣告的内网地址列表（ip:port），来自 AEX Node 的 ips(Intranet) + port
+    pub intranet_ips: Vec<String>,
+    /// peer 宣告的外网地址列表（ip:port），来自 AEX Node 的 ips(Extranet) + port
+    pub wan_ips: Vec<String>,
 }
