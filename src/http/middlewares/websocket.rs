@@ -9,7 +9,7 @@ use crate::{
 };
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
-use futures::{FutureExt, SinkExt, StreamExt};
+use futures::{FutureExt, StreamExt};
 use sha1::{Digest, Sha1};
 use std::{
     pin::Pin,
@@ -17,6 +17,7 @@ use std::{
     task::{Context as TaskContext, Poll},
 };
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, ReadBuf};
+use tokio::sync::Mutex;
 use tokio_util::codec::Framed;
 
 use futures::future::BoxFuture;
@@ -25,6 +26,31 @@ use futures::future::BoxFuture;
 struct CombinedStream {
     reader: Box<dyn tokio::io::AsyncRead + Send + Unpin>,
     writer: Box<dyn tokio::io::AsyncWrite + Send + Unpin>,
+}
+
+/// 所有 WebSocket 连接的写端收集器，用于从外部推送消息
+#[derive(Clone)]
+pub struct WsSenderList {
+    pub senders: Arc<Mutex<Vec<tokio::sync::mpsc::UnboundedSender<String>>>>,
+}
+
+impl WsSenderList {
+    pub fn new() -> Self {
+        Self {
+            senders: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+
+    /// 向所有已连接的 WebSocket 客户端广播文本消息
+    pub async fn broadcast(&self, text: &str) {
+        let mut guard = self.senders.lock().await;
+        guard.retain(|tx| tx.send(text.to_string()).is_ok());
+    }
+
+    /// 获取发送器数量（调试用）
+    pub async fn len(&self) -> usize {
+        self.senders.lock().await.len()
+    }
 }
 
 impl AsyncRead for CombinedStream {
@@ -146,7 +172,7 @@ impl WebSocket {
         Ok(())
     }
 
-    /// WebSocket 核心运行循环
+    /// WebSocket 核心运行循环（支持外部推送）
     pub async fn run(ws: &WebSocket, ctx: &mut Context) -> anyhow::Result<()> {
         let reader = ctx
             .reader
@@ -158,9 +184,32 @@ impl WebSocket {
             .ok_or_else(|| anyhow::anyhow!("Writer missing"))?;
 
         let io = CombinedStream { reader, writer };
-        let mut framed = Framed::new(io, WSCodec);
+        let framed = Framed::new(io, WSCodec);
 
-        while let Some(result) = framed.next().await {
+        let (mut sink, mut stream) = framed.split();
+
+        // 外部推送通道
+        let (out_tx, mut out_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+
+        // 注册到全局列表
+        {
+            if let Some(list) = ctx.global.get::<WsSenderList>().await {
+                list.senders.lock().await.push(out_tx);
+            }
+        }
+
+        // 后台写任务：将外部推送的消息发到 WebSocket
+        tokio::spawn(async move {
+            use futures::SinkExt;
+            while let Some(text) = out_rx.recv().await {
+                if let Err(e) = sink.send(WSFrame::Text(text)).await {
+                    tracing::debug!("WS send error: {:?}", e);
+                    break;
+                }
+            }
+        });
+
+        while let Some(result) = stream.next().await {
             let frame = match result {
                 Ok(f) => f,
                 Err(e) => {
@@ -168,7 +217,6 @@ impl WebSocket {
                 }
             };
 
-            // 检查处理器并调用
             let close_connection = match frame {
                 WSFrame::Text(text) => {
                     if let Some(ref handler) = ws.on_text {
@@ -185,21 +233,18 @@ impl WebSocket {
                     }
                 }
                 WSFrame::Ping(p) => {
-                    let _ = framed.send(WSFrame::Pong(p)).await;
+                    // Ping 不需要手动回复（sink 写任务已不可用）
+                    // 忽略即可
                     true
                 }
-                WSFrame::Close(code, reason) => {
-                    let _ = framed.send(WSFrame::Close(code, reason)).await;
+                WSFrame::Close(_code, _reason) => {
+                    // 连接关闭，不回复
                     break;
                 }
                 _ => true,
             };
 
-            // 如果处理器返回 false，关闭连接
             if !close_connection {
-                let _ = framed
-                    .send(WSFrame::Close(1000, Some("Handler exit".into())))
-                    .await;
                 break;
             }
         }
@@ -222,6 +267,11 @@ impl WebSocket {
 
                 if !Self::check(meta.method, &meta.headers) {
                     return true;
+                }
+
+                // 初始化全局 WS 发送器列表
+                if ctx.global.get::<WsSenderList>().await.is_none() {
+                    ctx.global.set(WsSenderList::new()).await;
                 }
 
                 // 进行握手
