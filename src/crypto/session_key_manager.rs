@@ -125,10 +125,10 @@ impl PairedSessionKey {
         Ok(Some(ephemeral_public))
     }
 
-    pub async fn establish_ends(&self, id: Vec<u8>, remote: &[u8]) -> Result<bool> {
+    pub async fn establish_ends(&self, temp_id: Vec<u8>, main_id: Vec<u8>, remote: &[u8]) -> Result<bool> {
         let mut temp_sessions = self.temp.lock().await;
 
-        let mut session = match temp_sessions.remove(&id) {
+        let mut session = match temp_sessions.remove(&temp_id) {
             Some(s) => s,
             None => return Ok(false),
         };
@@ -145,7 +145,7 @@ impl PairedSessionKey {
         // 跨锁操作建议：先释放 temp 锁再拿 main 锁，避免潜在死锁
         drop(temp_sessions);
 
-        self.main.write().await.insert(id, session);
+        self.main.write().await.insert(main_id, session);
         Ok(true)
     }
 

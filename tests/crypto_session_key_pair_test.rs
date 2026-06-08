@@ -200,7 +200,7 @@ mod tests {
 
         // 3. 服务端调用 establish_ends：处理客户端公钥，并将 session 移至 main
         let success = manager
-            .establish_ends(session_id.clone(), client_pub_bytes)
+            .establish_ends(session_id.clone(), session_id.clone(), client_pub_bytes)
             .await?;
         assert!(success, "握手结束阶段应返回 true");
 
