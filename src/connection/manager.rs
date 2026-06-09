@@ -1,6 +1,6 @@
 use std::{
     net::{IpAddr, SocketAddr},
-    sync::{Arc, atomic::AtomicU64},
+    sync::{Arc, atomic::{AtomicU64, Ordering}},
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -264,6 +264,30 @@ impl ConnectionManager {
 
                 // 替换旧的 Arc
                 *entry_ref.value_mut() = new_entry;
+            }
+        }
+    }
+
+    /// Mark a connection as active by updating its last_seen timestamp.
+    /// Unlike update(), this does NOT replace the ConnectionEntry, so it
+    /// will NOT abort the router task that reads from this connection.
+    pub fn mark_active(&self, addr: SocketAddr, is_client: bool) {
+        let ip = addr.ip();
+        let scope = NetworkScope::from_ip(&ip);
+        let key = (ip, scope);
+
+        if let Some(bi_conn) = self.connections.get(&key) {
+            let target_map = if is_client {
+                &bi_conn.clients
+            } else {
+                &bi_conn.servers
+            };
+            if let Some(entry_ref) = target_map.get(&addr) {
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs();
+                entry_ref.last_seen.store(now, Ordering::Relaxed);
             }
         }
     }

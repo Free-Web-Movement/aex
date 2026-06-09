@@ -42,7 +42,7 @@ mod tests {
 
         // 3. 测试 Establish: 握手确认
         manager
-            .establish_begins(main_key.clone(), &peer_public.as_bytes().to_vec())
+            .establish_begins(main_key.clone(), main_key.clone(), &peer_public.as_bytes().to_vec())
             .await?;
 
         // 4. 测试加解密
@@ -117,8 +117,9 @@ mod tests {
 
         // 2. 服务端：收到客户端请求，开始建立 session (establish_begins)
         let session_id = vec![1u8; 16]; // 模拟固定的 session_id
+        let local_id = vec![2u8; 16]; // 模拟本机 ID
         let server_pub_opt = manager
-            .establish_begins(session_id.clone(), &client_pub_bytes)
+            .establish_begins(session_id.clone(), local_id.clone(), &client_pub_bytes)
             .await?;
 
         assert!(server_pub_opt.is_some(), "握手应该成功生成服务端公钥");
@@ -200,7 +201,7 @@ mod tests {
 
         // 3. 服务端调用 establish_ends：处理客户端公钥，并将 session 移至 main
         let success = manager
-            .establish_ends(session_id.clone(), session_id.clone(), client_pub_bytes)
+            .establish_ends(session_id.clone(), session_id.clone(), local_id.clone(), client_pub_bytes)
             .await?;
         assert!(success, "握手结束阶段应返回 true");
 

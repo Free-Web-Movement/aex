@@ -82,4 +82,16 @@ impl SessionKey {
             .decrypt(nonce, ct)
             .map_err(|_| anyhow!("decrypt failed"))
     }
+
+    /// Create a copy with the same derived key (no ephemeral_secret).
+    /// Used to mirror the session under a second address key.
+    pub fn duplicate(&self) -> Self {
+        Self {
+            key: self.key,
+            ephemeral_secret: None,
+            ephemeral_public: self.ephemeral_public,
+            created_at: self.created_at,
+            updated_at: self.updated_at,
+        }
+    }
 }

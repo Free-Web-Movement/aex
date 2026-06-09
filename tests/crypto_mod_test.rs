@@ -72,7 +72,7 @@ mod tests {
         let id = vec![1u8; 16];
         let remote = vec![0u8; 32];
 
-        let result = paired.establish_begins(id, &remote).await;
+        let result = paired.establish_begins(id.clone(), id, &remote).await;
         assert!(result.is_ok());
     }
 

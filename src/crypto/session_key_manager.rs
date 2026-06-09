@@ -102,50 +102,86 @@ impl PairedSessionKey {
         Ok(x25519_dalek::PublicKey::from(array))
     }
 
-    /// 完成 session 握手（ACK 阶段）
+    /// 完成 session 握手（接收侧）
+    /// `peer_id`：对端地址（initiator），`local_id`：本机地址（responder）
+    ///
+    /// Only stores the key under `peer_id`. The initiator's `establish_ends`
+    /// stores under `peer_id` as well. Since DH is symmetric, both sides
+    /// compute the same shared secret, so `main[peer_id]` on the responder
+    /// equals `main[peer_id]` on the initiator. The encrypt side looks up
+    /// `main[receiver]`, the decrypt side looks up `main[sender]`. No mirroring
+    /// needed — avoids overwriting when a node has multiple connections.
     pub async fn establish_begins(
         &self,
-        id: Vec<u8>,
-        remote: &[u8], // 改为切片更通用
+        peer_id: Vec<u8>,
+        _local_id: Vec<u8>,
+        remote: &[u8],
     ) -> Result<Option<PublicKey>> {
         let mut session_key = SessionKey::new();
         let ephemeral_public = session_key.ephemeral_public.clone();
 
-        // 安全转换，不再使用 expect
         let client_pub = Self::parse_public_key(remote)?;
 
-        // 执行 Diffie-Hellman
         if let Err(_) = session_key.establish(&client_pub) {
             return Ok(None);
         }
 
         session_key.touch();
-        self.main.write().await.insert(id, session_key);
+        let peer_debug = String::from_utf8(peer_id.clone()).unwrap_or_default();
+        let key_dump = session_key.key.map(|k| {
+            let v: Vec<String> = k[..4].iter().map(|b| format!("{:02x}", b)).collect();
+            v.join("")
+        }).unwrap_or_default();
+        tracing::info!(
+            "🔑 establish_begins: storing main key for peer='{}' key_prefix={:?}",
+            peer_debug, key_dump,
+        );
+        let mut main = self.main.write().await;
+        main.insert(peer_id, session_key.duplicate());
 
         Ok(Some(ephemeral_public))
     }
 
-    pub async fn establish_ends(&self, temp_id: Vec<u8>, main_id: Vec<u8>, remote: &[u8]) -> Result<bool> {
+    pub async fn establish_ends(
+        &self,
+        temp_id: Vec<u8>,
+        peer_id: Vec<u8>,
+        _local_id: Vec<u8>,
+        remote: &[u8],
+    ) -> Result<bool> {
         let mut temp_sessions = self.temp.lock().await;
 
-        let mut session = match temp_sessions.remove(&temp_id) {
+        let session = match temp_sessions.remove(&temp_id) {
             Some(s) => s,
-            None => return Ok(false),
+            None => {
+                let id_debug = String::from_utf8(peer_id.clone()).unwrap_or_default();
+                tracing::warn!("⚠️ establish_ends: temp session NOT FOUND for peer_id='{}' (temp_id={:?})", id_debug, temp_id);
+                return Ok(false);
+            }
         };
 
-        // 安全转换
         let peer_pub = Self::parse_public_key(remote)?;
 
-        if let Err(_) = session.establish(&peer_pub) {
+        let mut session_key = session;
+        if let Err(_) = session_key.establish(&peer_pub) {
             return Ok(false);
         }
+        session_key.touch();
 
-        session.touch();
-
-        // 跨锁操作建议：先释放 temp 锁再拿 main 锁，避免潜在死锁
         drop(temp_sessions);
 
-        self.main.write().await.insert(main_id, session);
+        let peer_debug = String::from_utf8(peer_id.clone()).unwrap_or_default();
+        let key_dump = session_key.key.map(|k| {
+            let v: Vec<String> = k[..4].iter().map(|b| format!("{:02x}", b)).collect();
+            v.join("")
+        }).unwrap_or_default();
+        tracing::info!(
+            "🔑 establish_ends: storing main key for peer='{}' key_prefix={:?}",
+            peer_debug, key_dump,
+        );
+        let mut main = self.main.write().await;
+        main.insert(peer_id, session_key.duplicate());
+
         Ok(true)
     }
 
@@ -153,9 +189,22 @@ impl PairedSessionKey {
     pub async fn encrypt(&self, key: &Vec<u8>, plaintext: &[u8]) -> Result<Vec<u8>> {
         let mut sessions = self.main.write().await;
 
+        let key_debug = String::from_utf8(key.clone()).unwrap_or_else(|_| format!("{:?}", key));
+        tracing::info!("🔐 encrypt: looking up key='{}' (len={}), main has {} entries", key_debug, key.len(), sessions.len());
+        for (k, _) in sessions.iter() {
+            let kd = String::from_utf8(k.clone()).unwrap_or_else(|_| format!("{:?}", k));
+            tracing::info!("  main key: '{}' (len={})", kd, k.len());
+        }
+
         let sk = sessions
             .get_mut(key)
-            .ok_or_else(|| anyhow!("session not found for address"))?;
+            .ok_or_else(|| anyhow!("session not found for address '{}'", key_debug))?;
+
+        let sk_dump = sk.key.map(|k| {
+            let v: Vec<String> = k[..4].iter().map(|b| format!("{:02x}", b)).collect();
+            v.join("")
+        }).unwrap_or_default();
+        tracing::info!("🔐 encrypt: using key_prefix={:?}", sk_dump);
 
         let ct = sk.encrypt(plaintext)?;
         Ok(ct)
@@ -165,9 +214,22 @@ impl PairedSessionKey {
     pub async fn decrypt(&self, key: &Vec<u8>, data: &[u8]) -> Result<Vec<u8>> {
         let mut sessions = self.main.write().await;
 
+        let key_debug = String::from_utf8(key.clone()).unwrap_or_else(|_| format!("{:?}", key));
+        tracing::info!("🔓 decrypt: looking up key='{}' (len={}), main has {} entries", key_debug, key.len(), sessions.len());
+        for (k, _) in sessions.iter() {
+            let kd = String::from_utf8(k.clone()).unwrap_or_else(|_| format!("{:?}", k));
+            tracing::info!("  main key: '{}' (len={})", kd, k.len());
+        }
+
         let sk = sessions
             .get_mut(key)
-            .ok_or_else(|| anyhow!("session not found for address"))?;
+            .ok_or_else(|| anyhow!("session not found for address '{}'", key_debug))?;
+
+        let sk_dump = sk.key.map(|k| {
+            let v: Vec<String> = k[..4].iter().map(|b| format!("{:02x}", b)).collect();
+            v.join("")
+        }).unwrap_or_default();
+        tracing::info!("🔓 decrypt: using key_prefix={:?} (data_len={})", sk_dump, data.len());
 
         let pt = sk.decrypt(data)?;
         Ok(pt)
