@@ -132,11 +132,20 @@ impl PairedSessionKey {
             let v: Vec<String> = k[..4].iter().map(|b| format!("{:02x}", b)).collect();
             v.join("")
         }).unwrap_or_default();
+
+        // Atomically check-and-set under write lock to prevent concurrent
+        // writes for the same peer_id with different shared secrets.
+        let mut main = self.main.write().await;
+        let _entry_count = main.len();
+        if main.contains_key(&peer_id) {
+            let peer_debug = String::from_utf8(peer_id.clone()).unwrap_or_default();
+            tracing::info!("🔑 establish_begins: key already exists for peer='{}', skipping", peer_debug);
+            return Ok(None);
+        }
         tracing::info!(
             "🔑 establish_begins: storing main key for peer='{}' key_prefix={:?}",
             peer_debug, key_dump,
         );
-        let mut main = self.main.write().await;
         main.insert(peer_id, session_key.duplicate());
 
         Ok(Some(ephemeral_public))
@@ -175,11 +184,18 @@ impl PairedSessionKey {
             let v: Vec<String> = k[..4].iter().map(|b| format!("{:02x}", b)).collect();
             v.join("")
         }).unwrap_or_default();
+
+        // Atomic check-and-set under write lock: don't overwrite an existing key.
+        let mut main = self.main.write().await;
+        let _entry_count = main.len();
+        if main.contains_key(&peer_id) {
+            tracing::info!("🔑 establish_ends: key already exists for peer='{}', skipping", peer_debug);
+            return Ok(true);
+        }
         tracing::info!(
             "🔑 establish_ends: storing main key for peer='{}' key_prefix={:?}",
             peer_debug, key_dump,
         );
-        let mut main = self.main.write().await;
         main.insert(peer_id, session_key.duplicate());
 
         Ok(true)
