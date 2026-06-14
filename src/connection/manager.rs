@@ -561,6 +561,22 @@ impl ConnectionManager {
         f(matched).await
     }
 
+    /// 根据 SocketAddr 查找直连的 ConnectionEntry
+    /// 先查 servers（出站），再查 clients（入站）
+    pub fn find_entry(&self, addr: &SocketAddr) -> Option<Arc<ConnectionEntry>> {
+        let ip = addr.ip();
+        let scope = NetworkScope::from_ip(&ip);
+        if let Some(bi_conn) = self.connections.get(&(ip, scope)) {
+            if let Some(entry) = bi_conn.servers.get(addr) {
+                return Some(entry.value().clone());
+            }
+            if let Some(entry) = bi_conn.clients.get(addr) {
+                return Some(entry.value().clone());
+            }
+        }
+        None
+    }
+
     // 获取所有连接
     pub async fn forward<F, Fut>(&self, f: F)
     where
