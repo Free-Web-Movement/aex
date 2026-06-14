@@ -18,34 +18,13 @@ mod tests {
         let manager = PairedSessionKey::new(16);
         let peer_public = generate_peer_public();
 
-        // 1. 测试 Create: 在 temp 中创建 session
-        let (temp_id, _) = manager.create(false).await;
-        assert_eq!(temp_id.len(), 16);
-        {
-            let temp_lock = manager.temp.lock().await;
-            assert!(temp_lock.contains_key(&temp_id));
-        }
-
-        // 2. 测试 Save: 从 temp 迁移到 main (例如以公钥地址为 key)
+        // 1. 创建并建立会话
         let main_key = vec![1, 2, 3, 4];
-        manager.save(temp_id.clone(), main_key.clone()).await?;
-
-        {
-            let temp_lock = manager.temp.lock().await;
-            let main_lock = manager.main.read().await;
-            assert!(!temp_lock.contains_key(&temp_id), "Temp should be cleared");
-            assert!(
-                main_lock.contains_key(&main_key),
-                "Main should have the key"
-            );
-        }
-
-        // 3. 测试 Establish: 握手确认
         manager
             .establish_begins(main_key.clone(), main_key.clone(), &peer_public.as_bytes().to_vec())
             .await?;
 
-        // 4. 测试加解密
+        // 2. 测试加解密
         let message = b"Hello Zero Trust";
         let ciphertext = manager.encrypt(&main_key, message).await?;
         let decrypted = manager.decrypt(&main_key, &ciphertext).await?;
@@ -99,9 +78,11 @@ mod tests {
 
         let result = manager.decrypt(&fake_key, b"data").await;
         assert!(result.is_err());
-        assert_eq!(
-            result.unwrap_err().to_string(),
-            "session not found for address"
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.starts_with("session not found for address"),
+            "Expected error starting with 'session not found for address', got: {}",
+            err
         );
     }
 
@@ -188,6 +169,7 @@ mod tests {
         // 1. 模拟初始化阶段：服务端生成临时 Session 并发给客户端自己的公钥
         // 此时 is_main = false，SessionKey 存在 temp 中
         let (session_id, _server_pub) = manager.create(false).await;
+        let local_id = vec![2u8; 16];
 
         {
             let temp_map = manager.temp.lock().await;

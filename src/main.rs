@@ -28,7 +28,7 @@ async fn main() -> anyhow::Result<()> {
     let tcp_router = {
         let router = TcpRouter::<RawCodec, RawCodec>::new();
         let mut router = router.extractor(|c: &RawCodec| c.id());
-        router.on::<RawCodec, RawCodec>(
+        router.on(
             1001,
             Box::new(|_ctx, _frame: RawCodec, cmd: RawCodec| {
                 Box::pin(async move {

@@ -39,13 +39,15 @@ fn create_aex_router() -> Router {
     router
 }
 
-fn benchmark_aex_fast_path<'a>(routes: &[(&'a str, Vec<&'a str>)]) -> f64 {
+fn benchmark_aex_static<'a>(routes: &[(&'a str, Vec<&'a str>)]) -> f64 {
     let router = create_aex_router();
     const ITERATIONS: usize = 10_000_000;
     let start = Instant::now();
+    let mut params = SmallParams::new();
     for _ in 0..ITERATIONS {
         for (_, segs) in routes {
-            black_box(router.match_route_fast(segs));
+            params.clear();
+            black_box(router.match_route(segs, &mut params));
         }
     }
     let elapsed = start.elapsed();
@@ -227,7 +229,7 @@ fn main() {
         },
     );
 
-    let aex_ns = benchmark_aex_fast_path(&static_routes);
+    let aex_ns = benchmark_aex_static(&static_routes);
     let best_static = std_ns.min(ahash_ns).min(actix_ns).min(axum_ns).min(aex_ns);
 
     println!(
@@ -333,7 +335,7 @@ fn main() {
         ("ahash::AHashMap", ahash_ns),
         ("Actix-web", actix_ns),
         ("Axum", axum_ns),
-        ("AEX Trie (Fast Path)", aex_ns),
+        ("AEX Trie (Static)", aex_ns),
     ];
     static_results.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
 

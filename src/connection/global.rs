@@ -4,7 +4,7 @@ use std::{
     any::{Any, TypeId},
     collections::HashMap,
     net::SocketAddr,
-    sync::Arc,
+    sync::{Arc, OnceLock},
 };
 
 use tokio::{
@@ -42,7 +42,7 @@ pub struct GlobalContext {
     pub heartbeat_manager: Option<HeartbeatManager>,
     pub extensions: Arc<RwLock<TypeMap>>,
     pub routers: TypeMap,
-    pub h2_codec: std::sync::RwLock<Option<Arc<crate::http2::H2Codec>>>,
+    pub h2_codec: OnceLock<Arc<crate::http2::H2Codec>>,
     pub exits: Mutex<HashMap<String, (CancellationToken, AbortHandle)>>,
 }
 
@@ -66,7 +66,7 @@ impl GlobalContext {
             heartbeat_manager: None,
             extensions: Arc::new(RwLock::new(TypeMap::default())),
             routers: TypeMap::default(),
-            h2_codec: std::sync::RwLock::new(None),
+            h2_codec: OnceLock::new(),
             exits: Mutex::new(HashMap::new()),
         }
     }

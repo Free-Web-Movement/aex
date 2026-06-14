@@ -31,7 +31,7 @@ struct CombinedStream {
 /// 所有 WebSocket 连接的写端收集器，用于从外部推送消息
 #[derive(Clone)]
 pub struct WsSenderList {
-    pub senders: Arc<Mutex<Vec<tokio::sync::mpsc::UnboundedSender<String>>>>,
+    pub senders: Arc<Mutex<Vec<tokio::sync::mpsc::UnboundedSender<WSFrame>>>>,
 }
 
 impl WsSenderList {
@@ -44,7 +44,7 @@ impl WsSenderList {
     /// 向所有已连接的 WebSocket 客户端广播文本消息
     pub async fn broadcast(&self, text: &str) {
         let mut guard = self.senders.lock().await;
-        guard.retain(|tx| tx.send(text.to_string()).is_ok());
+        guard.retain(|tx| tx.send(WSFrame::Text(text.to_string())).is_ok());
     }
 
     /// 获取发送器数量（调试用）
@@ -189,20 +189,20 @@ impl WebSocket {
         let (mut sink, mut stream) = framed.split();
 
         // 外部推送通道
-        let (out_tx, mut out_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        let (out_tx, mut out_rx) = tokio::sync::mpsc::unbounded_channel::<WSFrame>();
 
         // 注册到全局列表
         {
             if let Some(list) = ctx.global.get::<WsSenderList>().await {
-                list.senders.lock().await.push(out_tx);
+                list.senders.lock().await.push(out_tx.clone());
             }
         }
 
         // 后台写任务：将外部推送的消息发到 WebSocket
         tokio::spawn(async move {
             use futures::SinkExt;
-            while let Some(text) = out_rx.recv().await {
-                if let Err(e) = sink.send(WSFrame::Text(text)).await {
+            while let Some(frame) = out_rx.recv().await {
+                if let Err(e) = sink.send(frame).await {
                     tracing::debug!("WS send error: {:?}", e);
                     break;
                 }
@@ -233,8 +233,7 @@ impl WebSocket {
                     }
                 }
                 WSFrame::Ping(p) => {
-                    // Ping 不需要手动回复（sink 写任务已不可用）
-                    // 忽略即可
+                    let _ = out_tx.send(WSFrame::Pong(p));
                     true
                 }
                 WSFrame::Close(_code, _reason) => {

@@ -51,7 +51,7 @@ macro_rules! router {
         {
             let mut r = $crate::tcp::Router::<$cmd_ty>::new();
             $(
-                r.on($id, $handler);
+                r.on_simple($id, $handler);
             )*
             r
         }

@@ -24,7 +24,8 @@ pub struct ConnectionManager {
     pub cancel_token: CancellationToken,
     /// 入站连接池：其他节点连入 (Inbound)
     pub connections: DashMap<(IpAddr, NetworkScope), BiDirectionalConnections>,
-    // pub(crate) index_by_id: DashMap<Vec<u8>, SocketAddr>,
+    /// Node ID → ConnectionEntry 索引，O(1) 查找
+    pub index_by_id: DashMap<Vec<u8>, Arc<ConnectionEntry>>,
 }
 
 impl Default for ConnectionManager {
@@ -38,6 +39,7 @@ impl ConnectionManager {
         Self {
             cancel_token: CancellationToken::new(),
             connections: DashMap::new(),
+            index_by_id: DashMap::new(),
         }
     }
 
@@ -198,6 +200,11 @@ impl ConnectionManager {
         is_client: bool,
         context: Option<Arc<Mutex<Context>>>, // writer: Option<Arc<Mutex<Option<BoxWriter>>>>,
     ) {
+        // 忽略回环地址
+        if addr.ip().is_loopback() {
+            return;
+        }
+
         let ip = addr.ip();
         let scope = NetworkScope::from_ip(&ip);
         let key = (ip, scope);
@@ -225,9 +232,30 @@ impl ConnectionManager {
             .entry(key)
             .or_insert_with(BiDirectionalConnections::new);
         if is_client {
-            bi_conn.clients.insert(addr, entry);
+            bi_conn.clients.insert(addr, entry.clone());
         } else {
-            bi_conn.servers.insert(addr, entry);
+            bi_conn.servers.insert(addr, entry.clone());
+        }
+    }
+
+    /// Register a node ID → ConnectionEntry mapping in the index.
+    pub fn index_node(&self, node_id: Vec<u8>, entry: Arc<ConnectionEntry>) {
+        self.index_by_id.insert(node_id, entry);
+    }
+
+    /// Remove a node ID from the index.
+    pub fn deindex_node(&self, node_id: &[u8]) {
+        self.index_by_id.remove(node_id);
+    }
+
+    fn deindex_entry(&self, entry: &ConnectionEntry) {
+        if let Some(node_id) = entry
+            .node
+            .try_read()
+            .ok()
+            .and_then(|lock| lock.as_ref().map(|n| n.id.clone()))
+        {
+            self.index_by_id.remove(&node_id);
         }
     }
 
@@ -263,7 +291,17 @@ impl ConnectionManager {
                 });
 
                 // 替换旧的 Arc
-                *entry_ref.value_mut() = new_entry;
+                *entry_ref.value_mut() = new_entry.clone();
+
+                // 如果新 entry 有 node ID，更新索引
+                if let Some(id) = new_entry
+                    .node
+                    .try_read()
+                    .ok()
+                    .and_then(|lock| lock.as_ref().map(|n| n.id.clone()))
+                {
+                    self.index_by_id.insert(id, new_entry);
+                }
             }
         }
     }
@@ -297,10 +335,14 @@ impl ConnectionManager {
         let scope = NetworkScope::from_ip(&ip);
 
         if let Some(bi_conn) = self.connections.get(&(ip, scope)) {
-            if is_client {
-                bi_conn.clients.remove(&addr);
+            let removed = if is_client {
+                bi_conn.clients.remove(&addr)
             } else {
-                bi_conn.servers.remove(&addr);
+                bi_conn.servers.remove(&addr)
+            };
+
+            if let Some((_, entry)) = removed {
+                self.deindex_entry(&entry);
             }
 
             // 💡 进阶逻辑：如果该 IP 下已经没有任何连接了，清理掉这个桶
@@ -324,18 +366,21 @@ impl ConnectionManager {
         // 1. 使用作用域或显式 drop 确保 bi_conn 的引用在 check_and_cleanup 之前释放
         {
             if let Some(bi_conn) = self.connections.get(&key) {
-                if let Some((_, entry)) = bi_conn.clients.remove(&addr) {
-                    entry.abort_handle.abort();
-                    found = true;
+                let entry = if let Some((_, entry)) = bi_conn.clients.remove(&addr) {
+                    entry
                 } else if let Some((_, entry)) = bi_conn.servers.remove(&addr) {
-                    entry.abort_handle.abort();
-                    found = true;
-                }
+                    entry
+                } else {
+                    return false;
+                };
+                entry.abort_handle.abort();
+                self.deindex_entry(&entry);
+                found = true;
             }
         } // <--- 这里 bi_conn (Ref) 被 drop，释放了分片锁
 
         if found {
-            self.check_and_cleanup_bucket(key); // 现在可以安全地重新获取锁或执行 remove
+            self.check_and_cleanup_bucket(key);
         }
 
         found
@@ -360,10 +405,12 @@ impl ConnectionManager {
         if let Some((_, bi_conn)) = self.connections.remove(&(ip, scope)) {
             // 遍历清理所有入站
             for r in bi_conn.clients {
+                self.deindex_entry(&r.1);
                 r.1.abort_handle.abort();
             }
             // 遍历清理所有出站
             for r in bi_conn.servers {
+                self.deindex_entry(&r.1);
                 r.1.abort_handle.abort();
             }
         }
@@ -488,6 +535,7 @@ impl ConnectionManager {
             bi_conn.servers.clear();
         }
         self.connections.clear();
+        self.index_by_id.clear();
 
         // 2. 在锁外物理掐断
         for h in handles {
@@ -517,19 +565,24 @@ impl ConnectionManager {
     }
 
     /// 根据 Node ID 获取所有相关的连接句柄
+    /// 使用 index_by_id 实现 O(1) 查找
     /// f 是一个闭包，允许你在获取到列表后立即执行操作
     pub async fn notify<F, Fut>(&self, node_id: &[u8], f: F)
     where
         F: FnOnce(Vec<Arc<ConnectionEntry>>) -> Fut,
         Fut: std::future::Future<Output = ()>,
     {
+        // 1. 优先走索引（O(1)）
+        if let Some(entry) = self.index_by_id.get(node_id) {
+            f(vec![entry.value().clone()]).await;
+            return;
+        }
+
+        // 2. 未索引时回退到全量遍历
         let mut all_entries = Vec::new();
 
-        // 1. 【同步阶段】快速收集所有 Arc 引用
-        // 这一步很快，且不涉及 .await，能迅速释放 DashMap 的分片锁
         for bucket_ref in self.connections.iter() {
             let bi_conn = bucket_ref.value();
-
             for entry_ref in bi_conn.clients.iter() {
                 all_entries.push(Arc::clone(entry_ref.value()));
             }
@@ -538,26 +591,21 @@ impl ConnectionManager {
             }
         }
 
-        // 2. 【异步阶段】过滤匹配的 Node ID
         let mut matched = Vec::new();
         for entry in all_entries {
             let is_match = {
-                // 在这个小作用域内获取锁
                 let node_lock = entry.node.read().await;
                 if let Some(node) = node_lock.as_ref() {
                     node.id == node_id
                 } else {
                     false
                 }
-            }; // 👈 锁 (node_lock) 在这里被自动 Drop
-
-            // 此时 node_lock 已经不存在了，可以安全地移动 entry (它是 Arc，克隆它也行)
+            };
             if is_match {
                 matched.push(entry);
             }
         }
 
-        // 3. 执行回调
         f(matched).await
     }
 

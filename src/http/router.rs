@@ -11,8 +11,6 @@
 //! | Wildcard | `/static/*` | Matches any remaining path |
 
 use ahash::AHashMap;
-use std::cell::RefCell;
-use std::rc::Rc;
 use std::sync::Arc;
 use tokio::io::AsyncReadExt;
 use tokio::sync::Mutex;
@@ -20,9 +18,11 @@ use tokio::sync::Mutex;
 use crate::connection::context::Context;
 use crate::http::meta::HttpMetadata;
 use crate::http::params::{Params, SmallParams};
+use crate::http::protocol::header::HeaderKey;
 use crate::http::protocol::media_type::SubMediaType;
 use crate::http::protocol::method::HttpMethod;
 use crate::http::protocol::status::StatusCode;
+use crate::http::protocol::version::HttpVersion;
 use crate::http::types::Executor;
 
 #[derive(Debug, Clone)]
@@ -45,7 +45,7 @@ impl NodeType {
 }
 
 pub struct RouteBuilder<'a> {
-    router: Rc<RefCell<&'a mut Router>>,
+    router: &'a mut Router,
     method: &'static str,
     path: String,
     handler: Arc<Executor>,
@@ -60,7 +60,7 @@ impl<'a> RouteBuilder<'a> {
         handler: Arc<Executor>,
     ) -> Self {
         Self {
-            router: Rc::new(RefCell::new(router)),
+            router,
             method,
             path,
             handler,
@@ -80,72 +80,65 @@ impl<'a> RouteBuilder<'a> {
 
         let method_key = self.method.to_uppercase();
 
-        {
-            let mut router = self.router.borrow_mut();
-
-            if segments.is_empty() {
-                if router.handlers.is_none() {
-                    router.handlers = Some(AHashMap::with_capacity(8));
-                }
-                router
-                    .handlers
-                    .as_mut()
-                    .unwrap()
-                    .insert(method_key.clone(), self.handler.clone());
-                if !self.middlewares.is_empty() {
-                    if router.middlewares.is_none() {
-                        router.middlewares = Some(AHashMap::with_capacity(4));
-                    }
-                    router
-                        .middlewares
-                        .as_mut()
-                        .unwrap()
-                        .insert(method_key, self.middlewares.clone());
-                }
-                return;
+        if segments.is_empty() {
+            let router = &mut *self.router;
+            if router.handlers.is_none() {
+                router.handlers = Some(AHashMap::with_capacity(8));
             }
-
-            let mut current: &mut Router = &mut *router;
-            for seg in &segments {
-                let key = if *seg == "*" {
-                    "*".to_string()
-                } else if seg.starts_with(':') {
-                    ":".to_string()
-                } else {
-                    seg.to_string()
-                };
-
-                let entry = current.children.entry(key.clone()).or_insert_with(|| {
-                    Router::new(if key == "*" {
-                        NodeType::Wildcard
-                    } else if key == ":" {
-                        NodeType::Param(seg[1..].into())
-                    } else {
-                        NodeType::Static(seg.to_string())
-                    })
-                });
-                current = entry;
-            }
-
-            if current.handlers.is_none() {
-                current.handlers = Some(AHashMap::with_capacity(8));
-            }
-            current
+            router
                 .handlers
                 .as_mut()
                 .unwrap()
                 .insert(method_key.clone(), self.handler.clone());
-
             if !self.middlewares.is_empty() {
-                if current.middlewares.is_none() {
-                    current.middlewares = Some(AHashMap::with_capacity(4));
+                if router.middlewares.is_none() {
+                    router.middlewares = Some(AHashMap::with_capacity(4));
                 }
-                current
+                router
                     .middlewares
                     .as_mut()
                     .unwrap()
                     .insert(method_key, self.middlewares.clone());
             }
+            return;
+        }
+
+        let mut current: &mut Router = self.router;
+        for seg in &segments {
+            current = if *seg == "*" {
+                current.wildcard.get_or_insert_with(|| {
+                    Box::new(Router::new(NodeType::Wildcard))
+                })
+            } else if seg.starts_with(':') {
+                let (_, router) = current.param.get_or_insert_with(|| {
+                    (seg[1..].to_string(), Box::new(Router::new(NodeType::Param(seg[1..].into()))))
+                });
+                &mut **router
+            } else {
+                current.statics.entry(seg.to_string()).or_insert_with(|| {
+                    Router::new(NodeType::Static(seg.to_string()))
+                })
+            };
+        }
+
+        if current.handlers.is_none() {
+            current.handlers = Some(AHashMap::with_capacity(8));
+        }
+        current
+            .handlers
+            .as_mut()
+            .unwrap()
+            .insert(method_key.clone(), self.handler.clone());
+
+        if !self.middlewares.is_empty() {
+            if current.middlewares.is_none() {
+                current.middlewares = Some(AHashMap::with_capacity(4));
+            }
+            current
+                .middlewares
+                .as_mut()
+                .unwrap()
+                .insert(method_key, self.middlewares.clone());
         }
     }
 }
@@ -153,13 +146,11 @@ impl<'a> RouteBuilder<'a> {
 /// Trie tree router for HTTP path matching.
 pub struct Router {
     pub node_type: NodeType,
-    pub children: AHashMap<String, Router>,
+    pub statics: AHashMap<String, Router>,
+    pub param: Option<(String, Box<Router>)>,
+    pub wildcard: Option<Box<Router>>,
     pub middlewares: Option<AHashMap<String, Vec<Arc<Executor>>>>,
     pub handlers: Option<AHashMap<String, Arc<Executor>>>,
-    #[cfg(feature = "router-cache")]
-    param_key: Option<String>,
-    #[cfg(feature = "router-cache")]
-    wildcard_key: Option<String>,
 }
 
 impl Router {
@@ -167,73 +158,44 @@ impl Router {
     pub fn new(node_type: NodeType) -> Self {
         Self {
             node_type,
-            children: AHashMap::with_capacity(4),
+            statics: AHashMap::with_capacity(4),
+            param: None,
+            wildcard: None,
             middlewares: None,
             handlers: None,
-            #[cfg(feature = "router-cache")]
-            param_key: None,
-            #[cfg(feature = "router-cache")]
-            wildcard_key: None,
         }
     }
 
     #[cfg(feature = "router-cache")]
     pub fn finalize(&mut self) {
-        for (key, child) in &mut self.children {
-            match &child.node_type {
-                NodeType::Param(_) => {
-                    self.param_key = Some(key.clone());
-                }
-                NodeType::Wildcard => {
-                    self.wildcard_key = Some(key.clone());
-                }
-                NodeType::Static(_) => {}
-            }
+        if let Some((_, ref mut child)) = self.param {
+            child.finalize();
+        }
+        if let Some(ref mut child) = self.wildcard {
+            child.finalize();
+        }
+        for (_, child) in &mut self.statics {
             child.finalize();
         }
     }
 
     #[inline]
-    pub fn match_route_fast<'a>(&'a self, segs: &'a [&str]) -> Option<&'a Router> {
-        let mut current: &Router = self;
+    fn match_seg<'a>(&'a self, seg: &str, params: &mut SmallParams) -> Option<&'a Router> {
+        // 1. Static match first
+        if let Some(node) = self.statics.get(seg) {
+            return Some(node);
+        }
 
-        for seg in segs {
-            let seg_str: &str = seg;
-            match current.children.get(seg_str) {
-                Some(node) if node.node_type.is_static() => {
-                    current = node;
-                }
-                _ => {
-                    #[cfg(feature = "router-cache")]
-                    {
-                        if let Some(ref param_key) = current.param_key {
-                            if let Some(node) = current.children.get(param_key) {
-                                if !node.node_type.is_param() {
-                                    return None;
-                                }
-                                current = node;
-                                continue;
-                            }
-                        }
-                    }
-                    #[cfg(not(feature = "router-cache"))]
-                    {
-                        if let Some(node) = current.children.get(":") {
-                            if node.node_type.is_param() {
-                                current = node;
-                                continue;
-                            }
-                        }
-                    }
-
-                    if let Some(node) = current.children.get("*") {
-                        return Some(node);
-                    }
-                    return None;
-                }
+        // 2. Param match
+        if let Some((ref name, ref node)) = self.param {
+            if node.node_type.is_param() {
+                params.insert(name.clone(), (*seg).to_string());
+                return Some(node);
             }
         }
-        Some(current)
+
+        // 3. Wildcard matches remaining path
+        self.wildcard.as_ref().map(|n| n.as_ref())
     }
 
     /// Fluent route registration: GET method.
@@ -289,23 +251,20 @@ impl Router {
 
         let mut current = self;
         for seg in &segments {
-            let key = if *seg == "*" {
-                "*".to_string()
-            } else if seg.starts_with(':') {
-                ":".to_string()
-            } else {
-                seg.to_string()
-            };
-
-            current = current.children.entry(key.clone()).or_insert_with(|| {
-                Router::new(if key == "*" {
-                    NodeType::Wildcard
-                } else if key == ":" {
-                    NodeType::Param(seg[1..].into())
-                } else {
-                    NodeType::Static(seg.to_string())
+            current = if *seg == "*" {
+                current.wildcard.get_or_insert_with(|| {
+                    Box::new(Router::new(NodeType::Wildcard))
                 })
-            });
+            } else if seg.starts_with(':') {
+                let (_, router) = current.param.get_or_insert_with(|| {
+                    (seg[1..].to_string(), Box::new(Router::new(NodeType::Param(seg[1..].into()))))
+                });
+                &mut **router
+            } else {
+                current.statics.entry(seg.to_string()).or_insert_with(|| {
+                    Router::new(NodeType::Static(seg.to_string()))
+                })
+            };
         }
 
         let node = current;
@@ -326,40 +285,22 @@ impl Router {
         }
     }
 
-    /// 匹配路径
+    /// 匹配路径（迭代版本，无回溯）
     #[inline]
     pub fn match_route<'a>(
         &'a self,
         segs: &[&str],
         params: &mut SmallParams,
     ) -> Option<&'a Router> {
-        if segs.is_empty() {
-            return Some(self);
-        }
-
-        let seg = segs[0];
-        let rest = &segs[1..];
-
-        if let Some(child) = self.children.get(seg) {
-            if let matched @ Some(_) = child.match_route(rest, params) {
-                return matched;
+        let mut current = self;
+        for seg in segs {
+            let next = current.match_seg(seg, params)?;
+            if matches!(next.node_type, NodeType::Wildcard) {
+                return Some(next);
             }
+            current = next;
         }
-
-        if let Some(child) = self.children.get(":") {
-            if let NodeType::Param(name) = &child.node_type {
-                params.insert(name.clone(), seg.to_string());
-                if let matched @ Some(_) = child.match_route(rest, params) {
-                    return matched;
-                }
-            }
-        }
-
-        if let Some(child) = self.children.get("*") {
-            return Some(child);
-        }
-
-        None
+        Some(current)
     }
 
     /// 从路由树中查找处理器（供 HTTP/2 使用）
@@ -408,18 +349,7 @@ impl Router {
         let mut path_params = SmallParams::with_capacity(segments.len().min(8));
 
         if let Some(node) = self.match_route(&segments, &mut path_params) {
-            let (path_full, method) = {
-                let meta = ctx.local.get_ref::<HttpMetadata>().unwrap();
-                (meta.path.clone(), meta.method)
-            };
-            let mut params = Params::new(path_full);
-
-            if !path_params.is_empty() {
-                params.data = Some(path_params.into());
-            }
-
-            // 5. 处理 Form Body (如果是 x-www-form-urlencoded)
-            let (is_form, length) = {
+            let (path_full, method, is_form, length) = {
                 let meta = ctx.local.get_ref::<HttpMetadata>().unwrap();
                 let is_form = meta
                     .content_type
@@ -430,8 +360,13 @@ impl Router {
                     .get(&crate::http::protocol::header::HeaderKey::ContentLength)
                     .and_then(|s| s.parse::<usize>().ok())
                     .unwrap_or(0);
-                (is_form, length)
+                (meta.path.clone(), meta.method, is_form, length)
             };
+            let mut params = Params::new(path_full);
+
+            if !path_params.is_empty() {
+                params.data = Some(path_params.into());
+            }
 
             if is_form && length > 0 {
                 let mut body_bytes = vec![0u8; length];
@@ -443,7 +378,6 @@ impl Router {
                 }
             }
 
-            // 6. 关键步骤：原地更新 meta
             {
                 let meta = ctx.local.get_mut::<HttpMetadata>().unwrap();
                 meta.params = Some(params);
@@ -485,14 +419,50 @@ impl Router {
         true
     }
 
+    /// Determine whether the connection should be kept alive after this request.
+    fn wants_keep_alive(meta: &HttpMetadata) -> bool {
+        match meta.version {
+            HttpVersion::Http10 => {
+                meta.headers
+                    .get(&HeaderKey::Connection)
+                    .map(|v| v.eq_ignore_ascii_case("keep-alive"))
+                    .unwrap_or(false)
+            }
+            HttpVersion::Http11 | HttpVersion::Http20 => {
+                !meta
+                    .headers
+                    .get(&HeaderKey::Connection)
+                    .map(|v| v.eq_ignore_ascii_case("close"))
+                    .unwrap_or(false)
+            }
+        }
+    }
+
     pub async fn handle(self: Arc<Self>, ctx: Arc<Mutex<Context>>) -> anyhow::Result<()> {
-        let guard = ctx.lock().await;
-        let mut ctx = guard;
-        ctx.req().parse_to_local().await?;
-        if self.on_request(&mut ctx).await {
-            ctx.res().send_response().await?;
-        } else {
-            ctx.res().send_failure().await?;
+        loop {
+            let guard = ctx.lock().await;
+            let mut ctx = guard;
+
+            if let Err(_) = ctx.req().parse_to_local().await {
+                break;
+            }
+
+            let keep_alive = match ctx.local.get_ref::<HttpMetadata>() {
+                Some(meta) => Self::wants_keep_alive(meta),
+                None => false,
+            };
+
+            if self.on_request(&mut ctx).await {
+                ctx.res().send_response().await?;
+            } else {
+                ctx.res().send_failure().await?;
+            }
+
+            if !keep_alive {
+                break;
+            }
+
+            ctx.local = crate::connection::context::LocalTypeMap::new();
         }
         Ok(())
     }

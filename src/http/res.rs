@@ -28,42 +28,43 @@ pub struct Response<'a> {
 }
 
 impl<'a> Response<'a> {
-    pub async fn send(
-        &mut self,
-        headers: &Headers,
-        body: &[u8],
-        status: StatusCode,
-        version: HttpVersion,
-    ) -> anyhow::Result<()> {
-        let w = self
-            .writer
-            .as_deref_mut()
-            .ok_or_else(|| anyhow::anyhow!("Writer not available"))?;
+pub async fn send(
+    &mut self,
+    headers: &Headers,
+    body: &[u8],
+    status: StatusCode,
+    version: HttpVersion,
+) -> anyhow::Result<()> {
+    let w = self
+        .writer
+        .as_deref_mut()
+        .ok_or_else(|| anyhow::anyhow!("Writer not available"))?;
 
-        // Optimized: pre-allocate buffer
-        let mut buf = Vec::with_capacity(256);
+    let mut buf = Vec::with_capacity(256 + headers.len() * 64);
 
-        // Status line
-        let status_line = build_status_line(status, version);
-        buf.extend_from_slice(&status_line);
+    let status_line = build_status_line(status, version);
+    buf.extend_from_slice(&status_line);
+    buf.extend_from_slice(b"\r\n");
+
+    for (k, v) in headers {
+        buf.extend_from_slice(k.as_str().as_bytes());
+        buf.extend_from_slice(b": ");
+        buf.extend_from_slice(v.as_bytes());
         buf.extend_from_slice(b"\r\n");
-
-        // Headers
-        for (k, v) in headers {
-            buf.extend_from_slice(k.as_str().as_bytes());
-            buf.extend_from_slice(b": ");
-            buf.extend_from_slice(v.as_bytes());
-            buf.extend_from_slice(b"\r\n");
-        }
-
-        buf.extend_from_slice(b"\r\n");
-        buf.extend_from_slice(body);
-
-        w.write_all(&buf).await?;
-        w.flush().await?;
-
-        Ok(())
     }
+
+    buf.extend_from_slice(b"Content-Length: ");
+    buf.extend_from_slice(body.len().to_string().as_bytes());
+    buf.extend_from_slice(b"\r\n");
+
+    buf.extend_from_slice(b"\r\n");
+    buf.extend_from_slice(body);
+
+    w.write_all(&buf).await?;
+    w.flush().await?;
+
+    Ok(())
+}
 
     pub fn set_header(&mut self, key: impl Into<HeaderKey>, value: impl Into<String>) -> &mut Self {
         if let Some(meta) = self.local.get_mut::<HttpMetadata>() {
@@ -73,25 +74,22 @@ impl<'a> Response<'a> {
     }
 
     pub async fn send_response(&mut self) -> anyhow::Result<()> {
-        let (headers, body, status, version) = {
+        let (status, version, body, headers) = {
             let meta = self
                 .local
                 .get_mut::<HttpMetadata>()
                 .ok_or_else(|| anyhow::anyhow!("HttpMetadata not found"))?;
             meta.headers
                 .insert(HeaderKey::ContentLength, meta.body.len().to_string());
-            (
-                meta.headers.clone(),
-                meta.body.clone(),
-                meta.status,
-                meta.version,
-            )
+            let body = std::mem::take(&mut meta.body);
+            let headers = std::mem::replace(&mut meta.headers, Headers::new());
+            (meta.status, meta.version, body, headers)
         };
         self.send(&headers, &body, status, version).await
     }
 
     pub async fn send_failure(&mut self) -> anyhow::Result<()> {
-        let (headers, body, status, version) = {
+        let (status, version, body, headers) = {
             let meta = self
                 .local
                 .get_mut::<HttpMetadata>()
@@ -104,12 +102,9 @@ impl<'a> Response<'a> {
             }
             meta.headers
                 .insert(HeaderKey::ContentLength, meta.body.len().to_string());
-            (
-                meta.headers.clone(),
-                meta.body.clone(),
-                meta.status,
-                meta.version,
-            )
+            let body = std::mem::take(&mut meta.body);
+            let headers = std::mem::replace(&mut meta.headers, Headers::new());
+            (meta.status, meta.version, body, headers)
         };
         self.send(&headers, &body, status, version).await
     }

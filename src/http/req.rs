@@ -24,32 +24,31 @@ use crate::{
 pub struct Request<'a> {
     pub reader: &'a mut Option<BoxReader>,
     pub local: &'a mut LocalTypeMap,
+    buf: Vec<u8>,
 }
 
 impl<'a> Request<'a> {
     pub async fn parse_to_local(&mut self) -> anyhow::Result<()> {
-        let line = self.read_line_with_limit().await?;
-        if line.len() > MAX_REQUEST_LINE_SIZE {
-            bail!("Request line too long: {} bytes", line.len());
-        }
+        let (method, path) = {
+            let line = self.read_line_with_limit().await?;
+            if line.len() > MAX_REQUEST_LINE_SIZE {
+                bail!("Request line too long: {} bytes", line.len());
+            }
 
-        // Optimized: split by ' ' instead of split_whitespace
-        let mut parts = line.split(|c| *c == b' ');
-        let method_bytes = parts.next().context("Missing method")?;
-        let path_bytes = parts.next().context("Missing path")?;
-        let _version_bytes = parts.next().context("Missing version")?;
+            let mut parts = line.split(|c| *c == b' ');
+            let method_bytes = parts.next().context("Missing method")?;
+            let path_bytes = parts.next().context("Missing path")?;
 
-        let method_str = std::str::from_utf8(method_bytes).context("Invalid method")?;
-        // Optimized: avoid to_string() - use &str for path
-        let path_str = std::str::from_utf8(path_bytes).context("Invalid path")?;
+            let method_str = std::str::from_utf8(method_bytes).context("Invalid method")?;
+            let path_str = std::str::from_utf8(path_bytes).context("Invalid path")?;
 
-        let version = HttpVersion::Http11;
-        let method = HttpMethod::from_str(method_str).context("Unknown method")?;
-
-        // Set path directly without allocation (will clone if needed)
-        let path = path_str.to_string();
+            let method = HttpMethod::from_str(method_str).context("Unknown method")?;
+            (method, path_str.to_string())
+        };
 
         let headers_map = self.parse_headers_from_reader().await?;
+
+        let version = HttpVersion::Http11;
 
         if headers_map.len() > MAX_HEADER_COUNT {
             bail!("Too many headers: {}", headers_map.len());
@@ -142,15 +141,14 @@ impl<'a> Request<'a> {
         map
     }
 
-    async fn read_line_with_limit(&mut self) -> anyhow::Result<Vec<u8>> {
-        let mut buf = Vec::with_capacity(MAX_CAPACITY as usize);
-
+    async fn read_line_with_limit(&mut self) -> anyhow::Result<&[u8]> {
+        self.buf.clear();
         if let Some(r) = self.reader.as_deref_mut() {
-            let n = r.read_until(b'\n', &mut buf).await?;
+            let n = r.read_until(b'\n', &mut self.buf).await?;
             if n == 0 {
                 bail!("Connection closed");
             }
-            Ok(buf)
+            Ok(&self.buf)
         } else {
             Err(anyhow::anyhow!("Reader taken!"))
         }
@@ -159,10 +157,8 @@ impl<'a> Request<'a> {
     async fn parse_headers_from_reader(&mut self) -> anyhow::Result<AHashMap<HeaderKey, String>> {
         let mut map = AHashMap::with_capacity(16);
         loop {
-            let line_bytes = self.read_line_with_limit().await?;
-            let line = std::str::from_utf8(&line_bytes)?;
-            let line = line.trim_end_matches(|c| c == '\r' || c == '\n');
-
+            let line = self.read_line_with_limit().await?;
+            let line = std::str::from_utf8(line)?.trim_end_matches(|c| c == '\r' || c == '\n');
             if line.is_empty() {
                 break;
             }
@@ -212,6 +208,10 @@ impl<'a> Request<'a> {
 
     /// 创建一个新的 Request 实例
     pub fn new(reader: &'a mut Option<BoxReader>, local: &'a mut LocalTypeMap) -> Self {
-        Self { reader, local }
+        Self {
+            reader,
+            local,
+            buf: Vec::with_capacity(1024),
+        }
     }
 }

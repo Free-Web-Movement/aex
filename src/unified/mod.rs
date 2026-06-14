@@ -337,12 +337,14 @@ impl UnifiedServer {
         let tcp_listener = TcpListener::bind(self.addr).await?;
         tracing::info!("[Unified] TCP listening on {}", self.addr);
 
-        if let Some(udp_handler) = &self.udp_handler {
-            let sock = Arc::new(UdpSocket::bind(self.addr).await?);
+        let self_arc = Arc::new(self.clone());
+
+        if let Some(udp_handler) = &self_arc.udp_handler {
+            let sock = Arc::new(UdpSocket::bind(self_arc.addr).await?);
             tracing::info!("[Unified] UDP listening on {}", sock.local_addr()?);
 
             let handler = udp_handler.clone();
-            let globals = self.globals.clone();
+            let globals = self_arc.globals.clone();
             tokio::spawn(async move {
                 let mut buf = [0u8; 65535];
                 loop {
@@ -363,14 +365,12 @@ impl UnifiedServer {
             });
         }
 
-        let server = self.clone();
-
         loop {
             tokio::select! {
                 result = tcp_listener.accept() => {
                     match result {
                         Ok((socket, peer_addr)) => {
-                            let srv = server.clone();
+                            let srv = self_arc.clone();
                             tokio::spawn(async move {
                                 srv.handle_tcp_connection(socket, peer_addr).await;
                             });

@@ -137,10 +137,7 @@ impl Context {
 
     /// 获取 Request 视图
     pub fn req(&mut self) -> Request<'_> {
-        Request {
-            reader: &mut self.reader,
-            local: &mut self.local,
-        }
+        Request::new(&mut self.reader, &mut self.local)
     }
 
     /// 获取 Response 视图

@@ -1,30 +1,8 @@
 use ahash::AHashMap;
 
-const MAX_PARAMS: usize = 8;
-
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct SmallParams {
-    entries: [(String, String); MAX_PARAMS],
-    len: usize,
-}
-
-impl Default for SmallParams {
-    fn default() -> Self {
-        const EMPTY: String = String::new();
-        Self {
-            entries: [
-                (EMPTY, EMPTY),
-                (EMPTY, EMPTY),
-                (EMPTY, EMPTY),
-                (EMPTY, EMPTY),
-                (EMPTY, EMPTY),
-                (EMPTY, EMPTY),
-                (EMPTY, EMPTY),
-                (EMPTY, EMPTY),
-            ],
-            len: 0,
-        }
-    }
+    entries: Vec<(String, String)>,
 }
 
 impl SmallParams {
@@ -34,63 +12,44 @@ impl SmallParams {
     }
 
     #[inline]
-    pub fn with_capacity(_cap: usize) -> Self {
-        Self::default()
+    pub fn with_capacity(cap: usize) -> Self {
+        Self {
+            entries: Vec::with_capacity(cap),
+        }
     }
 
     #[inline]
     pub fn insert(&mut self, key: String, value: String) {
-        if self.len < MAX_PARAMS {
-            self.entries[self.len] = (key, value);
-            self.len += 1;
-        }
+        self.entries.push((key, value));
     }
 
     #[inline]
     pub fn get(&self, key: &str) -> Option<&str> {
-        for i in 0..self.len {
-            if self.entries[i].0 == key {
-                return Some(&self.entries[i].1);
-            }
-        }
-        None
+        self.entries
+            .iter()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v.as_str())
     }
 
     #[inline]
     pub fn len(&self) -> usize {
-        self.len
+        self.entries.len()
     }
 
     #[inline]
     pub fn is_empty(&self) -> bool {
-        self.len == 0
+        self.entries.is_empty()
     }
 
     #[inline]
     pub fn clear(&mut self) {
-        self.len = 0;
-    }
-
-    #[inline]
-    pub unsafe fn into_map_unchecked(self) -> AHashMap<String, String> {
-        let mut map = AHashMap::with_capacity(self.len);
-        let mut i = 0usize;
-        while i < self.len {
-            unsafe {
-                let k = std::ptr::read(&self.entries[i].0 as *const String);
-                let v = std::ptr::read(&self.entries[i].1 as *const String);
-                map.insert(k, v);
-            }
-            i += 1;
-        }
-        std::mem::forget(self);
-        map
+        self.entries.clear();
     }
 }
 
 impl From<SmallParams> for AHashMap<String, String> {
     fn from(small: SmallParams) -> Self {
-        unsafe { small.into_map_unchecked() }
+        small.entries.into_iter().collect()
     }
 }
 
