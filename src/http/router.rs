@@ -183,14 +183,14 @@ impl Router {
         }
     }
 
+    /// Match a single segment against static or param children.
+    /// Does NOT fall through to wildcard — wildcards are handled by match_route.
     #[inline]
-    fn match_seg<'a>(&'a self, seg: &str, params: &mut SmallParams) -> Option<&'a Router> {
-        // 1. Static match first
+    fn match_seg_exact<'a>(&'a self, seg: &str, params: &mut SmallParams) -> Option<&'a Router> {
         if let Some(node) = self.statics.get(seg) {
             return Some(node);
         }
 
-        // 2. Param match
         if let Some((ref name, ref node)) = self.param {
             if node.node_type.is_param() {
                 params.insert(name.clone(), (*seg).to_string());
@@ -198,8 +198,7 @@ impl Router {
             }
         }
 
-        // 3. Wildcard matches remaining path
-        self.wildcard.as_ref().map(|n| n.as_ref())
+        None
     }
 
     /// Fluent route registration: GET method.
@@ -293,7 +292,12 @@ impl Router {
         }
     }
 
-    /// 匹配路径（迭代版本，无回溯）
+    /// Match path segments against the route trie with wildcard backtracking.
+    ///
+    /// Priority:
+    ///   1. Exact match (static/param) — continue to next segment
+    ///   2. Current node's wildcard — matches remaining segments
+    ///   3. Backtrack to ancestor wildcard — fallback when a deeper branch fails
     #[inline]
     pub fn match_route<'a>(
         &'a self,
@@ -301,13 +305,30 @@ impl Router {
         params: &mut SmallParams,
     ) -> Option<&'a Router> {
         let mut current = self;
+        let mut backtrack: Option<&'a Router> = None;
+
         for seg in segs {
-            let next = current.match_seg(seg, params)?;
-            if matches!(next.node_type, NodeType::Wildcard) {
-                return Some(next);
+            // Before descending into exact children, save this node's wildcard
+            // as a backtrack target in case the branch fails deeper.
+            if backtrack.is_none() {
+                backtrack = current.wildcard.as_ref().map(|n| n.as_ref());
             }
-            current = next;
+
+            // 1. Try exact match (static or param)
+            if let Some(next) = current.match_seg_exact(seg, params) {
+                current = next;
+                continue;
+            }
+
+            // 2. No exact match — if this node has a wildcard, it matches the rest
+            if let Some(wildcard) = &current.wildcard {
+                return Some(wildcard.as_ref());
+            }
+
+            // 3. No wildcard here either — backtrack to ancestor wildcard
+            return backtrack;
         }
+
         Some(current)
     }
 

@@ -203,8 +203,12 @@ impl ConnectionManager {
         is_client: bool,
         context: Option<Arc<Mutex<Context>>>, // writer: Option<Arc<Mutex<Option<BoxWriter>>>>,
     ) {
-        // 忽略回环地址
-        if addr.ip().is_loopback() {
+        // 忽略回环地址（设置环境变量 AEX_ALLOW_LOOPBACK=1 可跳过，用于测试）
+        static ALLOW_LOOPBACK: once_cell::sync::OnceCell<bool> = once_cell::sync::OnceCell::new();
+        let allow = *ALLOW_LOOPBACK.get_or_init(|| {
+            std::env::var("AEX_ALLOW_LOOPBACK").as_deref() == Ok("1")
+        });
+        if !allow && addr.ip().is_loopback() {
             return;
         }
 

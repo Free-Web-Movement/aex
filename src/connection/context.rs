@@ -173,17 +173,13 @@ impl Context {
         self
     }
 
-    /// Send a response body.
+    /// Send a response body. Content-Length is set automatically by send_response.
     pub fn send(&mut self, content: impl Into<String>, mime: Option<SubMediaType>) {
         if let Some(meta) = self.local.get_mut::<HttpMetadata>() {
             let bytes: Vec<u8> = content.into().into_bytes();
-            let len = bytes.len();
-
             let mime_str = mime.unwrap_or(SubMediaType::Plain);
             meta.headers
                 .insert(HeaderKey::ContentType, mime_str.as_str().to_string());
-            meta.headers
-                .insert(HeaderKey::ContentLength, len.to_string());
             meta.body = bytes;
         }
     }

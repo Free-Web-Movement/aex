@@ -8,6 +8,19 @@ use crate::{
     },
 };
 
+/// Known request-only header keys that must NOT be forwarded into the HTTP response.
+const REQUEST_ONLY_HEADERS: [HeaderKey; 8] = [
+    HeaderKey::ContentLength,
+    HeaderKey::TransferEncoding,
+    HeaderKey::Host,
+    HeaderKey::Connection,
+    HeaderKey::Upgrade,
+    HeaderKey::Origin,
+    HeaderKey::Cookie,
+    // Accept is technically fine, but useless in a response
+    HeaderKey::Accept,
+];
+
 fn build_status_line(status: StatusCode, version: HttpVersion) -> Vec<u8> {
     let prefix = match version {
         HttpVersion::Http10 => b"HTTP/1.0 ".to_vec(),
@@ -79,9 +92,10 @@ impl<'a> Response<'a> {
                 .local
                 .get_mut::<HttpMetadata>()
                 .ok_or_else(|| anyhow::anyhow!("HttpMetadata not found"))?;
-            meta.headers
-                .insert(HeaderKey::ContentLength, meta.body.len().to_string());
             let body = std::mem::take(&mut meta.body);
+            for h in &REQUEST_ONLY_HEADERS {
+                meta.headers.remove(h);
+            }
             let headers = std::mem::replace(&mut meta.headers, Headers::new());
             (meta.status, meta.version, body, headers)
         };
@@ -100,9 +114,10 @@ impl<'a> Response<'a> {
             if meta.body.is_empty() {
                 meta.body = b"Error".to_vec();
             }
-            meta.headers
-                .insert(HeaderKey::ContentLength, meta.body.len().to_string());
             let body = std::mem::take(&mut meta.body);
+            for h in &REQUEST_ONLY_HEADERS {
+                meta.headers.remove(h);
+            }
             let headers = std::mem::replace(&mut meta.headers, Headers::new());
             (meta.status, meta.version, body, headers)
         };
