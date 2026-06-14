@@ -13,8 +13,8 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 
-use crate::constants::server::SERVER_NAME;
 use crate::connection::scope::NetworkScope;
+use crate::constants::server::SERVER_NAME;
 use crate::{
     communicators::{
         event::{Event, EventCallback, EventEmitter},
@@ -219,20 +219,24 @@ impl GlobalContext {
                             NetworkScope::Extranet => wan.push(format!("{}:{}", ip, n.port)),
                         }
                     }
-                    (Some(String::from_utf8_lossy(&n.id).to_string()), intranet, wan)
+                    (
+                        Some(String::from_utf8_lossy(&n.id).to_string()),
+                        intranet,
+                        wan,
+                    )
                 } else {
                     (None, vec![], vec![])
                 };
                 drop(guard);
-                    inbound.push(PeerInfo {
-                        addr: addr.to_string(),
-                        direction: "inbound".to_string(),
-                        scope: format!("{:?}", scope),
-                        uptime_secs: entry.uptime_secs(),
-                        node_id,
-                        intranet_ips,
-                        wan_ips,
-                    });
+                inbound.push(PeerInfo {
+                    addr: addr.to_string(),
+                    direction: "inbound".to_string(),
+                    scope: format!("{:?}", scope),
+                    uptime_secs: entry.uptime_secs(),
+                    node_id,
+                    intranet_ips,
+                    wan_ips,
+                });
             }
 
             // servers = outbound (we connected to other nodes as client)
@@ -249,27 +253,42 @@ impl GlobalContext {
                             NetworkScope::Extranet => wan.push(format!("{}:{}", ip, n.port)),
                         }
                     }
-                    (Some(String::from_utf8_lossy(&n.id).to_string()), intranet, wan)
+                    (
+                        Some(String::from_utf8_lossy(&n.id).to_string()),
+                        intranet,
+                        wan,
+                    )
                 } else {
                     (None, vec![], vec![])
                 };
                 drop(guard);
-                    outbound.push(PeerInfo {
-                        addr: addr.to_string(),
-                        direction: "outbound".to_string(),
-                        scope: format!("{:?}", scope),
-                        uptime_secs: entry.uptime_secs(),
-                        node_id,
-                        intranet_ips,
-                        wan_ips,
-                    });
+                outbound.push(PeerInfo {
+                    addr: addr.to_string(),
+                    direction: "outbound".to_string(),
+                    scope: format!("{:?}", scope),
+                    uptime_secs: entry.uptime_secs(),
+                    node_id,
+                    intranet_ips,
+                    wan_ips,
+                });
             }
         }
 
-        let inbound_none: Vec<&str> = inbound.iter().filter(|p| p.node_id.is_none()).map(|p| p.addr.as_str()).collect();
-        let inbound_some: Vec<&str> = inbound.iter().filter_map(|p| p.node_id.as_ref().map(|_| p.addr.as_str())).collect();
-        tracing::info!("📊 get_connection_info: inbound total={}, with_node_id={}, without_node_id={:?}",
-            inbound.len(), inbound_some.len(), inbound_none);
+        let inbound_none: Vec<&str> = inbound
+            .iter()
+            .filter(|p| p.node_id.is_none())
+            .map(|p| p.addr.as_str())
+            .collect();
+        let inbound_some: Vec<&str> = inbound
+            .iter()
+            .filter_map(|p| p.node_id.as_ref().map(|_| p.addr.as_str()))
+            .collect();
+        tracing::info!(
+            "📊 get_connection_info: inbound total={}, with_node_id={}, without_node_id={:?}",
+            inbound.len(),
+            inbound_some.len(),
+            inbound_none
+        );
         tracing::info!("📊 get_connection_info: outbound total={}", outbound.len());
 
         ConnectionInfo { inbound, outbound }

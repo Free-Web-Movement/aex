@@ -128,10 +128,13 @@ impl PairedSessionKey {
 
         session_key.touch();
         let peer_debug = String::from_utf8(peer_id.clone()).unwrap_or_default();
-        let key_dump = session_key.key.map(|k| {
-            let v: Vec<String> = k[..4].iter().map(|b| format!("{:02x}", b)).collect();
-            v.join("")
-        }).unwrap_or_default();
+        let key_dump = session_key
+            .key
+            .map(|k| {
+                let v: Vec<String> = k[..4].iter().map(|b| format!("{:02x}", b)).collect();
+                v.join("")
+            })
+            .unwrap_or_default();
 
         // Atomically check-and-set under write lock to prevent concurrent
         // writes for the same peer_id with different shared secrets.
@@ -139,12 +142,16 @@ impl PairedSessionKey {
         let _entry_count = main.len();
         if main.contains_key(&peer_id) {
             let peer_debug = String::from_utf8(peer_id.clone()).unwrap_or_default();
-            tracing::info!("🔑 establish_begins: key already exists for peer='{}', skipping", peer_debug);
+            tracing::info!(
+                "🔑 establish_begins: key already exists for peer='{}', skipping",
+                peer_debug
+            );
             return Ok(None);
         }
         tracing::info!(
             "🔑 establish_begins: storing main key for peer='{}' key_prefix={:?}",
-            peer_debug, key_dump,
+            peer_debug,
+            key_dump,
         );
         main.insert(peer_id, session_key.duplicate());
 
@@ -164,7 +171,11 @@ impl PairedSessionKey {
             Some(s) => s,
             None => {
                 let id_debug = String::from_utf8(peer_id.clone()).unwrap_or_default();
-                tracing::warn!("⚠️ establish_ends: temp session NOT FOUND for peer_id='{}' (temp_id={:?})", id_debug, temp_id);
+                tracing::warn!(
+                    "⚠️ establish_ends: temp session NOT FOUND for peer_id='{}' (temp_id={:?})",
+                    id_debug,
+                    temp_id
+                );
                 return Ok(false);
             }
         };
@@ -180,21 +191,28 @@ impl PairedSessionKey {
         drop(temp_sessions);
 
         let peer_debug = String::from_utf8(peer_id.clone()).unwrap_or_default();
-        let key_dump = session_key.key.map(|k| {
-            let v: Vec<String> = k[..4].iter().map(|b| format!("{:02x}", b)).collect();
-            v.join("")
-        }).unwrap_or_default();
+        let key_dump = session_key
+            .key
+            .map(|k| {
+                let v: Vec<String> = k[..4].iter().map(|b| format!("{:02x}", b)).collect();
+                v.join("")
+            })
+            .unwrap_or_default();
 
         // Atomic check-and-set under write lock: don't overwrite an existing key.
         let mut main = self.main.write().await;
         let _entry_count = main.len();
         if main.contains_key(&peer_id) {
-            tracing::info!("🔑 establish_ends: key already exists for peer='{}', skipping", peer_debug);
+            tracing::info!(
+                "🔑 establish_ends: key already exists for peer='{}', skipping",
+                peer_debug
+            );
             return Ok(true);
         }
         tracing::info!(
             "🔑 establish_ends: storing main key for peer='{}' key_prefix={:?}",
-            peer_debug, key_dump,
+            peer_debug,
+            key_dump,
         );
         main.insert(peer_id, session_key.duplicate());
 
@@ -206,7 +224,12 @@ impl PairedSessionKey {
         let mut sessions = self.main.write().await;
 
         let key_debug = String::from_utf8(key.clone()).unwrap_or_else(|_| format!("{:?}", key));
-        tracing::info!("🔐 encrypt: looking up key='{}' (len={}), main has {} entries", key_debug, key.len(), sessions.len());
+        tracing::info!(
+            "🔐 encrypt: looking up key='{}' (len={}), main has {} entries",
+            key_debug,
+            key.len(),
+            sessions.len()
+        );
         for (k, _) in sessions.iter() {
             let kd = String::from_utf8(k.clone()).unwrap_or_else(|_| format!("{:?}", k));
             tracing::info!("  main key: '{}' (len={})", kd, k.len());
@@ -216,10 +239,13 @@ impl PairedSessionKey {
             .get_mut(key)
             .ok_or_else(|| anyhow!("session not found for address '{}'", key_debug))?;
 
-        let sk_dump = sk.key.map(|k| {
-            let v: Vec<String> = k[..4].iter().map(|b| format!("{:02x}", b)).collect();
-            v.join("")
-        }).unwrap_or_default();
+        let sk_dump = sk
+            .key
+            .map(|k| {
+                let v: Vec<String> = k[..4].iter().map(|b| format!("{:02x}", b)).collect();
+                v.join("")
+            })
+            .unwrap_or_default();
         tracing::info!("🔐 encrypt: using key_prefix={:?}", sk_dump);
 
         let ct = sk.encrypt(plaintext)?;
@@ -231,7 +257,12 @@ impl PairedSessionKey {
         let mut sessions = self.main.write().await;
 
         let key_debug = String::from_utf8(key.clone()).unwrap_or_else(|_| format!("{:?}", key));
-        tracing::info!("🔓 decrypt: looking up key='{}' (len={}), main has {} entries", key_debug, key.len(), sessions.len());
+        tracing::info!(
+            "🔓 decrypt: looking up key='{}' (len={}), main has {} entries",
+            key_debug,
+            key.len(),
+            sessions.len()
+        );
         for (k, _) in sessions.iter() {
             let kd = String::from_utf8(k.clone()).unwrap_or_else(|_| format!("{:?}", k));
             tracing::info!("  main key: '{}' (len={})", kd, k.len());
@@ -241,11 +272,18 @@ impl PairedSessionKey {
             .get_mut(key)
             .ok_or_else(|| anyhow!("session not found for address '{}'", key_debug))?;
 
-        let sk_dump = sk.key.map(|k| {
-            let v: Vec<String> = k[..4].iter().map(|b| format!("{:02x}", b)).collect();
-            v.join("")
-        }).unwrap_or_default();
-        tracing::info!("🔓 decrypt: using key_prefix={:?} (data_len={})", sk_dump, data.len());
+        let sk_dump = sk
+            .key
+            .map(|k| {
+                let v: Vec<String> = k[..4].iter().map(|b| format!("{:02x}", b)).collect();
+                v.join("")
+            })
+            .unwrap_or_default();
+        tracing::info!(
+            "🔓 decrypt: using key_prefix={:?} (data_len={})",
+            sk_dump,
+            data.len()
+        );
 
         let pt = sk.decrypt(data)?;
         Ok(pt)

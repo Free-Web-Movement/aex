@@ -106,18 +106,22 @@ impl<'a> RouteBuilder<'a> {
         let mut current: &mut Router = self.router;
         for seg in &segments {
             current = if *seg == "*" {
-                current.wildcard.get_or_insert_with(|| {
-                    Box::new(Router::new(NodeType::Wildcard))
-                })
+                current
+                    .wildcard
+                    .get_or_insert_with(|| Box::new(Router::new(NodeType::Wildcard)))
             } else if seg.starts_with(':') {
                 let (_, router) = current.param.get_or_insert_with(|| {
-                    (seg[1..].to_string(), Box::new(Router::new(NodeType::Param(seg[1..].into()))))
+                    (
+                        seg[1..].to_string(),
+                        Box::new(Router::new(NodeType::Param(seg[1..].into()))),
+                    )
                 });
                 &mut **router
             } else {
-                current.statics.entry(seg.to_string()).or_insert_with(|| {
-                    Router::new(NodeType::Static(seg.to_string()))
-                })
+                current
+                    .statics
+                    .entry(seg.to_string())
+                    .or_insert_with(|| Router::new(NodeType::Static(seg.to_string())))
             };
         }
 
@@ -252,18 +256,22 @@ impl Router {
         let mut current = self;
         for seg in &segments {
             current = if *seg == "*" {
-                current.wildcard.get_or_insert_with(|| {
-                    Box::new(Router::new(NodeType::Wildcard))
-                })
+                current
+                    .wildcard
+                    .get_or_insert_with(|| Box::new(Router::new(NodeType::Wildcard)))
             } else if seg.starts_with(':') {
                 let (_, router) = current.param.get_or_insert_with(|| {
-                    (seg[1..].to_string(), Box::new(Router::new(NodeType::Param(seg[1..].into()))))
+                    (
+                        seg[1..].to_string(),
+                        Box::new(Router::new(NodeType::Param(seg[1..].into()))),
+                    )
                 });
                 &mut **router
             } else {
-                current.statics.entry(seg.to_string()).or_insert_with(|| {
-                    Router::new(NodeType::Static(seg.to_string()))
-                })
+                current
+                    .statics
+                    .entry(seg.to_string())
+                    .or_insert_with(|| Router::new(NodeType::Static(seg.to_string())))
             };
         }
 
@@ -422,19 +430,16 @@ impl Router {
     /// Determine whether the connection should be kept alive after this request.
     fn wants_keep_alive(meta: &HttpMetadata) -> bool {
         match meta.version {
-            HttpVersion::Http10 => {
-                meta.headers
-                    .get(&HeaderKey::Connection)
-                    .map(|v| v.eq_ignore_ascii_case("keep-alive"))
-                    .unwrap_or(false)
-            }
-            HttpVersion::Http11 | HttpVersion::Http20 => {
-                !meta
-                    .headers
-                    .get(&HeaderKey::Connection)
-                    .map(|v| v.eq_ignore_ascii_case("close"))
-                    .unwrap_or(false)
-            }
+            HttpVersion::Http10 => meta
+                .headers
+                .get(&HeaderKey::Connection)
+                .map(|v| v.eq_ignore_ascii_case("keep-alive"))
+                .unwrap_or(false),
+            HttpVersion::Http11 | HttpVersion::Http20 => !meta
+                .headers
+                .get(&HeaderKey::Connection)
+                .map(|v| v.eq_ignore_ascii_case("close"))
+                .unwrap_or(false),
         }
     }
 

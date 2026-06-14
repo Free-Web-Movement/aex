@@ -21,7 +21,11 @@ mod tests {
         // 1. 创建并建立会话
         let main_key = vec![1, 2, 3, 4];
         manager
-            .establish_begins(main_key.clone(), main_key.clone(), &peer_public.as_bytes().to_vec())
+            .establish_begins(
+                main_key.clone(),
+                main_key.clone(),
+                &peer_public.as_bytes().to_vec(),
+            )
             .await?;
 
         // 2. 测试加解密
@@ -183,7 +187,12 @@ mod tests {
 
         // 3. 服务端调用 establish_ends：处理客户端公钥，并将 session 移至 main
         let success = manager
-            .establish_ends(session_id.clone(), session_id.clone(), local_id.clone(), client_pub_bytes)
+            .establish_ends(
+                session_id.clone(),
+                session_id.clone(),
+                local_id.clone(),
+                client_pub_bytes,
+            )
             .await?;
         assert!(success, "握手结束阶段应返回 true");
 

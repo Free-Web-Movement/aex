@@ -321,7 +321,10 @@ impl UnifiedServer {
             peer_addr,
         );
 
-        tracing::info!("[Unified] TCP handler invoked for connection from {}", peer_addr);
+        tracing::info!(
+            "[Unified] TCP handler invoked for connection from {}",
+            peer_addr
+        );
 
         if let Some(handler) = &self.tcp_handler {
             handler(ctx);

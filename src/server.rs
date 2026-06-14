@@ -225,11 +225,7 @@ impl Server {
     }
 
     async fn start_http(&self) {
-        let router = self
-            .globals
-            .routers
-            .get_value::<Arc<HttpRouter>>()
-            .unwrap();
+        let router = self.globals.routers.get_value::<Arc<HttpRouter>>().unwrap();
         let globals = self.globals.clone();
 
         tokio::spawn(async move {

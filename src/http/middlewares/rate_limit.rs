@@ -79,12 +79,10 @@ impl RateLimitConfig {
                 let now = Instant::now();
                 let window = Duration::from_secs(config.window_secs);
 
-                let mut bucket = state
-                    .entry(key.clone())
-                    .or_insert_with(|| RateLimitBucket {
-                        tokens: config.max_requests,
-                        last_refill: now,
-                    });
+                let mut bucket = state.entry(key.clone()).or_insert_with(|| RateLimitBucket {
+                    tokens: config.max_requests,
+                    last_refill: now,
+                });
 
                 if now.duration_since(bucket.last_refill) >= window {
                     bucket.tokens = config.max_requests;

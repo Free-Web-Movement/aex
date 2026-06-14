@@ -28,43 +28,43 @@ pub struct Response<'a> {
 }
 
 impl<'a> Response<'a> {
-pub async fn send(
-    &mut self,
-    headers: &Headers,
-    body: &[u8],
-    status: StatusCode,
-    version: HttpVersion,
-) -> anyhow::Result<()> {
-    let w = self
-        .writer
-        .as_deref_mut()
-        .ok_or_else(|| anyhow::anyhow!("Writer not available"))?;
+    pub async fn send(
+        &mut self,
+        headers: &Headers,
+        body: &[u8],
+        status: StatusCode,
+        version: HttpVersion,
+    ) -> anyhow::Result<()> {
+        let w = self
+            .writer
+            .as_deref_mut()
+            .ok_or_else(|| anyhow::anyhow!("Writer not available"))?;
 
-    let mut buf = Vec::with_capacity(256 + headers.len() * 64);
+        let mut buf = Vec::with_capacity(256 + headers.len() * 64);
 
-    let status_line = build_status_line(status, version);
-    buf.extend_from_slice(&status_line);
-    buf.extend_from_slice(b"\r\n");
-
-    for (k, v) in headers {
-        buf.extend_from_slice(k.as_str().as_bytes());
-        buf.extend_from_slice(b": ");
-        buf.extend_from_slice(v.as_bytes());
+        let status_line = build_status_line(status, version);
+        buf.extend_from_slice(&status_line);
         buf.extend_from_slice(b"\r\n");
+
+        for (k, v) in headers {
+            buf.extend_from_slice(k.as_str().as_bytes());
+            buf.extend_from_slice(b": ");
+            buf.extend_from_slice(v.as_bytes());
+            buf.extend_from_slice(b"\r\n");
+        }
+
+        buf.extend_from_slice(b"Content-Length: ");
+        buf.extend_from_slice(body.len().to_string().as_bytes());
+        buf.extend_from_slice(b"\r\n");
+
+        buf.extend_from_slice(b"\r\n");
+        buf.extend_from_slice(body);
+
+        w.write_all(&buf).await?;
+        w.flush().await?;
+
+        Ok(())
     }
-
-    buf.extend_from_slice(b"Content-Length: ");
-    buf.extend_from_slice(body.len().to_string().as_bytes());
-    buf.extend_from_slice(b"\r\n");
-
-    buf.extend_from_slice(b"\r\n");
-    buf.extend_from_slice(body);
-
-    w.write_all(&buf).await?;
-    w.flush().await?;
-
-    Ok(())
-}
 
     pub fn set_header(&mut self, key: impl Into<HeaderKey>, value: impl Into<String>) -> &mut Self {
         if let Some(meta) = self.local.get_mut::<HttpMetadata>() {
