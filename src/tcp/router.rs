@@ -78,8 +78,15 @@ impl<F, C> Router<F, C> {
                 }
 
                 if let Some(any_handler) = self.handlers.get(&key) {
+                    let cmd_val = match c.as_ref() {
+                        Some(cmd) => cmd.clone(),
+                        None => {
+                            tracing::error!("TCP handler: command extraction returned no value");
+                            return Ok(false);
+                        }
+                    };
                     for handler in any_handler {
-                        if !handler(ctx.clone(), frame.clone(), c.clone().unwrap()).await? {
+                        if !handler(ctx.clone(), frame.clone(), cmd_val.clone()).await? {
                             return Ok(false);
                         }
                     }
@@ -112,7 +119,10 @@ impl<F, C> Router<F, C> {
         if reader.is_none() {
             return Ok(());
         }
-        let mut r = reader.unwrap();
+        let mut r = match reader {
+            Some(r) => r,
+            None => return Ok(()),
+        };
 
         loop {
             // 在不锁定 Context 的情况下进行异步读取

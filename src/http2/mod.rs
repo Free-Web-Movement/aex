@@ -104,10 +104,9 @@ impl H2Codec {
                             let _route_found = self.router.on_request(&mut ctx).await;
 
                             // Check if WebSocket upgrade was performed by middleware
-                            let ws_upgraded = {
-                                let meta = ctx.local.get_ref::<HttpMetadata>().unwrap();
-                                meta.is_websocket
-                            };
+                            let ws_upgraded = ctx.local.get_ref::<HttpMetadata>()
+                                .map(|m| m.is_websocket)
+                                .unwrap_or(false);
 
                             // Note: Full HTTP/2 WebSocket support requires using h2's stream interface
                             // For now, we detect the upgrade request. Full implementation would need
@@ -117,12 +116,17 @@ impl H2Codec {
                             }
 
                             // Build response
-                            let (status, body, headers) = {
-                                let meta = ctx.local.get_ref::<HttpMetadata>().unwrap();
-                                let status = meta.status.to_http_status();
-                                let body = String::from_utf8_lossy(&meta.body).to_string();
-                                let headers = meta.headers.clone();
-                                (status, body, headers)
+                            let (status, body, headers) = match ctx.local.get_ref::<HttpMetadata>() {
+                                Some(meta) => {
+                                    let status = meta.status.to_http_status();
+                                    let body = String::from_utf8_lossy(&meta.body).to_string();
+                                    let headers = meta.headers.clone();
+                                    (status, body, headers)
+                                }
+                                None => {
+                                    tracing::error!("HttpMetadata missing in response build");
+                                    continue;
+                                }
                             };
 
                             // Build HTTP/2 response

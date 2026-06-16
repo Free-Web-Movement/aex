@@ -22,6 +22,6 @@ pub fn detect_command(data: &[u8]) -> Option<CommandId> {
     if data.len() < 4 {
         return None;
     }
-    let id = u32::from_le_bytes(data[0..4].try_into().unwrap());
+    let id = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
     CommandId::from_u32(id)
 }

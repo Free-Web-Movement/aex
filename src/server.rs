@@ -225,7 +225,13 @@ impl Server {
     }
 
     async fn start_http(&self) {
-        let router = self.globals.routers.get_value::<Arc<HttpRouter>>().unwrap();
+        let router = match self.globals.routers.get_value::<Arc<HttpRouter>>() {
+            Some(r) => r,
+            None => {
+                tracing::error!("HttpRouter not configured");
+                return;
+            }
+        };
         let globals = self.globals.clone();
 
         tokio::spawn(async move {

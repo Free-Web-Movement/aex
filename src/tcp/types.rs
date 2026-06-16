@@ -16,9 +16,8 @@ pub fn frame_config() -> impl bincode::config::Config {
 /// 注意：为了配合 bincode 2.0，我们需要同时满足 serde 和 bincode 的宏要求
 pub trait Codec: Serialize + for<'de> Deserialize<'de> + Encode + Decode<()> + Sized {
     /// 序列化
-    fn encode(&self) -> Vec<u8> {
-        // 使用 bincode 2.0 标准配置进行编码
-        encode_to_vec(self, frame_config()).expect("serialize failed")
+    fn encode(&self) -> Result<Vec<u8>> {
+        encode_to_vec(self, frame_config()).map_err(|e| anyhow::anyhow!("serialize failed: {}", e))
     }
 
     /// 反序列化并返回消耗的字节数
@@ -58,8 +57,13 @@ pub trait Frame: Codec {
     where
         F: FnOnce(&[u8]) -> Vec<u8>,
     {
-        let raw_bytes = Codec::encode(self); // 假设 Codec 提供 encode()
-        signer(&raw_bytes)
+        match Codec::encode(self) {
+            Ok(raw_bytes) => signer(&raw_bytes),
+            Err(e) => {
+                tracing::error!("sign failed: {}", e);
+                vec![]
+            }
+        }
     }
     fn verify<V>(&self, signature: &[u8], verifier: V) -> bool
     where

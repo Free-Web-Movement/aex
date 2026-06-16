@@ -58,7 +58,6 @@ impl Storage {
     }
 
     pub fn dir(&self) -> &str {
-        let str = self.app_dir.as_os_str().to_str().unwrap();
-        str
+        self.app_dir.as_os_str().to_str().unwrap_or_default()
     }
 }

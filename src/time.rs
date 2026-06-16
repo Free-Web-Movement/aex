@@ -18,10 +18,13 @@ impl SystemTime {
     }
 
     pub fn timestamp() -> u128 {
-        std::time::SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_millis()
+        match std::time::SystemTime::now().duration_since(UNIX_EPOCH) {
+            Ok(d) => d.as_millis(),
+            Err(e) => {
+                tracing::error!("SystemTime before UNIX_EPOCH: {}", e);
+                0
+            }
+        }
     }
 
     /// 当前毫秒级时间戳

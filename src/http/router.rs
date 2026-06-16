@@ -82,22 +82,14 @@ impl<'a> RouteBuilder<'a> {
 
         if segments.is_empty() {
             let router = &mut *self.router;
-            if router.handlers.is_none() {
-                router.handlers = Some(AHashMap::with_capacity(8));
-            }
             router
                 .handlers
-                .as_mut()
-                .unwrap()
+                .get_or_insert_with(|| AHashMap::with_capacity(8))
                 .insert(method_key.clone(), self.handler.clone());
             if !self.middlewares.is_empty() {
-                if router.middlewares.is_none() {
-                    router.middlewares = Some(AHashMap::with_capacity(4));
-                }
                 router
                     .middlewares
-                    .as_mut()
-                    .unwrap()
+                    .get_or_insert_with(|| AHashMap::with_capacity(4))
                     .insert(method_key, self.middlewares.clone());
             }
             return;
@@ -125,23 +117,15 @@ impl<'a> RouteBuilder<'a> {
             };
         }
 
-        if current.handlers.is_none() {
-            current.handlers = Some(AHashMap::with_capacity(8));
-        }
         current
             .handlers
-            .as_mut()
-            .unwrap()
+            .get_or_insert_with(|| AHashMap::with_capacity(8))
             .insert(method_key.clone(), self.handler.clone());
 
         if !self.middlewares.is_empty() {
-            if current.middlewares.is_none() {
-                current.middlewares = Some(AHashMap::with_capacity(4));
-            }
             current
                 .middlewares
-                .as_mut()
-                .unwrap()
+                .get_or_insert_with(|| AHashMap::with_capacity(4))
                 .insert(method_key, self.middlewares.clone());
         }
     }
@@ -275,20 +259,14 @@ impl Router {
         }
 
         let node = current;
-        if node.handlers.is_none() {
-            node.handlers = Some(AHashMap::with_capacity(8));
-        }
         node.handlers
-            .as_mut()
-            .unwrap()
+            .get_or_insert_with(|| AHashMap::with_capacity(8))
             .insert(method_key.clone(), handler);
 
-        // 设置中间件
         if let Some(mws) = middlewares {
-            if node.middlewares.is_none() {
-                node.middlewares = Some(AHashMap::with_capacity(4));
-            }
-            node.middlewares.as_mut().unwrap().insert(method_key, mws);
+            node.middlewares
+                .get_or_insert_with(|| AHashMap::with_capacity(4))
+                .insert(method_key, mws);
         }
     }
 
@@ -364,9 +342,12 @@ impl Router {
     // --------------------------------------
 
     pub async fn on_request(&self, ctx: &mut Context) -> bool {
-        let pure_path = {
-            let meta = ctx.local.get_ref::<HttpMetadata>().unwrap();
-            meta.path.split('?').next().unwrap_or("").to_string()
+        let pure_path = match ctx.local.get_ref::<HttpMetadata>() {
+            Some(meta) => meta.path.split('?').next().unwrap_or("").to_string(),
+            None => {
+                tracing::error!("HttpMetadata missing in on_request");
+                return false;
+            }
         };
 
         let segments: Vec<&str> = pure_path
@@ -378,18 +359,23 @@ impl Router {
         let mut path_params = SmallParams::with_capacity(segments.len().min(8));
 
         if let Some(node) = self.match_route(&segments, &mut path_params) {
-            let (path_full, method, is_form, length) = {
-                let meta = ctx.local.get_ref::<HttpMetadata>().unwrap();
-                let is_form = meta
-                    .content_type
-                    .to_string()
-                    .contains(SubMediaType::UrlEncoded.as_str());
-                let length = meta
-                    .headers
-                    .get(&crate::http::protocol::header::HeaderKey::ContentLength)
-                    .and_then(|s| s.parse::<usize>().ok())
-                    .unwrap_or(0);
-                (meta.path.clone(), meta.method, is_form, length)
+            let (path_full, method, is_form, length) = match ctx.local.get_ref::<HttpMetadata>() {
+                Some(meta) => {
+                    let is_form = meta
+                        .content_type
+                        .to_string()
+                        .contains(SubMediaType::UrlEncoded.as_str());
+                    let length = meta
+                        .headers
+                        .get(&crate::http::protocol::header::HeaderKey::ContentLength)
+                        .and_then(|s| s.parse::<usize>().ok())
+                        .unwrap_or(0);
+                    (meta.path.clone(), meta.method, is_form, length)
+                }
+                None => {
+                    tracing::error!("HttpMetadata missing in on_request");
+                    return false;
+                }
             };
             let mut params = Params::new(path_full);
 
@@ -407,9 +393,12 @@ impl Router {
                 }
             }
 
-            {
-                let meta = ctx.local.get_mut::<HttpMetadata>().unwrap();
-                meta.params = Some(params);
+            match ctx.local.get_mut::<HttpMetadata>() {
+                Some(meta) => meta.params = Some(params),
+                None => {
+                    tracing::error!("HttpMetadata missing when setting params");
+                    return false;
+                }
             }
 
             let method_key = method.to_str().to_uppercase();

@@ -33,7 +33,7 @@ impl CommandRouter {
         if data.len() < 4 {
             return Err(anyhow!("data too short"));
         }
-        let cmd_id = CommandId::from_u32(u32::from_le_bytes(data[0..4].try_into().unwrap()))
+        let cmd_id = CommandId::from_u32(u32::from_le_bytes([data[0], data[1], data[2], data[3]]))
             .ok_or_else(|| anyhow!("unknown command id"))?;
 
         if let Some(handler) = self.handlers.get(&cmd_id) {

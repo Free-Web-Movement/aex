@@ -28,7 +28,7 @@ impl Listener for TCPHandler {
     fn listen<'a>(&'a mut self) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send + 'a>> {
         Box::pin(async move {
             let listener = TcpListener::bind(self.addr).await?;
-            println!("TCP listener bound to {}", self.addr);
+            tracing::info!("TCP listener bound to {}", self.addr);
             self.listener = Some(listener);
             Ok(())
         })

@@ -31,7 +31,7 @@ impl RejectCommand {
         if data.len() < 4 {
             return Err("data too short".to_string());
         }
-        let id = u32::from_le_bytes(data[0..4].try_into().unwrap());
+        let id = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
         if id != CommandId::Reject.as_u32() {
             return Err("invalid command id".to_string());
         }

@@ -79,7 +79,7 @@ impl FrameHeader {
         if data.len() < PROTOCOL_HEADER_SIZE {
             return Err(anyhow!("frame header too short"));
         }
-        let command_id = u32::from_le_bytes(data[0..4].try_into().unwrap());
+        let command_id = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
         let flags = data[4];
         let sequence = u32::from_le_bytes([data[5], data[6], data[7], 0]);
         let payload_length = 0;
@@ -139,7 +139,7 @@ impl ProtocolFrame {
         if data.len() < 4 {
             return Err(anyhow!("data too short for length"));
         }
-        let length = u32::from_le_bytes(data[0..4].try_into().unwrap()) as usize;
+        let length = u32::from_le_bytes([data[0], data[1], data[2], data[3]]) as usize;
         if data.len() < 4 + length {
             return Err(anyhow!("incomplete frame"));
         }

@@ -275,7 +275,13 @@ impl WebSocket {
 
                 // 进行握手
                 {
-                    let w = ctx.writer.as_deref_mut().unwrap();
+                    let w = match ctx.writer.as_deref_mut() {
+                        Some(w) => w,
+                        None => {
+                            tracing::error!("WebSocket: no writer available");
+                            return false;
+                        }
+                    };
                     if let Err(e) = Self::handshake(w, &meta.headers).await {
                         tracing::warn!("WS Handshake Error: {:?}", e);
                         return false;

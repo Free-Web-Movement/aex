@@ -116,7 +116,7 @@ impl HandshakeHandler {
             let mut data = vec![0u8; len];
             reader.read_exact(&mut data).await?;
 
-            let id = u32::from_le_bytes(data[0..4].try_into().unwrap());
+            let id = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
 
             match CommandId::from_u32(id) {
                 Some(CommandId::Hello) => {
@@ -207,7 +207,7 @@ impl HandshakeHandler {
         let mut data = vec![0u8; len];
         socket.read_exact(&mut data).await?;
 
-        let id = u32::from_le_bytes(data[0..4].try_into().unwrap());
+        let id = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
 
         match CommandId::from_u32(id) {
             Some(CommandId::Welcome) => {

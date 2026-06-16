@@ -120,14 +120,23 @@ pub fn to_validator(dsl_map: AHashMap<String, String>) -> Arc<Executor> {
         let compiled = compiled.clone();
 
         // 获取 Metadata 原地修改
-        let meta = ctx
-            .local
-            .get_mut::<HttpMetadata>()
-            .expect("HttpMetadata missing");
+        let meta = match ctx.local.get_mut::<HttpMetadata>() {
+            Some(m) => m,
+                None => {
+                    tracing::error!("HttpMetadata missing in validator");
+                    return Box::pin(async move { false });
+                }
+        };
 
         // 拿到 Params 的副本进行操作 (由于 Params 内部有 HashMap，我们仍需要克隆它进行校验，
         // 但我们可以避免克隆整个 HttpMetadata)
-        let mut params = meta.params.clone().expect("AEX FATAL: HttpMetadata.params container must be pre-initialized by the protocol layer");
+        let mut params = match meta.params.clone() {
+            Some(p) => p,
+            None => {
+                    tracing::error!("AEX FATAL: HttpMetadata.params not initialized");
+                    return Box::pin(async move { false });
+                }
+        };
         let mut res = true;
 
         for (source, rules) in compiled.as_ref() {

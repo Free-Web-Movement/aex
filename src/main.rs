@@ -33,7 +33,7 @@ async fn main() -> anyhow::Result<()> {
             Box::new(|_ctx, _frame: RawCodec, cmd: RawCodec| {
                 Box::pin(async move {
                     let _cmd = cmd.clone();
-                    println!("Handling command...");
+                    tracing::info!("Handling command...");
                     Ok(true)
                 })
             }),
@@ -52,7 +52,7 @@ async fn main() -> anyhow::Result<()> {
              payload: RawCodec,
              peer,
              socket: Arc<UdpSocket>| async move {
-                println!("[UDP] Received 2002 from {}, data: {:?}", peer, payload);
+                tracing::debug!("[UDP] Received 2002 from {}, data: {:?}", peer, payload);
                 let response = b"UDP ACK".to_vec();
                 let _ = socket.send_to(&response, peer).await;
                 Ok(true)

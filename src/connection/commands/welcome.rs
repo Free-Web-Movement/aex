@@ -28,7 +28,7 @@ impl WelcomeCommand {
         Self {
             version: 1,
             node: crate::connection::node::Node::from_addr(
-                "0.0.0.0:0".parse().unwrap(),
+                std::net::SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::new(0, 0, 0, 0)), 0),
                 None,
                 None,
             ),
@@ -54,7 +54,7 @@ impl WelcomeCommand {
         if data.len() < 4 {
             return Err("data too short".to_string());
         }
-        let id = u32::from_le_bytes(data[0..4].try_into().unwrap());
+        let id = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
         if id != CommandId::Welcome.as_u32() {
             return Err("invalid command id".to_string());
         }

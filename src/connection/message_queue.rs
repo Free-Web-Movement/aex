@@ -35,18 +35,24 @@ impl Message {
 
 fn rand_id() -> u64 {
     use std::time::SystemTime;
-    SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos() as u64
+    match SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
+        Ok(d) => d.as_nanos() as u64,
+        Err(e) => {
+            tracing::error!("SystemTime before UNIX_EPOCH: {}", e);
+            0
+        }
+    }
 }
 
 fn current_timestamp() -> u64 {
     use std::time::SystemTime;
-    SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap()
-        .as_secs()
+    match SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
+        Ok(d) => d.as_secs(),
+        Err(e) => {
+            tracing::error!("SystemTime before UNIX_EPOCH: {}", e);
+            0
+        }
+    }
 }
 
 pub struct MessageQueueConfig {

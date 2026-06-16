@@ -547,7 +547,7 @@ impl ConnectionManager {
         for h in handles {
             h.abort();
         }
-        println!("ConnectionManager: All connections physically aborted.");
+        tracing::info!("ConnectionManager: All connections physically aborted.");
     }
 
     /// 优雅地取消单个连接：先发信号，让任务自己处理后事
