@@ -185,6 +185,12 @@ impl HeartbeatManager {
                                 state.missed_pings = 0;
                             } else {
                                 state.missed_pings += 1;
+                                // Trigger timeout callback when threshold reached
+                                if state.missed_pings >= 2 {
+                                    if let Some(callback) = &config.on_timeout {
+                                        callback(peer_addr);
+                                    }
+                                }
                             }
                         }
                     }
