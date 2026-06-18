@@ -28,7 +28,10 @@ impl WelcomeCommand {
         Self {
             version: 1,
             node: crate::connection::node::Node::from_addr(
-                std::net::SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::new(0, 0, 0, 0)), 0),
+                std::net::SocketAddr::new(
+                    std::net::IpAddr::V4(std::net::Ipv4Addr::new(0, 0, 0, 0)),
+                    0,
+                ),
                 None,
                 None,
             ),
