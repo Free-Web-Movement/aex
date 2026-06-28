@@ -53,28 +53,32 @@ pub const HTTP_METHODS: [&str; 21] = [
 impl HttpMethod {
     #[inline]
     pub fn from_str(s: &str) -> Option<Self> {
-        match s.to_ascii_uppercase().as_str() {
-            "GET" => Some(HttpMethod::GET),
-            "HEAD" => Some(HttpMethod::HEAD),
-            "POST" => Some(HttpMethod::POST),
-            "PUT" => Some(HttpMethod::PUT),
-            "DELETE" => Some(HttpMethod::DELETE),
-            "CONNECT" => Some(HttpMethod::CONNECT),
-            "OPTIONS" => Some(HttpMethod::OPTIONS),
-            "TRACE" => Some(HttpMethod::TRACE),
-            "PATCH" => Some(HttpMethod::PATCH),
-            "PROPFIND" => Some(HttpMethod::PROPFIND),
-            "PROPPATCH" => Some(HttpMethod::PROPPATCH),
-            "MKCOL" => Some(HttpMethod::MKCOL),
-            "MKCALENDAR" => Some(HttpMethod::MKCALENDAR), // <-- 对应新增
-            "COPY" => Some(HttpMethod::COPY),
-            "MOVE" => Some(HttpMethod::MOVE),
-            "LOCK" => Some(HttpMethod::LOCK),
-            "UNLOCK" => Some(HttpMethod::UNLOCK),
-            "SEARCH" => Some(HttpMethod::SEARCH),
-            "PURGE" => Some(HttpMethod::PURGE),
-            "LINK" => Some(HttpMethod::LINK),
-            "UNLINK" => Some(HttpMethod::UNLINK),
+        // zero-allocation case-insensitive matching
+        if s.len() < 3 || s.len() > 10 {
+            return None;
+        }
+        match s {
+            s if s.eq_ignore_ascii_case("GET") => Some(HttpMethod::GET),
+            s if s.eq_ignore_ascii_case("HEAD") => Some(HttpMethod::HEAD),
+            s if s.eq_ignore_ascii_case("POST") => Some(HttpMethod::POST),
+            s if s.eq_ignore_ascii_case("PUT") => Some(HttpMethod::PUT),
+            s if s.eq_ignore_ascii_case("DELETE") => Some(HttpMethod::DELETE),
+            s if s.eq_ignore_ascii_case("CONNECT") => Some(HttpMethod::CONNECT),
+            s if s.eq_ignore_ascii_case("OPTIONS") => Some(HttpMethod::OPTIONS),
+            s if s.eq_ignore_ascii_case("TRACE") => Some(HttpMethod::TRACE),
+            s if s.eq_ignore_ascii_case("PATCH") => Some(HttpMethod::PATCH),
+            s if s.eq_ignore_ascii_case("PROPFIND") => Some(HttpMethod::PROPFIND),
+            s if s.eq_ignore_ascii_case("PROPPATCH") => Some(HttpMethod::PROPPATCH),
+            s if s.eq_ignore_ascii_case("MKCOL") => Some(HttpMethod::MKCOL),
+            s if s.eq_ignore_ascii_case("MKCALENDAR") => Some(HttpMethod::MKCALENDAR),
+            s if s.eq_ignore_ascii_case("COPY") => Some(HttpMethod::COPY),
+            s if s.eq_ignore_ascii_case("MOVE") => Some(HttpMethod::MOVE),
+            s if s.eq_ignore_ascii_case("LOCK") => Some(HttpMethod::LOCK),
+            s if s.eq_ignore_ascii_case("UNLOCK") => Some(HttpMethod::UNLOCK),
+            s if s.eq_ignore_ascii_case("SEARCH") => Some(HttpMethod::SEARCH),
+            s if s.eq_ignore_ascii_case("PURGE") => Some(HttpMethod::PURGE),
+            s if s.eq_ignore_ascii_case("LINK") => Some(HttpMethod::LINK),
+            s if s.eq_ignore_ascii_case("UNLINK") => Some(HttpMethod::UNLINK),
             _ => None,
         }
     }

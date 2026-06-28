@@ -65,6 +65,10 @@ impl LocalTypeMap {
     pub fn set_value<T: Send + Sync + 'static>(&mut self, val: T) {
         self.inner.insert(TypeId::of::<T>(), Box::new(val));
     }
+
+    pub fn clear(&mut self) {
+        self.inner.clear();
+    }
 }
 
 pub struct HttpRouterKey;

@@ -26,21 +26,18 @@ macro_rules! define_header_keys {
             #[inline]
             pub fn from_str(s: &str) -> Option<Self> {
                 let s_trimmed = s.trim();
-                let s_lower = s_trimmed.to_ascii_lowercase();
-                match s_lower.as_str() {
-                    $(
-                        s if s == $string.to_ascii_lowercase() => Some(HeaderKey::$name),
-                    )*
-                    _ => Some(HeaderKey::Custom(s_trimmed.to_string())),
-                }
+                $( if s_trimmed.eq_ignore_ascii_case($string) {
+                    return Some(HeaderKey::$name);
+                } )*
+                Some(HeaderKey::Custom(s_trimmed.to_string()))
             }
         }
 
-        // --- 手动实现比较逻辑 ---
+        // --- 零分配大小写不敏感比较 ---
 
         impl PartialEq for HeaderKey {
             fn eq(&self, other: &Self) -> bool {
-                self.as_str().to_ascii_lowercase() == other.as_str().to_ascii_lowercase()
+                self.as_str().eq_ignore_ascii_case(other.as_str())
             }
         }
 
@@ -48,7 +45,11 @@ macro_rules! define_header_keys {
 
         impl Hash for HeaderKey {
             fn hash<H: Hasher>(&self, state: &mut H) {
-                self.as_str().to_ascii_lowercase().hash(state);
+                let s = self.as_str();
+                s.len().hash(state);
+                for &b in s.as_bytes() {
+                    state.write_u8(b.to_ascii_lowercase());
+                }
             }
         }
     };

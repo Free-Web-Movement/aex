@@ -154,7 +154,7 @@ s.close()
                                         id: frame.id,
                                         data: b"ACK".to_vec(),
                                     };
-                                    let encoded = Codec::encode(&response);
+                                    let encoded = Codec::encode(&response).unwrap();
 
                                     if let Some(mut w) = ctx.writer.take() {
                                         let _ = w.write_all(&encoded).await;

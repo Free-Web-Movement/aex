@@ -56,7 +56,7 @@ fn setup_framed_udp() -> UdpRouter<RawCodec, RawCodec> {
     router.on(1, |_g, _f, _c, addr, sock| {
         Box::pin(async move {
             let _ = sock
-                .send_to(&Codec::encode(&RawCodec(b"PONG".to_vec())), addr)
+                .send_to(&Codec::encode(&RawCodec(b"PONG".to_vec())).unwrap(), addr)
                 .await;
             Ok(true)
         })

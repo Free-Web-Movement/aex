@@ -86,7 +86,7 @@ impl<'a> Request<'a> {
         let (is_chunked, transfer_encoding) =
             if let Some(te) = headers.get(&HeaderKey::TransferEncoding) {
                 (
-                    te.to_ascii_lowercase().contains("chunked"),
+                    te.as_bytes().windows(7).any(|w| w.eq_ignore_ascii_case(b"chunked")),
                     Some(te.clone()),
                 )
             } else {

@@ -29,7 +29,7 @@ mod tests {
         };
 
         // 测试序列化
-        let encoded = Codec::encode(&cmd);
+        let encoded = Codec::encode(&cmd).unwrap();
         assert!(!encoded.is_empty());
 
         // 测试反序列化
@@ -63,7 +63,7 @@ mod tests {
     #[test]
     fn test_raw_codec_serialization() {
         let raw = RawCodec(vec![10, 20, 30]);
-        let encoded = Codec::encode(&raw);
+        let encoded = Codec::encode(&raw).unwrap();
         let decoded: RawCodec = Codec::decode(&encoded).unwrap();
 
         assert_eq!(raw.0, decoded.0);
@@ -131,7 +131,7 @@ mod tests {
         // 1. 调用实例方法 encode
         // 这里的 self 是 &RawCodec，会匹配到 impl Codec for RawCodec 的默认实现
         // let encoded = raw.encode();
-        let encoded = <RawCodec as Codec>::encode(&raw);
+        let encoded = <RawCodec as Codec>::encode(&raw).unwrap();
         assert!(!encoded.is_empty());
 
         // 2. 调用关联函数 decode
@@ -202,7 +202,7 @@ mod tests {
         // 验证你手写的 Codec::encode 结果是否与直接调用 bincode 结果一致
         // 这确保了你的 trait 逻辑没有意外地修改数据流
         // let trait_encoded = raw.encode();
-        let trait_encoded = Codec::encode(&raw);
+        let trait_encoded = Codec::encode(&raw).unwrap();
         let direct_encoded = encode_to_vec(&raw, frame_config()).unwrap();
 
         assert_eq!(

@@ -19,7 +19,7 @@ use crate::connection::context::Context;
 use crate::http::meta::HttpMetadata;
 use crate::http::params::{Params, SmallParams};
 use crate::http::protocol::header::HeaderKey;
-use crate::http::protocol::media_type::SubMediaType;
+
 use crate::http::protocol::method::HttpMethod;
 use crate::http::protocol::status::StatusCode;
 use crate::http::protocol::version::HttpVersion;
@@ -342,13 +342,15 @@ impl Router {
     // --------------------------------------
 
     pub async fn on_request(&self, ctx: &mut Context) -> bool {
-        let pure_path = match ctx.local.get_ref::<HttpMetadata>() {
-            Some(meta) => meta.path.split('?').next().unwrap_or("").to_string(),
+        let meta = match ctx.local.get_ref::<HttpMetadata>() {
+            Some(meta) => meta,
             None => {
                 tracing::error!("HttpMetadata missing in on_request");
                 return false;
             }
         };
+
+        let pure_path = meta.path.split_once('?').map(|(p, _)| p).unwrap_or(&meta.path);
 
         let segments: Vec<&str> = pure_path
             .trim_start_matches('/')
@@ -359,24 +361,15 @@ impl Router {
         let mut path_params = SmallParams::with_capacity(segments.len().min(8));
 
         if let Some(node) = self.match_route(&segments, &mut path_params) {
-            let (path_full, method, is_form, length) = match ctx.local.get_ref::<HttpMetadata>() {
-                Some(meta) => {
-                    let is_form = meta
-                        .content_type
-                        .to_string()
-                        .contains(SubMediaType::UrlEncoded.as_str());
-                    let length = meta
-                        .headers
-                        .get(&crate::http::protocol::header::HeaderKey::ContentLength)
-                        .and_then(|s| s.parse::<usize>().ok())
-                        .unwrap_or(0);
-                    (meta.path.clone(), meta.method, is_form, length)
-                }
-                None => {
-                    tracing::error!("HttpMetadata missing in on_request");
-                    return false;
-                }
-            };
+            let path_full = meta.path.clone();
+            let method = meta.method;
+            let is_form = meta.content_type.is_form_urlencoded();
+            let length = meta
+                .headers
+                .get(&HeaderKey::ContentLength)
+                .and_then(|s| s.parse::<usize>().ok())
+                .unwrap_or(0);
+
             let mut params = Params::new(path_full);
 
             if !path_params.is_empty() {
@@ -401,11 +394,11 @@ impl Router {
                 }
             }
 
-            let method_key = method.to_str().to_uppercase();
+            let method_key = method.to_str();
 
             // 7. 执行中间件 (Middleware)
             if let Some(mws_map) = &node.middlewares {
-                let mws = mws_map.get(&method_key).or_else(|| mws_map.get("*"));
+                let mws = mws_map.get(method_key).or_else(|| mws_map.get("*"));
                 if let Some(mws) = mws {
                     for mw in mws {
                         if !mw(ctx).await {
@@ -423,7 +416,7 @@ impl Router {
             // 8. 执行最终处理器 (Handler)
             if let Some(handlers_map) = &node.handlers {
                 let handler = handlers_map
-                    .get(&method_key)
+                    .get(method_key)
                     .or_else(|| handlers_map.get("*"));
                 if let Some(handler) = handler {
                     return handler(ctx).await;
@@ -477,7 +470,7 @@ impl Router {
                 break;
             }
 
-            ctx.local = crate::connection::context::LocalTypeMap::new();
+            ctx.local.clear();
         }
         Ok(())
     }

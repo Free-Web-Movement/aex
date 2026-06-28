@@ -176,7 +176,8 @@ async fn main() -> anyhow::Result<()> {
 ### HTTP 路由详解
 
 ```rust
-use aex::http::router::{NodeType, Router as HttpRouter, PathParams};
+use aex::http::router::{NodeType, Router as HttpRouter};
+use aex::http::params::Params;
 use aex::exe;
 
 // 1. 创建路由器
@@ -190,20 +191,20 @@ router.get("/api/health", exe!(|ctx| {
 
 // 3. 参数路由
 router.get("/api/users/:id", exe!(|ctx| {
-    let params = ctx.local.get_ref::<PathParams>();
+    let params = ctx.local.get_ref::<Params>();
     if let Some(p) = params {
-        let id = p.get("id");
-        ctx.send(format!("User: {}", id), None);
+        let id = p.data.as_ref().and_then(|d| d.get("id").cloned());
+        ctx.send(format!("User: {}", id.unwrap_or_default()), None);
     }
     true
 })).register();
 
 // 4. 通配符路由
 router.get("/api/files/*", exe!(|ctx| {
-    let params = ctx.local.get_ref::<PathParams>();
+    let params = ctx.local.get_ref::<Params>();
     if let Some(p) = params {
-        let path = p.get("*");
-        ctx.send(format!("File: {}", path), None);
+        let path = p.data.as_ref().and_then(|d| d.get("*").cloned());
+        ctx.send(format!("File: {}", path.unwrap_or_default()), None);
     }
     true
 })).register();
@@ -239,7 +240,8 @@ HTTPServer::new(addr, None)
 WebSocket 作为中间件实现，共享 HTTP 上下文：
 
 ```rust
-use aex::http::websocket::{TextHandler, BinaryHandler, WebSocket};
+use aex::http::websocket::{TextHandler, BinaryHandler};
+use aex::http::middlewares::websocket::WebSocket;
 use aex::exe;
 
 let text_handler: TextHandler = Arc::new(|ws, ctx, text| {
@@ -278,8 +280,12 @@ router.get("/protected", exe!(|ctx| {
 | 方法 | 说明 |
 |------|------|
 | `.http_router(router)` | 设置 HTTP 路由 |
+| `.http_handler(handler)` | 设置 HTTP 处理器 |
 | `.enable_http2()` | 启用 HTTP/2 支持 |
-| `.p2p_handler(handler)` | 设置 P2P/TCP 连接处理器 |
+| `.http2_handler(handler)` | 设置 HTTP/2 处理器 |
+| `.tcp_handler(handler)` | 设置 TCP 处理器 |
+| `.udp_handler(handler)` | 设置 UDP 处理器 |
+| `.start()` | 启动统一服务器 |
 
 ### 适用场景
 
@@ -300,16 +306,17 @@ router.get("/protected", exe!(|ctx| {
 use aex::tcp::router::Router as TcpRouter;
 use aex::tcp::types::{Codec, Command, Frame, RawCodec};
 use aex::connection::global::GlobalContext;
+use futures::FutureExt;
 use std::sync::Arc;
 use std::net::SocketAddr;
 
-// 1. 创建 TCP 路由器
-let mut tcp_router = TcpRouter::new();
+// 1. 创建 TCP 路由器 (指定 Frame/Command 类型)
+let mut tcp_router = TcpRouter::<RawCodec, RawCodec>::new();
 
 // 注册命令处理器 (命令 ID = 1)
-tcp_router.on::<RawCodec, RawCodec>(
+tcp_router.on(
     1,
-    Box::new(|_, _, _| Box::pin(async move { Ok(true) }).boxed()),
+    Box::new(|_, _, _| async move { Ok(true) }.boxed()),
     vec![],
 );
 ```
@@ -318,8 +325,10 @@ tcp_router.on::<RawCodec, RawCodec>(
 
 ```rust
 use aex::tcp::types::{Codec, Command, Frame};
+use serde::{Deserialize, Serialize};
+use bincode::{Decode, Encode};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize, Encode, Decode)]
 struct MyFrame {
     data: Vec<u8>,
 }
@@ -331,9 +340,7 @@ impl Frame for MyFrame {
     fn is_flat(&self) -> bool { false }
 }
 
-impl Codec for MyFrame {}
-
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize, Encode, Decode)]
 struct MyCommand {
     id: u32,
     data: Vec<u8>,
@@ -341,11 +348,8 @@ struct MyCommand {
 
 impl Command for MyCommand {
     fn id(&self) -> u32 { self.id }
-    fn validate(&self) -> bool { true }
     fn data(&self) -> &Vec<u8> { &self.data }
 }
-
-impl Codec for MyCommand {}
 ```
 
 ---
@@ -357,11 +361,11 @@ use aex::udp::router::Router as UdpRouter;
 use aex::tcp::types::{Codec, Command, Frame, RawCodec};
 use std::sync::Arc;
 
-// 创建 UDP 路由器
-let mut udp_router = UdpRouter::new();
+// 创建 UDP 路由器 (指定 Frame/Command 类型)
+let mut udp_router = UdpRouter::<RawCodec, RawCodec>::new();
 
 // 注册处理器
-udp_router.on::<RawCodec, RawCodec, _, _>(100, |global, frame, cmd, addr, socket| {
+udp_router.on(100, |global, frame, cmd, addr, socket| {
     Box::pin(async move {
         println!("UDP packet from {}: cmd_id={}", addr, cmd.id());
         Ok(true)
@@ -491,8 +495,10 @@ let manager = HeartbeatManager::new(local_node).with_config(config);
 多个发送者 → 一个消费者（适用于日志、审计）：
 
 ```rust
+use futures::FutureExt;
+
 server.globals.pipe::<String>("audit_log", Box::new(|msg| {
-    async move { write_to_file(msg).await }
+    async move { write_to_file(msg).await }.boxed()
 })).await;
 
 server.globals.pipe.send("audit_log", "User logged in".to_string()).await;
@@ -503,8 +509,10 @@ server.globals.pipe.send("audit_log", "User logged in".to_string()).await;
 一个发送者 → 多个消费者（适用于配置同步）：
 
 ```rust
+use futures::FutureExt;
+
 server.globals.spread::<i32>("config_sync", Box::new(|val| {
-    async move { update_config(val).await }
+    async move { update_config(val).await }.boxed()
 })).await;
 
 server.globals.spread.publish("config_sync", 42).await;
@@ -515,11 +523,14 @@ server.globals.spread.publish("config_sync", 42).await;
 多个发送者 → 多个消费者（适用于业务事件）：
 
 ```rust
+use aex::communicators::event::Event;
+use futures::FutureExt;
+
 server.globals.event::<u32>("user_login", Arc::new(|uid| {
-    async move { notify_admins(uid).await }
+    async move { notify_admins(uid).await }.boxed()
 })).await;
 
-server.globals.event.notify("user_login".to_string(), 888).await;
+Event::<u32>::notify(&server.globals.event, "user_login".to_string(), 888).await;
 ```
 
 ---
@@ -592,11 +603,23 @@ server.globals.event.notify("user_login".to_string(), 888).await;
 
 ### Aex 设计理念
 
-1. **显式优于隐式** - 线性中间件链，控制流可预测
-2. **轻量优于重** - 最少依赖，直面核心问题
-3. **性能优先** - ahash + Trie 树优化
-4. **HTTP 本质** - 尊重 HTTP 协议设计
-5. **统一架构** - 同一端口支持所有协议
+  1. **显式优于隐式** - 线性中间件链，控制流可预测
+  2. **轻量优于重** - 最少依赖，直面核心问题
+  3. **性能优先** - ahash + Trie 树优化
+  4. **HTTP 本质** - 尊重 HTTP 协议设计
+  5. **统一架构** - 同一端口支持所有协议
+
+### 性能对比 (AEX vs Axum vs Actix-web)
+
+wrk 基准测试 (release 构建, `t4-c500` 高并发 5s):
+
+| 路由 | AEX QPS | Axum 0.8.9 QPS | Actix-web 4 QPS | AEX vs Axum | AEX vs Actix |
+|------|---------|-----------------|-----------------|-------------|-------------|
+| `/` | 130,455 | 118,448 | 141,612 | **1.10x** | 0.92x |
+| `/api/users` | 132,157 | 114,872 | 128,422 | **1.15x** | **1.02x** |
+| `/api/users/{id}` | 116,345 | 97,831 | 110,414 | **1.18x** | **1.05x** |
+
+AEX 在静态和动态路由上均优于 Axum，动态参数路由优势最大 (1.18x)。与 Actix-web 相比，AEX 在带路径参数的路由上表现更好。
 
 ### 适用场景
 

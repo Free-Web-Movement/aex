@@ -8,28 +8,58 @@ use crate::{
     },
 };
 
-/// Known request-only header keys that must NOT be forwarded into the HTTP response.
-const REQUEST_ONLY_HEADERS: [HeaderKey; 8] = [
-    HeaderKey::ContentLength,
-    HeaderKey::TransferEncoding,
-    HeaderKey::Host,
+/// Standard request-only headers that MUST NOT be forwarded into the response.
+/// Only headers that are meaningful in a response (Content-Type, Cache-Control,
+/// Location, Set-Cookie, etc.) should survive.
+const REQUEST_ONLY_HEADERS: [HeaderKey; 25] = [
+    // ── General ──
     HeaderKey::Connection,
+    HeaderKey::TransferEncoding,
     HeaderKey::Upgrade,
-    HeaderKey::Origin,
-    HeaderKey::Cookie,
-    // Accept is technically fine, but useless in a response
+    HeaderKey::Via,
+    HeaderKey::Warning,
+    // ── Request ──
     HeaderKey::Accept,
+    HeaderKey::AcceptCharset,
+    HeaderKey::AcceptEncoding,
+    HeaderKey::AcceptLanguage,
+    HeaderKey::Authorization,
+    HeaderKey::Cookie,
+    HeaderKey::Expect,
+    HeaderKey::From,
+    HeaderKey::Host,
+    HeaderKey::IfMatch,
+    HeaderKey::IfModifiedSince,
+    HeaderKey::IfNoneMatch,
+    HeaderKey::IfRange,
+    HeaderKey::IfUnmodifiedSince,
+    HeaderKey::MaxForwards,
+    HeaderKey::Origin,
+    HeaderKey::Range,
+    HeaderKey::Referer,
+    HeaderKey::UserAgent,
+    // ContentLength is set automatically by build_response, so we strip it too
+    HeaderKey::ContentLength,
 ];
+
+fn status_code_bytes(code: u16) -> [u8; 3] {
+    [
+        b'0' + (code / 100) as u8,
+        b'0' + ((code / 10) % 10) as u8,
+        b'0' + (code % 10) as u8,
+    ]
+}
 
 fn build_status_line(status: StatusCode, version: HttpVersion) -> Vec<u8> {
     let prefix = match version {
-        HttpVersion::Http10 => b"HTTP/1.0 ".to_vec(),
-        HttpVersion::Http11 => b"HTTP/1.1 ".to_vec(),
-        HttpVersion::Http20 => b"HTTP/2.0 ".to_vec(),
+        HttpVersion::Http10 => b"HTTP/1.0 ",
+        HttpVersion::Http11 => b"HTTP/1.1 ",
+        HttpVersion::Http20 => b"HTTP/2.0 ",
     };
     let status_str = status.to_str();
-    let mut buf = prefix;
-    buf.extend_from_slice((status as u16).to_string().as_bytes());
+    let mut buf = Vec::with_capacity(prefix.len() + 3 + 1 + status_str.len());
+    buf.extend_from_slice(prefix);
+    buf.extend_from_slice(&status_code_bytes(status as u16));
     buf.push(b' ');
     buf.extend_from_slice(status_str.as_bytes());
     buf

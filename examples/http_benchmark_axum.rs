@@ -12,7 +12,7 @@ async fn main() {
     let app = Router::new()
         .route("/", get(handler_root))
         .route("/api/users", get(handler_users))
-        .route("/api/users/:id", get(handler_user_id));
+        .route("/api/users/{id}", get(handler_user_id));
 
     println!("Axum server on {}", addr);
     axum::serve(tokio::net::TcpListener::bind(addr).await.unwrap(), app)
