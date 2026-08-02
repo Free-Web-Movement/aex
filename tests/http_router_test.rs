@@ -101,7 +101,7 @@ mod tests {
     #[tokio::test]
     async fn test_server_auto_parsing_and_routing() {
         // 1. 构建 Router 场景
-        let mut hr = Router::new(NodeType::Static("root".into()));
+        let mut hr = Router::default();
 
         hr.insert(
             "/api/user/:id",
@@ -186,7 +186,7 @@ mod tests {
         let wildcard_hit_count = Arc::new(AtomicUsize::new(0));
 
         // --- 2. 构建 Router 场景 ---
-        let mut hr = Router::new(NodeType::Static("root".into()));
+        let mut hr = Router::default();
 
         // A. 注册中间件 A (记录轨迹)
         let t1 = mw_exec_order.clone();
@@ -282,7 +282,7 @@ mod tests {
     #[tokio::test]
     async fn test_middleware_interruption_full_stack() {
         // 验证中间件返回 false 时，处理器不应被执行
-        let mut hr = Router::new(NodeType::Static("root".into()));
+        let mut hr = Router::default();
         let handler_executed = Arc::new(AtomicUsize::new(0));
 
         // 拦截中间件
@@ -339,7 +339,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_router_404_not_found() {
-        let hr = Router::new(NodeType::Static("root".into())); // 空路由
+        let hr = Router::default(); // 空路由
 
         let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
         let actual_addr = tokio::net::TcpListener::bind(addr)
@@ -365,7 +365,7 @@ mod tests {
     }
     // #[tokio::test]
     //     async fn test_form_body_auto_parsing() {
-    //         let mut hr = Router::new(NodeType::Static("root".into()));
+    //         let mut hr = Router::default();
 
     //         hr.insert(
     //             "/submit",
@@ -419,7 +419,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_router_404_fallback() {
-        let hr = Router::new(NodeType::Static("root".into())); // 空路由
+        let hr = Router::default(); // 空路由
 
         let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
         let actual_addr = tokio::net::TcpListener::bind(addr)
@@ -445,7 +445,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_form_body_auto_parsing() {
-        let mut hr = Router::new(NodeType::Static("root".into()));
+        let mut hr = Router::default();
 
         hr.insert(
             "/submit",
@@ -514,7 +514,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_wildcard_method_matching() {
-        let mut hr = Router::new(NodeType::Static("root".into()));
+        let mut hr = Router::default();
 
         // 1. 注册一个通用处理器 (Method 为 None 或 "*")
         // 假设该处理器应处理除明确定义外的所有方法
@@ -588,7 +588,7 @@ mod tests {
             .local_addr()
             .unwrap();
 
-        let mut hr = Router::new(NodeType::Static("root".into()));
+        let mut hr = Router::default();
         let mw_hit_count = Arc::new(AtomicUsize::new(0));
 
         let mut server = HTTPServer::new(actual_addr, None);
@@ -655,7 +655,7 @@ mod tests {
             .local_addr()
             .unwrap();
 
-        let mut hr = Router::new(NodeType::Static("root".into()));
+        let mut hr = Router::default();
         let mw_hit_count = Arc::new(AtomicUsize::new(0));
 
         // 1. 使用原本的闭包方式定义的中间件
@@ -725,7 +725,7 @@ mod tests {
             .local_addr()
             .unwrap();
 
-        let mut hr = Router::new(NodeType::Static("root".into()));
+        let mut hr = Router::default();
         // let trace = Arc::new(Mutex::new(Vec::<u8>::new()));
 
         // --- 1. 使用 exe! 定义带 Pre 处理的中间件 ---
@@ -799,7 +799,7 @@ mod tests {
             .local_addr()
             .unwrap();
 
-        let mut hr = Router::new(NodeType::Static("root".into()));
+        let mut hr = Router::default();
 
         // --- 1. 中间件：演示 pre 块提取数据并存入 context ---
         let mw_info = exe!(
@@ -883,7 +883,7 @@ mod tests {
             .local_addr()
             .unwrap();
 
-        let mut hr = Router::new(NodeType::Static("root".into()));
+        let mut hr = Router::default();
 
         hr.put(
             "/data",
@@ -926,7 +926,7 @@ mod tests {
             .local_addr()
             .unwrap();
 
-        let mut hr = Router::new(NodeType::Static("root".into()));
+        let mut hr = Router::default();
 
         hr.delete(
             "/item/:id",
@@ -970,7 +970,7 @@ mod tests {
             .local_addr()
             .unwrap();
 
-        let mut hr = Router::new(NodeType::Static("root".into()));
+        let mut hr = Router::default();
 
         hr.patch(
             "/update",
@@ -1013,7 +1013,7 @@ mod tests {
             .local_addr()
             .unwrap();
 
-        let mut hr = Router::new(NodeType::Static("root".into()));
+        let mut hr = Router::default();
 
         hr.options(
             "/api",
@@ -1059,7 +1059,7 @@ mod tests {
             .local_addr()
             .unwrap();
 
-        let mut hr = Router::new(NodeType::Static("root".into()));
+        let mut hr = Router::default();
 
         hr.head(
             "/head-test",

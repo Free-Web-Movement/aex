@@ -54,7 +54,7 @@ async fn main() -> anyhow::Result<()> {
     let globals = Arc::new(GlobalContext::new(addr, None));
     let mut unified = UnifiedServer::new(addr, globals);
 
-    let mut router = HttpRouter::new(aex::http::router::NodeType::Static("root".into()));
+    let mut router = HttpRouter::new(aex::http::router::NodeType::default());
 
     router
         .get(

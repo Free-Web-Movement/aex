@@ -18,7 +18,7 @@ use aex::udp::router::Router as UdpRouter;
 use anyhow::Result;
 
 fn setup_http() -> HttpRouter {
-    let mut router = HttpRouter::new(NodeType::Static("root".into()));
+    let mut router = HttpRouter::default();
 
     router
         .get(

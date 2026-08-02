@@ -16,7 +16,7 @@ use anyhow::Result;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 fn setup_http() -> HttpRouter {
-    let mut router = HttpRouter::new(NodeType::Static("root".into()));
+    let mut router = HttpRouter::default();
 
     router
         .get(

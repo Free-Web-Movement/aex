@@ -7,7 +7,7 @@ use aex::http::router::{NodeType, Router as AexRouter};
 use aex::http::types::Executor;
 
 fn bench_static_route(c: &mut Criterion) {
-    let mut router = AexRouter::new(NodeType::Static("root".into()));
+    let mut router = AexRouter::default();
 
     let handler: Arc<Executor> = Arc::new(|_ctx| Box::pin(async { true }));
     router.get("/api/users", handler.clone());
@@ -33,7 +33,7 @@ fn bench_static_route(c: &mut Criterion) {
 }
 
 fn bench_param_route(c: &mut Criterion) {
-    let mut router = AexRouter::new(NodeType::Static("root".into()));
+    let mut router = AexRouter::default();
 
     let handler: Arc<Executor> = Arc::new(|_ctx| Box::pin(async { true }));
     router.get("/api/users/:id", handler.clone());
@@ -55,7 +55,7 @@ fn bench_param_route(c: &mut Criterion) {
 }
 
 fn bench_wildcard_route(c: &mut Criterion) {
-    let mut router = AexRouter::new(NodeType::Static("root".into()));
+    let mut router = AexRouter::default();
 
     let handler: Arc<Executor> = Arc::new(|_ctx| Box::pin(async { true }));
     router.get("/static/*", handler.clone());
@@ -77,7 +77,7 @@ fn bench_wildcard_route(c: &mut Criterion) {
 }
 
 fn bench_mixed_route(c: &mut Criterion) {
-    let mut router = AexRouter::new(NodeType::Static("root".into()));
+    let mut router = AexRouter::default();
 
     let handler: Arc<Executor> = Arc::new(|_ctx| Box::pin(async { true }));
 

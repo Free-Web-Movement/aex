@@ -12,7 +12,7 @@ use tokio::net::TcpStream;
 use tokio::time::{Duration, sleep};
 
 fn make_http_router() -> HttpRouter {
-    let mut router = HttpRouter::new(aex::http::router::NodeType::Static("root".into()));
+    let mut router = HttpRouter::new(aex::http::router::NodeType::default());
 
     let handler: Arc<Executor> = Arc::new(|_ctx: &mut aex::connection::context::Context| {
         Box::pin(async move {

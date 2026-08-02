@@ -16,7 +16,7 @@ use tokio::time::{Duration, sleep};
 use tokio_util::codec::{Decoder, Encoder};
 
 fn make_http_router() -> HttpRouter {
-    let mut router = HttpRouter::new(aex::http::router::NodeType::Static("root".into()));
+    let mut router = HttpRouter::new(aex::http::router::NodeType::default());
 
     let handler: Arc<Executor> = Arc::new(|_ctx: &mut Context| {
         Box::pin(async move { true }) as Pin<Box<dyn futures::Future<Output = bool> + Send>>

@@ -19,7 +19,7 @@ use aex::http::types::Executor;
 use ahash::AHashMap;
 
 fn create_aex_router() -> Router {
-    let mut router = Router::new(NodeType::Static("root".into()));
+    let mut router = Router::default();
     let handler: Arc<Executor> = exe!(|_ctx| { true });
     router.get("/api/users", handler.clone()).register();
     router.get("/api/users/:id", handler.clone()).register();

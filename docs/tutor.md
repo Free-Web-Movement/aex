@@ -91,7 +91,7 @@ cargo add tokio futures futures_util anyhow
 #[tokio::main(flavor = "multi_thread")]
 async fn main() -> anyhow::Result<()> {
     // 构建 Router
-    let mut route = Router::new(NodeType::Static("root".into()));
+    let mut route = Router::default();
     route!(
         route,
         get!("/", |ctx: &mut HTTPContext| {
@@ -164,7 +164,7 @@ async fn main() -> anyhow::Result<()> {
 
 ```rust
   // 1. 创建静态根（root）节点
-  let mut route = Router::new(NodeType::Static("root".into()));
+  let mut route = Router::default();
   // 2. 使用route!宏添加路由信息
   route!(
       route,
@@ -188,7 +188,7 @@ async fn main() -> anyhow::Result<()> {
 上面的代码等 价于：
 
 ```rust
-    let mut route = Router::new(NodeType::Static("root".into()));
+    let mut route = Router::default();
     route.insert(
         "/",
         Some("GET"),
@@ -511,7 +511,7 @@ on_binary
 ### 5. 插入到路由的中间件中
 
 ```rust
-let mut route = Router::new(NodeType::Static("root".into()));
+let mut route = Router::default();
 route!(route, ws_params);
 ```
 

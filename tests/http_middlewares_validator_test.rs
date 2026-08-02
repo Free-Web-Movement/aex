@@ -23,7 +23,7 @@ async fn test_to_validator_integration_full() {
         .local_addr()
         .unwrap();
 
-    let mut hr = Router::new(NodeType::Static("root".into()));
+    let mut hr = Router::default();
 
     // --- 1. 定义 Schema (覆盖所有 Source 和主要类型) ---
     let mut dsl_map = AHashMap::new();
@@ -106,7 +106,7 @@ async fn test_v_macro_integration_full() {
         .local_addr()
         .unwrap();
 
-    let mut hr = Router::new(NodeType::Static("root".into()));
+    let mut hr = Router::default();
 
     let mw_validator = v!(
         params => "(id:int[1,100])",
@@ -169,7 +169,7 @@ async fn test_validator_to_handler_data_flow() {
         .local_addr()
         .unwrap();
 
-    let mut hr = Router::new(NodeType::Static("root".into()));
+    let mut hr = Router::default();
 
     // 1. 定义全 Object 化的 DSL (使用你确认正确的括号语法)
     let mw_validator = v!(
@@ -248,7 +248,7 @@ async fn test_validator_conversion_logic_hardcore() {
         .local_addr()
         .unwrap();
 
-    let mut hr = Router::new(NodeType::Static("root".into()));
+    let mut hr = Router::default();
 
     // 括号语法定义：必须严格匹配类型
     let mw_validator = v!(
@@ -308,7 +308,7 @@ async fn test_validator_edge_cases_and_fallback() {
         .local_addr()
         .unwrap();
 
-    let mut hr = Router::new(NodeType::Static("root".into()));
+    let mut hr = Router::default();
 
     // 1. 构造 DSL
     // b_off: 测试 "off" 转换
@@ -384,7 +384,7 @@ async fn test_validator_boolean_strict_error_integration() {
     // 之前报错 "Expected LParen"，说明语法需要括号
     dsl_map.insert("query".to_string(), "(is_active:bool)".to_string());
 
-    let mut hr = Router::new(NodeType::Static("root".into()));
+    let mut hr = Router::default();
     let validator_mw = to_validator(dsl_map);
 
     hr.insert(
@@ -438,7 +438,7 @@ async fn test_validator_integer_strict_error_integration() {
     let mut dsl_map = AHashMap::new();
     dsl_map.insert("query".to_string(), "(age:int)".to_string());
 
-    let mut hr = Router::new(NodeType::Static("root".into()));
+    let mut hr = Router::default();
     // 注入 validator 中间件
     let validator_mw = to_validator(dsl_map);
     hr.insert(
@@ -509,7 +509,7 @@ async fn test_validator_float_strict_error_integration() {
     let mut dsl_map = AHashMap::new();
     dsl_map.insert("query".to_string(), "(price:float)".to_string());
 
-    let mut hr = Router::new(NodeType::Static("root".into()));
+    let mut hr = Router::default();
     // 注入 validator 中间件
     let validator_mw = to_validator(dsl_map);
     hr.insert(
@@ -578,7 +578,7 @@ async fn test_validator_float_auto_completion_promotion() {
     let mut dsl_map = AHashMap::new();
     dsl_map.insert("query".to_string(), "(val:float)".to_string());
 
-    let mut hr = Router::new(NodeType::Static("root".into()));
+    let mut hr = Router::default();
 
     // 2. 核心：在 Handler 中提取转换后的 Meta 数据
     hr.insert(
@@ -647,7 +647,7 @@ async fn test_validator_value_to_string_fallback() {
     let mut dsl_map = AHashMap::new();
     dsl_map.insert("query".to_string(), "(tag:string)".to_string());
 
-    let mut hr = Router::new(NodeType::Static("root".into()));
+    let mut hr = Router::default();
 
     // 2. 注入处理器：验证提取出来的值是否为空字符串
     hr.insert(
@@ -744,7 +744,7 @@ async fn test_validator_params_none_fallback() {
     let mut dsl_map = AHashMap::new();
     dsl_map.insert("query".to_string(), "(id:int)".to_string());
 
-    let mut hr = Router::new(NodeType::Static("root".into()));
+    let mut hr = Router::default();
 
     // 注入处理器：如果 fallback 成功，Params 会被初始化
     hr.insert(

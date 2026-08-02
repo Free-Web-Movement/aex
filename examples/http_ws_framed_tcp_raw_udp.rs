@@ -17,7 +17,7 @@ use aex::tcp::types::{Codec, RawCodec};
 use anyhow::Result;
 
 fn setup_http() -> HttpRouter {
-    let mut router = HttpRouter::new(NodeType::Static("root".into()));
+    let mut router = HttpRouter::default();
 
     router
         .get(

@@ -2,7 +2,7 @@
 mod tests {
     #[test]
     fn test_http_module_re_exports() {
-        let _ = aex::http::router::Router::new(aex::http::router::NodeType::Static("root".into()));
+        let _ = aex::http::router::Router::new(aex::http::router::NodeType::default());
         let _ = aex::http::meta::HttpMetadata::default();
     }
 

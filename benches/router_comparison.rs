@@ -13,7 +13,7 @@ fn bench_aex_router(c: &mut Criterion) {
 
     // Static route
     c.bench_function("aex_static", |b| {
-        let mut router = AexRouter::new(NodeType::Static("root".into()));
+        let mut router = AexRouter::default();
         router.get("/api/users", handler.clone());
 
         let path = vec!["api", "users"];
@@ -25,7 +25,7 @@ fn bench_aex_router(c: &mut Criterion) {
 
     // Param route
     c.bench_function("aex_param", |b| {
-        let mut router = AexRouter::new(NodeType::Static("root".into()));
+        let mut router = AexRouter::default();
         router.get("/api/users/:id", handler.clone());
 
         let path = vec!["api", "users", "123"];
@@ -37,7 +37,7 @@ fn bench_aex_router(c: &mut Criterion) {
 
     // Wildcard
     c.bench_function("aex_wildcard", |b| {
-        let mut router = AexRouter::new(NodeType::Static("root".into()));
+        let mut router = AexRouter::default();
         router.get("/static/*", handler.clone());
 
         let path = vec!["static", "js", "app.js"];

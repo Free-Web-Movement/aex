@@ -68,7 +68,7 @@ async fn main() -> anyhow::Result<()> {
     
     // HTTP 路由
     let mut http_router = HttpRouter::new(
-        aex::http::router::NodeType::Static("root".into())
+        aex::http::router::NodeType::default()
     );
     http_router.get("/", exe!(|ctx| {
         ctx.send("Hello from unified server!", None);
@@ -158,7 +158,7 @@ use std::net::SocketAddr;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let addr: SocketAddr = "0.0.0.0:8080".parse()?;
-    let mut router = HttpRouter::new(NodeType::Static("root".into()));
+    let mut router = HttpRouter::default();
 
     router.get("/", exe!(|ctx| {
         ctx.send("Hello, World!", None);
@@ -181,7 +181,7 @@ use aex::http::params::Params;
 use aex::exe;
 
 // 1. 创建路由器
-let mut router = HttpRouter::new(NodeType::Static("root".into()));
+let mut router = HttpRouter::default();
 
 // 2. 静态路由
 router.get("/api/health", exe!(|ctx| {

@@ -12,7 +12,7 @@ use std::sync::Arc;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let addr: SocketAddr = "0.0.0.0:8080".parse()?;
-    let mut router = HttpRouter::new(NodeType::Static("root".into()));
+    let mut router = HttpRouter::default();
 
     let auth: Arc<Executor> = exe!(|ctx| {
         let meta = ctx.local.get_value::<HttpMetadata>().unwrap();

@@ -32,6 +32,12 @@ pub enum NodeType {
     Wildcard,
 }
 
+impl Default for NodeType {
+    fn default() -> Self {
+        NodeType::Static(String::new())
+    }
+}
+
 impl NodeType {
     pub fn is_static(&self) -> bool {
         matches!(self, NodeType::Static(_))
@@ -502,6 +508,6 @@ impl Router {
 
 impl Default for Router {
     fn default() -> Self {
-        Router::new(NodeType::Static("root".into()))
+        Router::new(NodeType::default())
     }
 }
