@@ -1,16 +1,15 @@
-use aex::connection::context::TypeMapExt;
-use aex::exe;
+use aex::connection::context::{Context, TypeMapExt};
 use aex::http::meta::HttpMetadata;
 use aex::http::protocol::header::HeaderKey;
 use aex::http::router::{NodeType, Router as HttpRouter};
-use aex::http::types::Executor;
+use aex::http::types::{Executor, IntoExecutor};
 use aex::server::HTTPServer;
 use aex::tcp::types::{Command, RawCodec};
 use std::net::SocketAddr;
 use std::sync::Arc;
 
 fn auth_middleware() -> Arc<Executor> {
-    exe!(|ctx| {
+    IntoExecutor::into_executor(|ctx: &mut Context| {
         let meta = ctx.local.get_value::<HttpMetadata>().unwrap();
         let auth_header = meta.headers.get(&HeaderKey::Authorization);
 
@@ -31,7 +30,7 @@ fn auth_middleware() -> Arc<Executor> {
 }
 
 fn logging_middleware() -> Arc<Executor> {
-    exe!(|ctx| {
+    IntoExecutor::into_executor(|ctx: &mut Context| {
         let meta = ctx.local.get_value::<HttpMetadata>().unwrap();
         println!("[{:?}] {} {}", meta.method, meta.path, ctx.addr);
         true
@@ -47,61 +46,44 @@ async fn main() -> anyhow::Result<()> {
     let logger = logging_middleware();
 
     router
-        .get(
-            "/api/users",
-            exe!(|ctx| {
-                ctx.send(r#"["user1", "user2", "user3"]"#, None);
-                true
-            }),
-        )
-        .middleware(logger.clone())
-        .register();
+        .get("/api/users", |ctx| {
+            ctx.send(r#"["user1", "user2", "user3"]"#, None);
+            true
+        })
+        .middleware(logger.clone());
 
     router
-        .get(
-            "/api/users/:id",
-            exe!(|ctx| {
-                let meta = ctx.local.get_value::<HttpMetadata>().unwrap();
-                let id = meta
-                    .params
-                    .as_ref()
-                    .and_then(|p| p.data.as_ref())
-                    .and_then(|d| d.get("id"))
-                    .map(|v| v.as_str())
-                    .unwrap_or("unknown");
-                ctx.send(format!(r#"{{"id":"{}","name":"User {}"}}"#, id, id), None);
-                true
-            }),
-        )
+        .get("/api/users/:id", |ctx| {
+            let meta = ctx.local.get_value::<HttpMetadata>().unwrap();
+            let id = meta
+                .params
+                .as_ref()
+                .and_then(|p| p.data.as_ref())
+                .and_then(|d| d.get("id"))
+                .map(|v| v.as_str())
+                .unwrap_or("unknown");
+            ctx.send(format!(r#"{{"id":"{}","name":"User {}"}}"#, id, id), None);
+            true
+        })
         .middleware(auth.clone())
-        .middleware(logger.clone())
-        .register();
+        .middleware(logger.clone());
 
     router
-        .post(
-            "/api/users",
-            exe!(|ctx| {
-                let meta = ctx.local.get_value::<HttpMetadata>().unwrap();
-                let body = String::from_utf8_lossy(&meta.body);
-                println!("Create user: {}", body);
-                ctx.send(format!(r#"{{"status":"created","data":{}}}"#, body), None);
-                true
-            }),
-        )
+        .post("/api/users", |ctx| {
+            let meta = ctx.local.get_value::<HttpMetadata>().unwrap();
+            let body = String::from_utf8_lossy(&meta.body);
+            println!("Create user: {}", body);
+            ctx.send(format!(r#"{{"status":"created","data":{}}}"#, body), None);
+            true
+        })
         .middleware(auth.clone())
-        .middleware(logger.clone())
-        .register();
+        .middleware(logger.clone());
 
-    router
-        .get(
-            "/public/*",
-            exe!(|ctx| {
-                let meta = ctx.local.get_value::<HttpMetadata>().unwrap();
-                ctx.send(format!(r#"{{"path":"{}"}}"#, meta.path), None);
-                true
-            }),
-        )
-        .register();
+    router.get("/public/*", |ctx| {
+        let meta = ctx.local.get_value::<HttpMetadata>().unwrap();
+        ctx.send(format!(r#"{{"path":"{}"}}"#, meta.path), None);
+        true
+    });
 
     println!("Server running at http://{}", addr);
     println!("Try:");

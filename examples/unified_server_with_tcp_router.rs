@@ -56,37 +56,24 @@ async fn main() -> anyhow::Result<()> {
 
     let mut router = HttpRouter::new(aex::http::router::NodeType::default());
 
-    router
-        .get(
-            "/",
-            aex::exe!(|ctx| {
-                ctx.send("AEX Unified Server + TCP Frame!", None);
-                true
-            }),
-        )
-        .register();
+    router.get("/", |ctx| {
+        ctx.send("AEX Unified Server + TCP Frame!", None);
+        true
+    });
 
-    router
-        .get(
-            "/info",
-            aex::exe!(|ctx| {
-                let info = serde_json::json!({
-                    "protocols": ["http1", "http2", "ws", "tcp_frame", "udp"],
-                    "frame_format": "MyFrame (id:u32, data:Vec<u8>)"
-                });
-                ctx.send(info.to_string(), None);
-                ctx.res().set_header("Content-Type", "application/json");
-                true
-            }),
-        )
-        .register();
+    router.get("/info", |ctx| {
+        let info = serde_json::json!({
+            "protocols": ["http1", "http2", "ws", "tcp_frame", "udp"],
+            "frame_format": "MyFrame (id:u32, data:Vec<u8>)"
+        });
+        ctx.send(info.to_string(), None);
+        ctx.res().set_header("Content-Type", "application/json");
+        true
+    });
 
-    router
-        .get(
-            "/test",
-            aex::exe!(|ctx| {
-                ctx.send(
-                    r#"<!DOCTYPE html>
+    router.get("/test", |ctx| {
+        ctx.send(
+            r#"<!DOCTYPE html>
 <html><body>
 <h1>TCP Frame Test</h1>
 <p>Send binary frame with Python:</p>
@@ -99,13 +86,11 @@ print(s.recv(1024))
 s.close()
 "</pre>
 </body></html>"#,
-                    None,
-                );
-                ctx.res().set_header("Content-Type", "text/html");
-                true
-            }),
-        )
-        .register();
+            None,
+        );
+        ctx.res().set_header("Content-Type", "text/html");
+        true
+    });
 
     let ws_handler = WebSocket::new()
         .on_text(|_ws, _ctx, text| {
@@ -123,10 +108,7 @@ s.close()
 
     let ws_middleware: Arc<Executor> = Arc::from(WebSocket::to_middleware(ws_handler));
 
-    router
-        .get("/ws", aex::exe!(|_ctx| { true }))
-        .middleware(ws_middleware)
-        .register();
+    router.get("/ws", |_ctx| true).middleware(ws_middleware);
 
     unified = unified
         .http_router(router)

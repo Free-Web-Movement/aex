@@ -8,7 +8,6 @@
 //! use aex::http::router::{NodeType, Router as HttpRouter};
 //! use aex::server::HTTPServer;
 //! use aex::tcp::types::Command;
-//! use aex::exe;
 //! use std::net::SocketAddr;
 //! use std::sync::Arc;
 //!
@@ -17,10 +16,10 @@
 //!     let addr: SocketAddr = "0.0.0.0:8080".parse()?;
 //!     let mut router = HttpRouter::default();
 //!
-//!     router.get("/", exe!(|ctx| {
+//!     router.get("/", |ctx| {
 //!         ctx.send("Hello!");
 //!         true
-//!     })).register();
+//!     });
 //!
 //!     HTTPServer::new(addr, None)
 //!         .http(router)

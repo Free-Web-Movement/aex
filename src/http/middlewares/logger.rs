@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use crate::{
-    exe,
-    http::{meta::HttpMetadata, types::Executor},
+    connection::context::Context,
+    http::{meta::HttpMetadata, types::{Executor, IntoExecutor}},
 };
 
 #[derive(Clone, Default)]
@@ -37,40 +37,36 @@ impl LogConfig {
     }
 
     pub fn build(self) -> Arc<Executor> {
-        let config = self;
-        exe!(
-            move |ctx, config| {
-                if let Some(meta) = ctx.local.get_ref::<HttpMetadata>() {
-                    let method = if config.log_method {
-                        Some(meta.method.to_str())
-                    } else {
-                        None
-                    };
+        IntoExecutor::into_executor(move |ctx: &mut Context| {
+            if let Some(meta) = ctx.local.get_ref::<HttpMetadata>() {
+                let method = if self.log_method {
+                    Some(meta.method.to_str())
+                } else {
+                    None
+                };
 
-                    let path = if config.log_path {
-                        Some(meta.path.as_str())
-                    } else {
-                        None
-                    };
+                let path = if self.log_path {
+                    Some(meta.path.as_str())
+                } else {
+                    None
+                };
 
-                    match (method, path) {
-                        (Some(m), Some(p)) => {
-                            tracing::info!(target: "aex", "{} {} [AEX]", m, p);
-                        }
-                        (Some(m), None) => {
-                            tracing::info!(target: "aex", "{} [AEX]", m);
-                        }
-                        (None, Some(p)) => {
-                            tracing::info!(target: "aex", "{} [AEX]", p);
-                        }
-                        (None, None) => {}
+                match (method, path) {
+                    (Some(m), Some(p)) => {
+                        tracing::info!(target: "aex", "{} {} [AEX]", m, p);
                     }
+                    (Some(m), None) => {
+                        tracing::info!(target: "aex", "{} [AEX]", m);
+                    }
+                    (None, Some(p)) => {
+                        tracing::info!(target: "aex", "{} [AEX]", p);
+                    }
+                    (None, None) => {}
                 }
+            }
 
-                true
-            },
-            |ctx| { config.clone() }
-        )
+            true
+        })
     }
 }
 

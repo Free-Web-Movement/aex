@@ -5,10 +5,9 @@ use dashmap::DashMap;
 
 use crate::{
     connection::context::Context,
-    exe,
     http::{
         meta::HttpMetadata, protocol::header::HeaderKey, protocol::status::StatusCode,
-        types::Executor,
+        types::{Executor, IntoExecutor},
     },
 };
 
@@ -73,53 +72,46 @@ impl RateLimitConfig {
         let state = Arc::new(DashMap::<String, RateLimitBucket>::new());
         let config = Arc::new(self);
 
-        exe!(
-            move |ctx, data| {
-                let (config, key, state) = data;
-                let now = Instant::now();
-                let window = Duration::from_secs(config.window_secs);
+        IntoExecutor::into_executor(move |ctx: &mut Context| {
+            let key = (config.key_fn)(ctx);
+            let now = Instant::now();
+            let window = Duration::from_secs(config.window_secs);
 
-                let mut bucket = state.entry(key.clone()).or_insert_with(|| RateLimitBucket {
-                    tokens: config.max_requests,
-                    last_refill: now,
-                });
+            let mut bucket = state.entry(key.clone()).or_insert_with(|| RateLimitBucket {
+                tokens: config.max_requests,
+                last_refill: now,
+            });
 
-                if now.duration_since(bucket.last_refill) >= window {
-                    bucket.tokens = config.max_requests;
-                    bucket.last_refill = now;
-                }
-
-                if bucket.tokens > 0 {
-                    bucket.tokens -= 1;
-                    let remaining = bucket.tokens;
-                    let reset = bucket.last_refill + window;
-
-                    ctx.res()
-                        .set_header("X-RateLimit-Limit", config.max_requests.to_string())
-                        .set_header("X-RateLimit-Remaining", remaining.to_string())
-                        .set_header("X-RateLimit-Reset", reset.elapsed().as_secs().to_string());
-
-                    true
-                } else {
-                    let retry_after = bucket.last_refill + window - now;
-                    let retry_after_secs = retry_after.as_secs().to_string();
-                    ctx.status(StatusCode::TooManyRequests).send(
-                        format!(
-                            "Rate limit exceeded. Retry after {} seconds.",
-                            retry_after_secs
-                        ),
-                        None,
-                    );
-                    ctx.res().set_header("Retry-After", retry_after_secs);
-                    false
-                }
-            },
-            |ctx| {
-                let config = config.clone();
-                let key = (config.key_fn)(ctx);
-                (config, key, state.clone())
+            if now.duration_since(bucket.last_refill) >= window {
+                bucket.tokens = config.max_requests;
+                bucket.last_refill = now;
             }
-        )
+
+            if bucket.tokens > 0 {
+                bucket.tokens -= 1;
+                let remaining = bucket.tokens;
+                let reset = bucket.last_refill + window;
+
+                ctx.res()
+                    .set_header("X-RateLimit-Limit", config.max_requests.to_string())
+                    .set_header("X-RateLimit-Remaining", remaining.to_string())
+                    .set_header("X-RateLimit-Reset", reset.elapsed().as_secs().to_string());
+
+                true
+            } else {
+                let retry_after = bucket.last_refill + window - now;
+                let retry_after_secs = retry_after.as_secs().to_string();
+                ctx.status(StatusCode::TooManyRequests).send(
+                    format!(
+                        "Rate limit exceeded. Retry after {} seconds.",
+                        retry_after_secs
+                    ),
+                    None,
+                );
+                ctx.res().set_header("Retry-After", retry_after_secs);
+                false
+            }
+        })
     }
 }
 

@@ -1,8 +1,12 @@
 //! # HTTP Macros
 //!
-//! Macros for defining HTTP handlers.
+//! Macros for defining HTTP handlers and middleware.
 //!
 //! ## Usage
+//!
+//! `exe!` builds an `Arc<Executor>` with an async body. Use it when a handler
+//! or middleware needs to `await` inside the body (plain sync closures work
+//! directly on routes: `router.get("/", |ctx| { ...; true })`).
 //!
 //! ```rust,ignore
 //! use aex::exe;
@@ -12,8 +16,6 @@
 //!     true
 //! });
 //! ```
-
-// for `.boxed()`
 
 #[macro_export]
 #[allow(unused_variables)]

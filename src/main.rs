@@ -1,5 +1,4 @@
 use aex::connection::global::GlobalContext;
-use aex::exe;
 use aex::http::router::Router as HttpRouter;
 use aex::server::Server;
 use aex::tcp::router::Router as TcpRouter;
@@ -15,15 +14,7 @@ async fn main() -> anyhow::Result<()> {
 
     let mut http_router = HttpRouter::default();
 
-    http_router
-        .get(
-            "/",
-            exe!(|ctx| {
-                ctx.send("Hello world!", None);
-                true
-            }),
-        )
-        .register();
+    http_router.get("/", |_| "Hello world!");
 
     let tcp_router = {
         let router = TcpRouter::<RawCodec, RawCodec>::new();

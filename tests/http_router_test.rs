@@ -11,7 +11,6 @@ mod tests {
 
     use aex::{
         connection::context::{Context, TypeMapExt},
-        exe,
         http::{
             meta::HttpMetadata,
             protocol::{header::HeaderKey, status::StatusCode},
@@ -23,6 +22,65 @@ mod tests {
     };
     use futures::FutureExt;
     use tokio::time::sleep;
+
+    fn handler(ctx: &mut Context) -> bool {
+        let mut meta = ctx.local.get_value::<HttpMetadata>().unwrap();
+        meta.body = b"Macro OK".to_vec();
+        ctx.local.set_value(meta);
+        true
+    }
+
+    #[test]
+    fn test_exe_macro_builds_executor() {
+        let simple: Arc<Executor> = aex::exe!(|ctx| {
+            let _ = ctx;
+            true
+        });
+
+        let moved: Arc<Executor> = aex::exe!(move |ctx| {
+            let _ = ctx;
+            true
+        });
+
+        let with_pre: Arc<Executor> = aex::exe!(|ctx, data| {
+            let _ = ctx;
+            let _ = data;
+            true
+        }, |_ctx| { 42usize });
+
+        let moved_pre: Arc<Executor> = aex::exe!(move |ctx, data| {
+            let _ = ctx;
+            let _ = data;
+            true
+        }, |_ctx| { 42usize });
+
+        let _ = (simple, moved, with_pre, moved_pre);
+    }
+
+    #[test]
+    fn test_handler_forms() {
+        // 三种等价的路由写法都必须可编译：
+        // 1. 直接返回字符串
+        let mut router = Router::default();
+        router.get("/a", |_| "Hello world!");
+        // 2. 单参数便捷方法，闭包无需返回 true
+        router.get("/b", |ctx| {
+            ctx.text("Hello world!");
+        });
+        // 3. 原始写法：2 参数 send + 显式 true
+        router.get("/c", |ctx| {
+            ctx.send("Hello world!", None);
+            true
+        });
+        // 4. 其他常用 mime 便捷方法
+        router.get("/d", |ctx| {
+            ctx.json(r#"{"ok":true}"#);
+        });
+        router.get("/e", |ctx| {
+            ctx.html("<h1>Hi</h1>");
+        });
+        assert!(router.has_route("GET", "/a"));
+    }
 
     #[test]
     fn test_header_key_standard_match() {
@@ -728,35 +786,28 @@ mod tests {
         let mut hr = Router::default();
         // let trace = Arc::new(Mutex::new(Vec::<u8>::new()));
 
-        // --- 1. 使用 exe! 定义带 Pre 处理的中间件 ---
-        // let t1 = trace.clone();
-        let mw_info = exe!(
-            |ctx, info| {
+        // --- 1. 定义带 Pre 处理的中间件 ---
+        let mw_info: std::sync::Arc<aex::http::types::Executor> = std::sync::Arc::new(move |ctx: &mut aex::connection::context::Context| {
+            let info = { "info".to_string() };
+            Box::pin(async move {
                 async move { true }.await;
                 true
-            },
-            |_ctx| { "info".to_string() }
-        );
-
-        // --- 2. 使用 exe! 定义 Handler (修正版) ---
-        let handler: Arc<Executor> = exe!(|ctx| {
-            let mut meta = ctx.local.get_value::<HttpMetadata>().unwrap();
-            meta.body = b"Macro OK".to_vec();
-            ctx.local.set_value(meta);
-            true
+            })
         });
+
+        // --- 2. Handler 使用模块级 fn item (可 Copy，无需 clone) ---
 
         // --- 3. 使用 fluent API 注册 ---
 
         // 注册通配符方法路由到 /api/*
-        hr.all("/api/all", handler.clone())
+        hr.all("/api/all", handler)
             .middleware(mw_info.clone())
-            .register();
+            ;
 
         // 注册特定 GET 路由
         hr.get("/api/specific", handler)
             .middleware(mw_info)
-            .register();
+            ;
 
         // --- 4. 启动服务器 ---
         let server = HTTPServer::new(actual_addr, None).http(hr).clone();
@@ -802,8 +853,12 @@ mod tests {
         let mut hr = Router::default();
 
         // --- 1. 中间件：演示 pre 块提取数据并存入 context ---
-        let mw_info = exe!(
-            |ctx, info| {
+        let mw_info: std::sync::Arc<aex::http::types::Executor> = std::sync::Arc::new(move |ctx: &mut aex::connection::context::Context| {
+            let info = {
+                // pre 块：这里可以根据不同请求生成动态数据
+                "processed-by-macro".to_string()
+            };
+            Box::pin(async move {
                 // 将 pre 块提取的 info 放入 Response Header 传回 client
                 let mut meta = ctx.local.get_value::<HttpMetadata>().unwrap();
                 meta.headers
@@ -812,28 +867,18 @@ mod tests {
 
                 async move { true }.await;
                 true
-            },
-            |_ctx| {
-                // pre 块：这里可以根据不同请求生成动态数据
-                "processed-by-macro".to_string()
-            }
-        );
-
-        // --- 2. Handler：修改 Body ---
-        let handler: Arc<Executor> = exe!(|ctx| {
-            let mut meta = ctx.local.get_value::<HttpMetadata>().unwrap();
-            meta.body = b"Macro OK".to_vec();
-            ctx.local.set_value(meta);
-            true
+            })
         });
 
+        // --- 2. Handler 使用模块级 fn item (可 Copy，无需 clone) ---
+
         // --- 3. 注册路由 ---
-        hr.all("/api/all", handler.clone())
+        hr.all("/api/all", handler)
             .middleware(mw_info.clone())
-            .register();
+            ;
         hr.get("/api/specific", handler)
             .middleware(mw_info)
-            .register();
+            ;
 
         // --- 4. 启动服务器 ---
         let server = HTTPServer::new(actual_addr, None).http(hr).clone();
@@ -887,18 +932,15 @@ mod tests {
 
         hr.put(
             "/data",
-            Arc::new(|ctx: &mut Context| {
-                async move {
-                    let mut meta = ctx.local.get_value::<HttpMetadata>().unwrap();
-                    meta.status = StatusCode::Ok;
-                    meta.body = b"PUT OK".to_vec();
-                    ctx.local.set_value(meta);
-                    true
-                }
-                .boxed()
-            }),
+            |ctx: &mut Context| {
+                let mut meta = ctx.local.get_value::<HttpMetadata>().unwrap();
+                meta.status = StatusCode::Ok;
+                meta.body = b"PUT OK".to_vec();
+                ctx.local.set_value(meta);
+                true
+            },
         )
-        .register();
+        ;
 
         let server = HTTPServer::new(actual_addr, None).http(hr).clone();
         tokio::spawn(async move {
@@ -930,18 +972,15 @@ mod tests {
 
         hr.delete(
             "/item/:id",
-            Arc::new(|ctx: &mut Context| {
-                async move {
-                    let mut meta = ctx.local.get_value::<HttpMetadata>().unwrap();
-                    meta.status = StatusCode::Ok;
-                    meta.body = b"DELETED".to_vec();
-                    ctx.local.set_value(meta);
-                    true
-                }
-                .boxed()
-            }),
+            |ctx: &mut Context| {
+                let mut meta = ctx.local.get_value::<HttpMetadata>().unwrap();
+                meta.status = StatusCode::Ok;
+                meta.body = b"DELETED".to_vec();
+                ctx.local.set_value(meta);
+                true
+            },
         )
-        .register();
+        ;
 
         let server = HTTPServer::new(actual_addr, None).http(hr).clone();
         tokio::spawn(async move {
@@ -974,18 +1013,15 @@ mod tests {
 
         hr.patch(
             "/update",
-            Arc::new(|ctx: &mut Context| {
-                async move {
-                    let mut meta = ctx.local.get_value::<HttpMetadata>().unwrap();
-                    meta.status = StatusCode::Ok;
-                    meta.body = b"PATCHED".to_vec();
-                    ctx.local.set_value(meta);
-                    true
-                }
-                .boxed()
-            }),
+            |ctx: &mut Context| {
+                let mut meta = ctx.local.get_value::<HttpMetadata>().unwrap();
+                meta.status = StatusCode::Ok;
+                meta.body = b"PATCHED".to_vec();
+                ctx.local.set_value(meta);
+                true
+            },
         )
-        .register();
+        ;
 
         let server = HTTPServer::new(actual_addr, None).http(hr).clone();
         tokio::spawn(async move {
@@ -1017,18 +1053,15 @@ mod tests {
 
         hr.options(
             "/api",
-            Arc::new(|ctx: &mut Context| {
-                async move {
-                    let mut meta = ctx.local.get_value::<HttpMetadata>().unwrap();
-                    meta.status = StatusCode::Ok;
-                    meta.body = b"OPTIONS OK".to_vec();
-                    ctx.local.set_value(meta);
-                    true
-                }
-                .boxed()
-            }),
+            |ctx: &mut Context| {
+                let mut meta = ctx.local.get_value::<HttpMetadata>().unwrap();
+                meta.status = StatusCode::Ok;
+                meta.body = b"OPTIONS OK".to_vec();
+                ctx.local.set_value(meta);
+                true
+            },
         )
-        .register();
+        ;
 
         let server = HTTPServer::new(actual_addr, None).http(hr).clone();
         tokio::spawn(async move {
@@ -1063,17 +1096,14 @@ mod tests {
 
         hr.head(
             "/head-test",
-            Arc::new(|ctx: &mut Context| {
-                async move {
-                    let mut meta = ctx.local.get_value::<HttpMetadata>().unwrap();
-                    meta.status = StatusCode::Ok;
-                    ctx.local.set_value(meta);
-                    true
-                }
-                .boxed()
-            }),
+            |ctx: &mut Context| {
+                let mut meta = ctx.local.get_value::<HttpMetadata>().unwrap();
+                meta.status = StatusCode::Ok;
+                ctx.local.set_value(meta);
+                true
+            },
         )
-        .register();
+        ;
 
         let server = HTTPServer::new(actual_addr, None).http(hr).clone();
         tokio::spawn(async move {

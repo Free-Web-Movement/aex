@@ -1,20 +1,18 @@
-use aex::connection::context::TypeMapExt;
-use aex::exe;
+use aex::connection::context::{Context, TypeMapExt};
 use aex::http::meta::HttpMetadata;
 use aex::http::protocol::header::HeaderKey;
 use aex::http::router::{NodeType, Router as HttpRouter};
-use aex::http::types::Executor;
+use aex::http::types::IntoExecutor;
 use aex::server::HTTPServer;
 use aex::tcp::types::{Command, RawCodec};
 use std::net::SocketAddr;
-use std::sync::Arc;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let addr: SocketAddr = "0.0.0.0:8080".parse()?;
     let mut router = HttpRouter::default();
 
-    let auth: Arc<Executor> = exe!(|ctx| {
+    let auth = IntoExecutor::into_executor(|ctx: &mut Context| {
         let meta = ctx.local.get_value::<HttpMetadata>().unwrap();
         let auth_header = meta.headers.get(&HeaderKey::Authorization);
 
@@ -25,54 +23,44 @@ async fn main() -> anyhow::Result<()> {
         true
     });
 
-    let logger: Arc<Executor> = exe!(|ctx| {
+    let logger = IntoExecutor::into_executor(|ctx: &mut Context| {
         let meta = ctx.local.get_value::<HttpMetadata>().unwrap();
         println!("[{:?}] {} {}", meta.method, meta.path, ctx.addr);
         true
     });
 
-    let home: Arc<Executor> = exe!(|ctx| {
+    router.get("/", |ctx| {
         ctx.send("Welcome to AEX!", None);
         true
     });
 
-    let users: Arc<Executor> = exe!(|ctx| {
-        ctx.send(r#"["user1", "user2", "user3"]"#, None);
-        true
-    });
+    router
+        .get("/api/users", |ctx| {
+            ctx.send(r#"["user1", "user2", "user3"]"#, None);
+            true
+        })
+        .middleware(logger.clone());
 
-    let user_detail: Arc<Executor> = exe!(|ctx| {
-        let meta = ctx.local.get_value::<HttpMetadata>().unwrap();
-        let id = meta
-            .params
-            .as_ref()
-            .and_then(|p| p.data.as_ref())
-            .and_then(|d| d.get("id"))
-            .map(|v| v.as_str())
-            .unwrap_or("unknown");
-        ctx.send(format!(r#"{{"id":"{}"}}"#, id), None);
-        true
-    });
+    router
+        .get("/api/users/:id", |ctx| {
+            let meta = ctx.local.get_value::<HttpMetadata>().unwrap();
+            let id = meta
+                .params
+                .as_ref()
+                .and_then(|p| p.data.as_ref())
+                .and_then(|d| d.get("id"))
+                .map(|v| v.as_str())
+                .unwrap_or("unknown");
+            ctx.send(format!(r#"{{"id":"{}"}}"#, id), None);
+            true
+        })
+        .middleware(auth.clone())
+        .middleware(logger.clone());
 
-    let health: Arc<Executor> = exe!(|ctx| {
+    router.get("/health", |ctx| {
         ctx.send(r#"{"status":"healthy"}"#, None);
         true
     });
-
-    router.get("/", home).register();
-
-    router
-        .get("/api/users", users)
-        .middleware(logger.clone())
-        .register();
-
-    router
-        .get("/api/users/:id", user_detail)
-        .middleware(auth.clone())
-        .middleware(logger.clone())
-        .register();
-
-    router.get("/health", health).register();
 
     println!("Fluent API Server running at http://{}", addr);
     println!("\nEndpoints:");

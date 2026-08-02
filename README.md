@@ -57,7 +57,6 @@ Aex 是目前 Rust 生态中**协议支持最全面**的 web 框架之一，可�
 ```rust
 use aex::unified::{UnifiedServer, Protocol};
 use aex::http::router::Router as HttpRouter;
-use aex::exe;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
@@ -67,13 +66,8 @@ async fn main() -> anyhow::Result<()> {
     let globals = Arc::new(GlobalContext::new(addr, None));
     
     // HTTP 路由
-    let mut http_router = HttpRouter::new(
-        aex::http::router::NodeType::default()
-    );
-    http_router.get("/", exe!(|ctx| {
-        ctx.send("Hello from unified server!", None);
-        true
-    })).register();
+    let mut http_router = HttpRouter::default();
+    http_router.get("/", |_| "Hello from unified server!");
     
     // 创建统一服务器
     let server = UnifiedServer::new(addr, globals)
@@ -152,7 +146,6 @@ server.start_udp::<OtherFrame, OtherCommand>().await?;
 ```rust
 use aex::http::router::{NodeType, Router as HttpRouter};
 use aex::server::HTTPServer;
-use aex::exe;
 use std::net::SocketAddr;
 
 #[tokio::main]
@@ -160,10 +153,7 @@ async fn main() -> anyhow::Result<()> {
     let addr: SocketAddr = "0.0.0.0:8080".parse()?;
     let mut router = HttpRouter::default();
 
-    router.get("/", exe!(|ctx| {
-        ctx.send("Hello, World!", None);
-        true
-    })).register();
+    router.get("/", |_| "Hello, World!");
 
     HTTPServer::new(addr, None)
         .http(router)
@@ -178,42 +168,46 @@ async fn main() -> anyhow::Result<()> {
 ```rust
 use aex::http::router::{NodeType, Router as HttpRouter};
 use aex::http::params::Params;
-use aex::exe;
 
 // 1. 创建路由器
 let mut router = HttpRouter::default();
 
 // 2. 静态路由
-router.get("/api/health", exe!(|ctx| {
-    ctx.send("OK", None);
-    true
-})).register();
+router.get("/api/health", |_| "OK");
 
 // 3. 参数路由
-router.get("/api/users/:id", exe!(|ctx| {
+router.get("/api/users/:id", |ctx| {
     let params = ctx.local.get_ref::<Params>();
     if let Some(p) = params {
         let id = p.data.as_ref().and_then(|d| d.get("id").cloned());
         ctx.send(format!("User: {}", id.unwrap_or_default()), None);
     }
-    true
-})).register();
+});
 
 // 4. 通配符路由
-router.get("/api/files/*", exe!(|ctx| {
+router.get("/api/files/*", |ctx| {
     let params = ctx.local.get_ref::<Params>();
     if let Some(p) = params {
         let path = p.data.as_ref().and_then(|d| d.get("*").cloned());
         ctx.send(format!("File: {}", path.unwrap_or_default()), None);
     }
-    true
-})).register();
+});
 
 // 5. 带中间件的路由
-router.post("/api/users", exe!(|ctx| {
-    ctx.send("Created", None);
+router.post("/api/users", |ctx| {
+    ctx.text("Created");
+}).middleware(auth_middleware);
+```
+
+路由 handler 支持多种等价写法：直接返回字符串、`ctx.text(...)`/`ctx.json(...)`/`ctx.html(...)` 便捷方法、或原始 `ctx.send(content, mime)`：
+
+```rust
+router.get("/a", |_| "Hello world!");          // 直接返回字符串
+router.get("/b", |ctx| { ctx.text("Hello"); }); // 便捷方法，无需 true
+router.get("/c", |ctx| {                        // 原始写法
+    ctx.send("Hello world!", None);
     true
-}).middleware(auth_middleware).register());
+});
 ```
 
 ### HTTP/2 支持
@@ -224,7 +218,6 @@ HTTP/2 与 HTTP/1.1 共用同一个 router：
 use aex::server::HTTPServer;
 use aex::http::router::{NodeType, Router as HttpRouter};
 use aex::tcp::types::RawCodec;
-use aex::exe;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
@@ -242,7 +235,6 @@ WebSocket 作为中间件实现，共享 HTTP 上下文：
 ```rust
 use aex::http::websocket::{TextHandler, BinaryHandler};
 use aex::http::middlewares::websocket::WebSocket;
-use aex::exe;
 
 let text_handler: TextHandler = Arc::new(|ws, ctx, text| {
     Box::pin(async move {
@@ -257,9 +249,8 @@ let ws = WebSocket {
     on_binary: None,
 };
 
-router.get("/ws", exe!(|_ctx| true))
-    .middleware(WebSocket::to_middleware(ws))
-    .register();
+router.get("/ws", |_ctx| true)
+    .middleware(WebSocket::to_middleware(ws));
 ```
 
 ### 中间件
@@ -267,10 +258,9 @@ router.get("/ws", exe!(|_ctx| true))
 中间件是 Executor 的有序数组，按声明顺序执行：
 
 ```rust
-router.get("/protected", exe!(|ctx| {
-    ctx.send("Protected resource", None);
-    true
-}).middleware(auth_middleware).middleware(logging_middleware).register());
+router.get("/protected", |ctx| {
+    ctx.text("Protected resource");
+}).middleware(auth_middleware).middleware(logging_middleware);
 ```
 
 ---

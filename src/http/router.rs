@@ -23,7 +23,7 @@ use crate::http::protocol::header::HeaderKey;
 use crate::http::protocol::method::HttpMethod;
 use crate::http::protocol::status::StatusCode;
 use crate::http::protocol::version::HttpVersion;
-use crate::http::types::Executor;
+use crate::http::types::{Executor, HandlerOutput, IntoExecutor};
 
 #[derive(Debug, Clone)]
 pub enum NodeType {
@@ -56,6 +56,7 @@ pub struct RouteBuilder<'a> {
     path: String,
     handler: Arc<Executor>,
     middlewares: Vec<Arc<Executor>>,
+    registered: bool,
 }
 
 impl<'a> RouteBuilder<'a> {
@@ -71,17 +72,24 @@ impl<'a> RouteBuilder<'a> {
             path,
             handler,
             middlewares: Vec::new(),
+            registered: false,
         }
     }
 
     /// Add middleware to the route. Middlewares are executed before the handler.
-    pub fn middleware(mut self, mw: Arc<Executor>) -> Self {
-        self.middlewares.push(mw);
+    /// Accepts a plain closure or a pre-built `Arc<Executor>`.
+    pub fn middleware<F>(mut self, mw: F) -> Self
+    where
+        F: IntoExecutor,
+    {
+        self.middlewares.push(mw.into_executor());
         self
     }
 
-    /// Register the route with the router.
-    pub fn register(self) {
+    fn do_register(&mut self) {
+        if self.registered {
+            return;
+        }
         let segments: Vec<&str> = self.path.split('/').filter(|s| !s.is_empty()).collect();
 
         let method_key = self.method.to_uppercase();
@@ -134,6 +142,12 @@ impl<'a> RouteBuilder<'a> {
                 .get_or_insert_with(|| AHashMap::with_capacity(4))
                 .insert(method_key, self.middlewares.clone());
         }
+    }
+}
+
+impl<'a> Drop for RouteBuilder<'a> {
+    fn drop(&mut self) {
+        self.do_register();
     }
 }
 
@@ -191,44 +205,94 @@ impl Router {
         None
     }
 
+    fn register_handler<F, R>(
+        &mut self,
+        method: &'static str,
+        path: &str,
+        handler: F,
+    ) -> RouteBuilder<'_>
+    where
+        F: for<'a> Fn(&'a mut Context) -> R + Send + Sync + 'static,
+        R: HandlerOutput + Send + 'static,
+    {
+        let executor: Arc<Executor> =
+            Arc::new(move |ctx: &mut Context| Box::pin(handler(ctx).into_boxed(ctx)));
+        RouteBuilder::new(self, method, path.to_string(), executor)
+    }
+
     /// Fluent route registration: GET method.
-    pub fn get(&mut self, path: &str, handler: Arc<Executor>) -> RouteBuilder<'_> {
-        RouteBuilder::new(self, "GET", path.to_string(), handler)
+    /// Registers automatically when the builder goes out of scope, so
+    /// `router.get("/", |_| "Hello")`, `router.get("/", |ctx| { ... })` and the
+    /// chained `router.get("/", handler).middleware(mw)` forms all work.
+    pub fn get<F, R>(&mut self, path: &str, handler: F) -> RouteBuilder<'_>
+    where
+        F: for<'a> Fn(&'a mut Context) -> R + Send + Sync + 'static,
+        R: HandlerOutput + Send + 'static,
+    {
+        self.register_handler("GET", path, handler)
     }
 
     /// Fluent route registration: POST method.
-    pub fn post(&mut self, path: &str, handler: Arc<Executor>) -> RouteBuilder<'_> {
-        RouteBuilder::new(self, "POST", path.to_string(), handler)
+    pub fn post<F, R>(&mut self, path: &str, handler: F) -> RouteBuilder<'_>
+    where
+        F: for<'a> Fn(&'a mut Context) -> R + Send + Sync + 'static,
+        R: HandlerOutput + Send + 'static,
+    {
+        self.register_handler("POST", path, handler)
     }
 
     /// Fluent route registration: PUT method.
-    pub fn put(&mut self, path: &str, handler: Arc<Executor>) -> RouteBuilder<'_> {
-        RouteBuilder::new(self, "PUT", path.to_string(), handler)
+    pub fn put<F, R>(&mut self, path: &str, handler: F) -> RouteBuilder<'_>
+    where
+        F: for<'a> Fn(&'a mut Context) -> R + Send + Sync + 'static,
+        R: HandlerOutput + Send + 'static,
+    {
+        self.register_handler("PUT", path, handler)
     }
 
     /// Fluent route registration: DELETE method.
-    pub fn delete(&mut self, path: &str, handler: Arc<Executor>) -> RouteBuilder<'_> {
-        RouteBuilder::new(self, "DELETE", path.to_string(), handler)
+    pub fn delete<F, R>(&mut self, path: &str, handler: F) -> RouteBuilder<'_>
+    where
+        F: for<'a> Fn(&'a mut Context) -> R + Send + Sync + 'static,
+        R: HandlerOutput + Send + 'static,
+    {
+        self.register_handler("DELETE", path, handler)
     }
 
     /// Fluent route registration: PATCH method.
-    pub fn patch(&mut self, path: &str, handler: Arc<Executor>) -> RouteBuilder<'_> {
-        RouteBuilder::new(self, "PATCH", path.to_string(), handler)
+    pub fn patch<F, R>(&mut self, path: &str, handler: F) -> RouteBuilder<'_>
+    where
+        F: for<'a> Fn(&'a mut Context) -> R + Send + Sync + 'static,
+        R: HandlerOutput + Send + 'static,
+    {
+        self.register_handler("PATCH", path, handler)
     }
 
     /// Fluent route registration: OPTIONS method.
-    pub fn options(&mut self, path: &str, handler: Arc<Executor>) -> RouteBuilder<'_> {
-        RouteBuilder::new(self, "OPTIONS", path.to_string(), handler)
+    pub fn options<F, R>(&mut self, path: &str, handler: F) -> RouteBuilder<'_>
+    where
+        F: for<'a> Fn(&'a mut Context) -> R + Send + Sync + 'static,
+        R: HandlerOutput + Send + 'static,
+    {
+        self.register_handler("OPTIONS", path, handler)
     }
 
     /// Fluent route registration: HEAD method.
-    pub fn head(&mut self, path: &str, handler: Arc<Executor>) -> RouteBuilder<'_> {
-        RouteBuilder::new(self, "HEAD", path.to_string(), handler)
+    pub fn head<F, R>(&mut self, path: &str, handler: F) -> RouteBuilder<'_>
+    where
+        F: for<'a> Fn(&'a mut Context) -> R + Send + Sync + 'static,
+        R: HandlerOutput + Send + 'static,
+    {
+        self.register_handler("HEAD", path, handler)
     }
 
     /// Fluent route registration: matches all HTTP methods.
-    pub fn all(&mut self, path: &str, handler: Arc<Executor>) -> RouteBuilder<'_> {
-        RouteBuilder::new(self, "*", path.to_string(), handler)
+    pub fn all<F, R>(&mut self, path: &str, handler: F) -> RouteBuilder<'_>
+    where
+        F: for<'a> Fn(&'a mut Context) -> R + Send + Sync + 'static,
+        R: HandlerOutput + Send + 'static,
+    {
+        self.register_handler("*", path, handler)
     }
 
     /// Register a handler for a specific path and method.

@@ -8,8 +8,8 @@ use zz_validator::{
 };
 
 use crate::{
-    exe,
-    http::{meta::HttpMetadata, protocol::status::StatusCode, types::Executor},
+    connection::context::Context,
+    http::{meta::HttpMetadata, protocol::status::StatusCode, types::{Executor, IntoExecutor}},
 };
 
 /// 1. 独立转换函数：确保在 to_value_optimized 作用域内可见
@@ -116,7 +116,7 @@ pub fn to_validator(dsl_map: AHashMap<String, String>) -> Arc<Executor> {
 
     let compiled = Arc::new(compiled_vec);
 
-    exe!(|ctx, data| { data }, |ctx| {
+    IntoExecutor::into_executor(move |ctx: &mut Context| {
         let compiled = compiled.clone();
 
         // 获取 Metadata 原地修改
@@ -124,7 +124,7 @@ pub fn to_validator(dsl_map: AHashMap<String, String>) -> Arc<Executor> {
             Some(m) => m,
             None => {
                 tracing::error!("HttpMetadata missing in validator");
-                return Box::pin(async move { false });
+                return false;
             }
         };
 
@@ -134,7 +134,7 @@ pub fn to_validator(dsl_map: AHashMap<String, String>) -> Arc<Executor> {
             Some(p) => p,
             None => {
                 tracing::error!("AEX FATAL: HttpMetadata.params not initialized");
-                return Box::pin(async move { false });
+                return false;
             }
         };
         let mut res = true;

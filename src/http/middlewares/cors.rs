@@ -1,8 +1,8 @@
 use crate::{
-    exe,
+    connection::context::Context,
     http::{
         meta::HttpMetadata, protocol::header::HeaderKey, protocol::status::StatusCode,
-        types::Executor,
+        types::{Executor, IntoExecutor},
     },
 };
 use std::sync::Arc;
@@ -71,54 +71,51 @@ impl CorsConfig {
 
     pub fn build(self) -> Arc<Executor> {
         let config = Arc::new(self);
-        exe!(
-            move |ctx, config| {
-                let mut is_options = false;
+        IntoExecutor::into_executor(move |ctx: &mut Context| {
+            let mut is_options = false;
 
-                if let Some(meta) = ctx.local.get_mut::<HttpMetadata>() {
-                    let origin = meta.headers.get(&HeaderKey::Origin).cloned();
+            if let Some(meta) = ctx.local.get_mut::<HttpMetadata>() {
+                let origin = meta.headers.get(&HeaderKey::Origin).cloned();
 
-                    if origin.is_some() || config.allow_origin_all {
-                        let origin_value = origin.as_deref().unwrap_or("*");
-                        meta.headers.insert(
-                            HeaderKey::AccessControlAllowOrigin,
-                            origin_value.to_string(),
-                        );
-                    }
-
+                if origin.is_some() || config.allow_origin_all {
+                    let origin_value = origin.as_deref().unwrap_or("*");
                     meta.headers.insert(
-                        HeaderKey::AccessControlAllowMethods,
-                        config.allow_methods.join(", "),
+                        HeaderKey::AccessControlAllowOrigin,
+                        origin_value.to_string(),
                     );
-                    meta.headers.insert(
-                        HeaderKey::AccessControlAllowHeaders,
-                        config.allow_headers.join(", "),
-                    );
-
-                    if config.allow_credentials {
-                        meta.headers
-                            .insert(HeaderKey::AccessControlAllowCredentials, "true".to_string());
-                    }
-
-                    if let Some(max_age) = config.max_age {
-                        meta.headers
-                            .insert(HeaderKey::AccessControlMaxAge, max_age.to_string());
-                    }
-
-                    if meta.method.to_str() == "OPTIONS" {
-                        is_options = true;
-                    }
                 }
 
-                if is_options {
-                    ctx.status(StatusCode::Ok).send("", None);
-                    return false;
+                meta.headers.insert(
+                    HeaderKey::AccessControlAllowMethods,
+                    config.allow_methods.join(", "),
+                );
+                meta.headers.insert(
+                    HeaderKey::AccessControlAllowHeaders,
+                    config.allow_headers.join(", "),
+                );
+
+                if config.allow_credentials {
+                    meta.headers
+                        .insert(HeaderKey::AccessControlAllowCredentials, "true".to_string());
                 }
 
-                true
-            },
-            |ctx| { config.clone() }
-        )
+                if let Some(max_age) = config.max_age {
+                    meta.headers
+                        .insert(HeaderKey::AccessControlMaxAge, max_age.to_string());
+                }
+
+                if meta.method.to_str() == "OPTIONS" {
+                    is_options = true;
+                }
+            }
+
+            if is_options {
+                ctx.status(StatusCode::Ok).send("", None);
+                return false;
+            }
+
+            true
+        })
     }
 }
 

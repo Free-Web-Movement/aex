@@ -1,9 +1,7 @@
 use ahash::AHashMap;
-use std::sync::Arc;
 
 use aex::{
     connection::context::TypeMapExt,
-    exe,
     http::{
         meta::HttpMetadata,
         middlewares::validator::{to_validator, value_to_string},
@@ -33,7 +31,8 @@ async fn test_to_validator_integration_full() {
 
     let mw_validator = to_validator(dsl_map);
 
-    let handler = exe!(|ctx| {
+    // 路由中的 :id 必须对应 DSL 里的 id
+    hr.post("/check/:id", |ctx| {
         let mut meta = ctx.local.get_value::<HttpMetadata>().unwrap();
         println!("params: {:?}", meta.params.clone().unwrap().data);
         println!("body: {:?}", meta.params.clone().unwrap().form);
@@ -41,12 +40,9 @@ async fn test_to_validator_integration_full() {
         meta.body = b"Success".to_vec();
         ctx.local.set_value(meta);
         true
-    });
-
-    // 路由中的 :id 必须对应 DSL 里的 id
-    hr.post("/check/:id", handler)
+    })
         .middleware(mw_validator)
-        .register();
+        ;
 
     let server = HTTPServer::new(actual_addr, None).http(hr).clone();
     tokio::spawn(async move {
@@ -114,16 +110,14 @@ async fn test_v_macro_integration_full() {
         body   => "(tags:array<string>)"
     );
 
-    let handler = exe!(|ctx| {
+    hr.post("/check/:id", |ctx| {
         let mut meta = ctx.local.get_value::<HttpMetadata>().unwrap();
         meta.body = b"Macro Success".to_vec();
         ctx.local.set_value(meta);
         true
-    });
-
-    hr.post("/check/:id", handler)
+    })
         .middleware(mw_validator)
-        .register();
+        ;
 
     let server = HTTPServer::new(actual_addr, None).http(hr).clone();
     tokio::spawn(async move {
@@ -179,7 +173,8 @@ async fn test_validator_to_handler_data_flow() {
     );
 
     // 2. 编写最终 Handler 进行数据断言
-    let handler = exe!(|ctx| {
+    // 路由绑定：:id 对应 params 规则
+    hr.post("/user/:id", |ctx| {
         // 从 local 提取 HttpMetadata
         let mut meta = ctx.local.get_value::<HttpMetadata>().unwrap();
 
@@ -202,12 +197,9 @@ async fn test_validator_to_handler_data_flow() {
         meta.body = b"Handler Reached".to_vec();
         ctx.local.set_value(meta);
         true
-    });
-
-    // 路由绑定：:id 对应 params 规则
-    hr.post("/user/:id", handler)
+    })
         .middleware(mw_validator)
-        .register();
+        ;
 
     let server = HTTPServer::new(actual_addr, None).http(hr).clone();
     tokio::spawn(async move {
@@ -255,14 +247,13 @@ async fn test_validator_conversion_logic_hardcore() {
         query => "(i:int, b_true:bool, b_false:bool, f:float)"
     );
 
-    let handler = exe!(|ctx| {
+    hr.get("/test", |ctx| {
         let mut meta = ctx.local.get_value::<HttpMetadata>().unwrap();
         meta.body = b"Conversion Verified".to_vec();
         ctx.local.set_value(meta);
         true
-    });
-
-    hr.get("/test", handler).middleware(mw_validator).register();
+    })
+    .middleware(mw_validator);
 
     let server = HTTPServer::new(actual_addr, None).http(hr).clone();
     tokio::spawn(async move {
@@ -318,14 +309,13 @@ async fn test_validator_edge_cases_and_fallback() {
         query => "(b_off:bool, mixed:string)"
     );
 
-    let handler = exe!(|ctx| {
+    hr.get("/edge", |ctx| {
         let mut meta = ctx.local.get_value::<HttpMetadata>().unwrap();
         meta.body = b"Edge Cases Verified".to_vec();
         ctx.local.set_value(meta);
         true
-    });
-
-    hr.get("/edge", handler).middleware(mw_validator).register();
+    })
+    .middleware(mw_validator);
 
     let server = HTTPServer::new(actual_addr, None).http(hr).clone();
     tokio::spawn(async move {
@@ -390,7 +380,7 @@ async fn test_validator_boolean_strict_error_integration() {
     hr.insert(
         "/check",
         Some("GET"),
-        exe!(|_ctx| { true }),
+        aex::http::types::IntoExecutor::into_executor(|_ctx: &mut aex::connection::context::Context| true),
         Some(vec![validator_mw]),
     );
 
@@ -444,7 +434,7 @@ async fn test_validator_integer_strict_error_integration() {
     hr.insert(
         "/user",
         Some("GET"),
-        exe!(|_ctx| { true }),
+        aex::http::types::IntoExecutor::into_executor(|_ctx: &mut aex::connection::context::Context| true),
         Some(vec![validator_mw]),
     );
 
@@ -515,7 +505,7 @@ async fn test_validator_float_strict_error_integration() {
     hr.insert(
         "/product",
         Some("GET"),
-        exe!(|_ctx| { true }),
+        aex::http::types::IntoExecutor::into_executor(|_ctx: &mut aex::connection::context::Context| true),
         Some(vec![validator_mw]),
     );
 
@@ -584,7 +574,7 @@ async fn test_validator_float_auto_completion_promotion() {
     hr.insert(
         "/promote",
         Some("GET"),
-        exe!(|ctx| {
+        aex::http::types::IntoExecutor::into_executor(|ctx: &mut aex::connection::context::Context| {
             // 💡 重点：从 Context 拿到转换后的 HttpMetadata
             let mut meta = ctx.local.get_value::<HttpMetadata>().unwrap();
 
@@ -653,7 +643,7 @@ async fn test_validator_value_to_string_fallback() {
     hr.insert(
         "/fallback",
         Some("GET"),
-        exe!(|ctx| {
+        aex::http::types::IntoExecutor::into_executor(|ctx: &mut aex::connection::context::Context| {
             let mut meta = ctx.local.get_value::<HttpMetadata>().unwrap();
             let mut found_empty = false;
 
@@ -750,7 +740,7 @@ async fn test_validator_params_none_fallback() {
     hr.insert(
         "/fallback_params",
         Some("GET"),
-        exe!(|ctx| {
+        aex::http::types::IntoExecutor::into_executor(|ctx: &mut aex::connection::context::Context| {
             let mut meta = ctx.local.get_value::<HttpMetadata>().unwrap();
             // 验证 params 是否已经不再是 None (被 unwrap_or_else 补全并后续写回)
             if meta.params.is_some() {

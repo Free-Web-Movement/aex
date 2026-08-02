@@ -1,11 +1,8 @@
 use aex::communicators::event::Event;
-use aex::connection::context::TypeMapExt;
 use aex::http::router::Router as HttpRouter;
-use aex::http::types::Executor;
 use aex::server::Server;
 use futures::FutureExt;
 use std::net::SocketAddr;
-use std::pin::Pin;
 use std::sync::{Arc, atomic::AtomicUsize, atomic::Ordering};
 use tokio::time::{Duration, sleep, timeout};
 
@@ -15,13 +12,10 @@ async fn test_server_http() {
     let server = Server::new(addr, None);
 
     let mut http_router = HttpRouter::default();
-    let handler: Arc<Executor> = Arc::new(|_ctx: &mut aex::connection::context::Context| {
-        Box::pin(async move {
-            println!("HTTP handler executed");
-            true
-        }) as Pin<Box<dyn futures::Future<Output = bool> + Send>>
+    http_router.get("/", |_ctx| {
+        println!("HTTP handler executed");
+        true
     });
-    http_router.get("/", handler).register();
 
     let temp_listener = tokio::net::TcpListener::bind(addr).await.unwrap();
     let actual_addr = temp_listener.local_addr().unwrap();

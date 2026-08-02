@@ -1,10 +1,7 @@
 use aex::connection::global::GlobalContext;
 use aex::http::router::Router as HttpRouter;
-use aex::http::types::Executor;
 use aex::unified::UnifiedServer;
-use futures::FutureExt;
 use std::net::SocketAddr;
-use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -14,14 +11,10 @@ use tokio::time::{Duration, sleep};
 fn make_http_router() -> HttpRouter {
     let mut router = HttpRouter::new(aex::http::router::NodeType::default());
 
-    let handler: Arc<Executor> = Arc::new(|_ctx: &mut aex::connection::context::Context| {
-        Box::pin(async move {
-            println!("[Test] HTTP handler executed");
-            true
-        }) as Pin<Box<dyn futures::Future<Output = bool> + Send>>
+    router.get("/", |_ctx| {
+        println!("[Test] HTTP handler executed");
+        true
     });
-
-    router.get("/", handler).register();
     router
 }
 

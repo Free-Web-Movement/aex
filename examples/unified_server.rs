@@ -20,29 +20,19 @@ async fn main() -> anyhow::Result<()> {
 
     let mut router = HttpRouter::new(aex::http::router::NodeType::default());
 
-    router
-        .get(
-            "/",
-            aex::exe!(|ctx| {
-                ctx.send("Hello from HTTP/1.1!", None);
-                true
-            }),
-        )
-        .register();
+    router.get("/", |ctx| {
+        ctx.send("Hello from HTTP/1.1!", None);
+        true
+    });
 
-    router
-        .get(
-            "/info",
-            aex::exe!(|ctx| {
-                ctx.send(
-                    r#"{"protocol":"HTTP/1.1","message":"Welcome to AEX Unified Server"}"#,
-                    None,
-                );
-                ctx.res().set_header("Content-Type", "application/json");
-                true
-            }),
-        )
-        .register();
+    router.get("/info", |ctx| {
+        ctx.send(
+            r#"{"protocol":"HTTP/1.1","message":"Welcome to AEX Unified Server"}"#,
+            None,
+        );
+        ctx.res().set_header("Content-Type", "application/json");
+        true
+    });
 
     let ws_handler = WebSocket::new()
         .on_text(|_ws, _ctx, text| {
@@ -60,12 +50,9 @@ async fn main() -> anyhow::Result<()> {
 
     let ws_middleware: Arc<Executor> = Arc::from(WebSocket::to_middleware(ws_handler));
 
-    router
-        .get("/ws", aex::exe!(|_ctx| { true }))
-        .middleware(ws_middleware)
-        .register();
+    router.get("/ws", |_ctx| true).middleware(ws_middleware);
 
-    router.get("/test", aex::exe!(|ctx| {
+    router.get("/test", |ctx| {
         let html = r#"<!DOCTYPE html>
 <html>
 <head>
@@ -115,7 +102,7 @@ async fn main() -> anyhow::Result<()> {
         ctx.send(html, None);
         ctx.res().set_header("Content-Type", "text/html");
         true
-    })).register();
+    });
 
     unified = unified
         .http_router(router)

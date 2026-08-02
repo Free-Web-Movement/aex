@@ -178,6 +178,7 @@ impl Context {
     }
 
     /// Send a response body. Content-Length is set automatically by send_response.
+    /// Pass `None` for the default content type (plain text), or `Some(mime)`.
     pub fn send(&mut self, content: impl Into<String>, mime: Option<SubMediaType>) {
         if let Some(meta) = self.local.get_mut::<HttpMetadata>() {
             let bytes: Vec<u8> = content.into().into_bytes();
@@ -186,6 +187,21 @@ impl Context {
                 .insert(HeaderKey::ContentType, mime_str.as_str().to_string());
             meta.body = bytes;
         }
+    }
+
+    /// Send a response body as plain text. Equivalent to `send(content, None)`.
+    pub fn text(&mut self, content: impl Into<String>) {
+        self.send(content, Some(SubMediaType::Plain));
+    }
+
+    /// Send a response body as text/html.
+    pub fn html(&mut self, content: impl Into<String>) {
+        self.send(content, Some(SubMediaType::Html));
+    }
+
+    /// Send a response body as application/json.
+    pub fn json(&mut self, content: impl Into<String>) {
+        self.send(content, Some(SubMediaType::Json));
     }
 
     /// Redirect to another URL (302 Found).

@@ -9,33 +9,29 @@
 //! 5. AEX Trie - Pattern-matching router
 
 use std::hint::black_box;
-use std::sync::Arc;
 use std::time::Instant;
 
-use aex::exe;
 use aex::http::params::SmallParams;
 use aex::http::router::{NodeType, Router};
-use aex::http::types::Executor;
 use ahash::AHashMap;
+
+fn handler(_ctx: &mut aex::connection::context::Context) -> bool {
+    true
+}
 
 fn create_aex_router() -> Router {
     let mut router = Router::default();
-    let handler: Arc<Executor> = exe!(|_ctx| { true });
-    router.get("/api/users", handler.clone()).register();
-    router.get("/api/users/:id", handler.clone()).register();
-    router
-        .get("/api/users/:id/posts", handler.clone())
-        .register();
-    router.post("/api/users", handler.clone()).register();
-    router.get("/api/posts", handler.clone()).register();
-    router.get("/api/posts/:slug", handler.clone()).register();
-    router
-        .get("/api/posts/:slug/comments/:id", handler.clone())
-        .register();
-    router.get("/health", handler.clone()).register();
-    router.get("/", handler.clone()).register();
-    router.get("/about", handler.clone()).register();
-    router.get("/contact", handler.clone()).register();
+    router.get("/api/users", handler);
+    router.get("/api/users/:id", handler);
+    router.get("/api/users/:id/posts", handler);
+    router.post("/api/users", handler);
+    router.get("/api/posts", handler);
+    router.get("/api/posts/:slug", handler);
+    router.get("/api/posts/:slug/comments/:id", handler);
+    router.get("/health", handler);
+    router.get("/", handler);
+    router.get("/about", handler);
+    router.get("/contact", handler);
     router
 }
 

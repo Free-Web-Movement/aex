@@ -2,7 +2,6 @@
 //!
 //! Tests: no URL, static URL, dynamic URL
 
-use aex::exe;
 use aex::http::router::Router as HttpRouter;
 use aex::server::Server;
 use std::net::SocketAddr;
@@ -16,37 +15,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut http_router = HttpRouter::default();
 
     // 1. No URL (root)
-    http_router
-        .get(
-            "/",
-            exe!(|ctx| {
-                ctx.send("Hello", None);
-                true
-            }),
-        )
-        .register();
+    http_router.get("/", |ctx| {
+        ctx.send("Hello", None);
+        true
+    });
 
     // 2. Static URL
-    http_router
-        .get(
-            "/api/users",
-            exe!(|ctx| {
-                ctx.send(r#"[{"id":1,"name":"alice"}]"#, None);
-                true
-            }),
-        )
-        .register();
+    http_router.get("/api/users", |ctx| {
+        ctx.send(r#"[{"id":1,"name":"alice"}]"#, None);
+        true
+    });
 
     // 3. Dynamic URL
-    http_router
-        .get(
-            "/api/users/:id",
-            exe!(|ctx| {
-                ctx.send(r#"{"id":1}"#, None);
-                true
-            }),
-        )
-        .register();
+    http_router.get("/api/users/:id", |ctx| {
+        ctx.send(r#"{"id":1}"#, None);
+        true
+    });
 
     let server = Server::new(addr, None).http(http_router);
     println!("AEX server on {}", addr);
