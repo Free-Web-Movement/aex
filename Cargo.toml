@@ -10,11 +10,7 @@ keywords = [
     "web",
     "http",
     "tcp",
-    "upd",
     "websocket",
-    "uniserver",
-    "server",
-    "router",
 ]
 authors = ["Eric <calidion@gmail.com>"]
 
