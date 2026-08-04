@@ -10,10 +10,10 @@ fn bench_static_route(c: &mut Criterion) {
     let mut router = AexRouter::default();
 
     let handler: Arc<Executor> = Arc::new(|_ctx| Box::pin(async { true }));
-    router.get("/api/users", handler.clone());
-    router.get("/api/posts", handler.clone());
-    router.get("/api/comments", handler.clone());
-    router.get("/static/app.js", handler.clone());
+    router.insert("/api/users", Some("GET"), handler.clone(), None);
+    router.insert("/api/posts", Some("GET"), handler.clone(), None);
+    router.insert("/api/comments", Some("GET"), handler.clone(), None);
+    router.insert("/static/app.js", Some("GET"), handler.clone(), None);
 
     let paths = vec![
         vec!["api", "users"],
@@ -36,8 +36,13 @@ fn bench_param_route(c: &mut Criterion) {
     let mut router = AexRouter::default();
 
     let handler: Arc<Executor> = Arc::new(|_ctx| Box::pin(async { true }));
-    router.get("/api/users/:id", handler.clone());
-    router.get("/api/posts/:post_id/comments/:comment_id", handler.clone());
+    router.insert("/api/users/:id", Some("GET"), handler.clone(), None);
+    router.insert(
+        "/api/posts/:post_id/comments/:comment_id",
+        Some("GET"),
+        handler.clone(),
+        None,
+    );
 
     let paths = vec![
         vec!["api", "users", "123"],
@@ -58,7 +63,7 @@ fn bench_wildcard_route(c: &mut Criterion) {
     let mut router = AexRouter::default();
 
     let handler: Arc<Executor> = Arc::new(|_ctx| Box::pin(async { true }));
-    router.get("/static/*", handler.clone());
+    router.insert("/static/*", Some("GET"), handler.clone(), None);
 
     let paths = vec![
         vec!["static", "js", "app.js"],
@@ -81,11 +86,16 @@ fn bench_mixed_route(c: &mut Criterion) {
 
     let handler: Arc<Executor> = Arc::new(|_ctx| Box::pin(async { true }));
 
-    router.get("/api/users", handler.clone());
-    router.get("/api/users/:id", handler.clone());
-    router.get("/api/posts/:post_id/comments/:comment_id", handler.clone());
-    router.get("/static/*", handler.clone());
-    router.get("/health", handler.clone());
+    router.insert("/api/users", Some("GET"), handler.clone(), None);
+    router.insert("/api/users/:id", Some("GET"), handler.clone(), None);
+    router.insert(
+        "/api/posts/:post_id/comments/:comment_id",
+        Some("GET"),
+        handler.clone(),
+        None,
+    );
+    router.insert("/static/*", Some("GET"), handler.clone(), None);
+    router.insert("/health", Some("GET"), handler.clone(), None);
 
     let static_paths = vec![vec!["api", "users"], vec!["health"]];
     let param_paths = vec![vec!["api", "users", "123"]];

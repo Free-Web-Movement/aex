@@ -249,9 +249,9 @@ impl Server {
                         let router = router.clone();
                         let globals = globals.clone();
                         tokio::spawn(async move {
+                            use std::sync::Arc;
                             use tokio::io::{BufReader, BufWriter};
                             use tokio::sync::Mutex;
-                            use std::sync::Arc;
 
                             let (reader, writer) = socket.into_split();
                             let reader = Box::new(BufReader::new(reader))
@@ -259,14 +259,13 @@ impl Server {
                             let writer = Box::new(BufWriter::new(writer))
                                 as Box<dyn tokio::io::AsyncWrite + Send + Sync + Unpin>;
 
-                            let ctx = Arc::new(Mutex::new(
-                                crate::connection::context::Context::new(
+                            let ctx =
+                                Arc::new(Mutex::new(crate::connection::context::Context::new(
                                     Some(reader),
                                     Some(writer),
                                     globals,
                                     peer_addr,
-                                ),
-                            ));
+                                )));
 
                             let _ = router.clone().handle(ctx).await;
                         });

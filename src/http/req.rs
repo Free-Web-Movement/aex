@@ -86,7 +86,9 @@ impl<'a> Request<'a> {
         let (is_chunked, transfer_encoding) =
             if let Some(te) = headers.get(&HeaderKey::TransferEncoding) {
                 (
-                    te.as_bytes().windows(7).any(|w| w.eq_ignore_ascii_case(b"chunked")),
+                    te.as_bytes()
+                        .windows(7)
+                        .any(|w| w.eq_ignore_ascii_case(b"chunked")),
                     Some(te.clone()),
                 )
             } else {
@@ -177,6 +179,14 @@ impl<'a> Request<'a> {
             .get_value::<HttpMetadata>()
             .map(|m| m.method)
             .unwrap_or(HttpMethod::GET)
+    }
+
+    /// 原始请求路径（如 `/static/sub`）。
+    pub fn path(&self) -> &str {
+        match self.local.get_ref::<HttpMetadata>() {
+            Some(meta) => &meta.path,
+            None => "/",
+        }
     }
 
     /// 快速获取所有的 Params

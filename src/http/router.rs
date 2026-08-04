@@ -11,6 +11,7 @@
 //! | Wildcard | `/static/*` | Matches any remaining path |
 
 use ahash::AHashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::io::AsyncReadExt;
 use tokio::sync::Mutex;
@@ -65,13 +66,14 @@ impl<'a> RouteBuilder<'a> {
         method: &'static str,
         path: String,
         handler: Arc<Executor>,
+        middlewares: Vec<Arc<Executor>>,
     ) -> Self {
         Self {
             router,
             method,
             path,
             handler,
-            middlewares: Vec::new(),
+            middlewares,
             registered: false,
         }
     }
@@ -151,6 +153,14 @@ impl<'a> Drop for RouteBuilder<'a> {
     }
 }
 
+/// Implemented by types whose methods declare routes via `#[aex::routes]`.
+///
+/// Generated automatically; mount an instance with `Router::push`.
+#[doc(hidden)]
+pub trait AexRoutes {
+    fn __aex_register(router: &mut Router, this: Arc<Self>);
+}
+
 /// Trie tree router for HTTP path matching.
 pub struct Router {
     pub node_type: NodeType,
@@ -210,6 +220,7 @@ impl Router {
         method: &'static str,
         path: &str,
         handler: F,
+        middlewares: Vec<Arc<Executor>>,
     ) -> RouteBuilder<'_>
     where
         F: for<'a> Fn(&'a mut Context) -> R + Send + Sync + 'static,
@@ -217,7 +228,21 @@ impl Router {
     {
         let executor: Arc<Executor> =
             Arc::new(move |ctx: &mut Context| Box::pin(handler(ctx).into_boxed(ctx)));
-        RouteBuilder::new(self, method, path.to_string(), executor)
+        RouteBuilder::new(self, method, path.to_string(), executor, middlewares)
+    }
+
+    fn register_with<F, R>(
+        &mut self,
+        method: &'static str,
+        path: &str,
+        middlewares: impl Into<Vec<Arc<Executor>>>,
+        handler: F,
+    ) -> RouteBuilder<'_>
+    where
+        F: for<'a> Fn(&'a mut Context) -> R + Send + Sync + 'static,
+        R: HandlerOutput + Send + 'static,
+    {
+        self.register_handler(method, path, handler, middlewares.into())
     }
 
     /// Fluent route registration: GET method.
@@ -229,7 +254,23 @@ impl Router {
         F: for<'a> Fn(&'a mut Context) -> R + Send + Sync + 'static,
         R: HandlerOutput + Send + 'static,
     {
-        self.register_handler("GET", path, handler)
+        self.register_handler("GET", path, handler, Vec::new())
+    }
+
+    /// Fluent route registration: GET method with middlewares.
+    /// Middlewares run before the handler; they sit between path and handler:
+    /// `router.get_with("/admin", [auth, logger], |_| "Admin")`.
+    pub fn get_with<F, R>(
+        &mut self,
+        path: &str,
+        middlewares: impl Into<Vec<Arc<Executor>>>,
+        handler: F,
+    ) -> RouteBuilder<'_>
+    where
+        F: for<'a> Fn(&'a mut Context) -> R + Send + Sync + 'static,
+        R: HandlerOutput + Send + 'static,
+    {
+        self.register_with("GET", path, middlewares, handler)
     }
 
     /// Fluent route registration: POST method.
@@ -238,7 +279,21 @@ impl Router {
         F: for<'a> Fn(&'a mut Context) -> R + Send + Sync + 'static,
         R: HandlerOutput + Send + 'static,
     {
-        self.register_handler("POST", path, handler)
+        self.register_handler("POST", path, handler, Vec::new())
+    }
+
+    /// Fluent route registration: POST method with middlewares.
+    pub fn post_with<F, R>(
+        &mut self,
+        path: &str,
+        middlewares: impl Into<Vec<Arc<Executor>>>,
+        handler: F,
+    ) -> RouteBuilder<'_>
+    where
+        F: for<'a> Fn(&'a mut Context) -> R + Send + Sync + 'static,
+        R: HandlerOutput + Send + 'static,
+    {
+        self.register_with("POST", path, middlewares, handler)
     }
 
     /// Fluent route registration: PUT method.
@@ -247,7 +302,21 @@ impl Router {
         F: for<'a> Fn(&'a mut Context) -> R + Send + Sync + 'static,
         R: HandlerOutput + Send + 'static,
     {
-        self.register_handler("PUT", path, handler)
+        self.register_handler("PUT", path, handler, Vec::new())
+    }
+
+    /// Fluent route registration: PUT method with middlewares.
+    pub fn put_with<F, R>(
+        &mut self,
+        path: &str,
+        middlewares: impl Into<Vec<Arc<Executor>>>,
+        handler: F,
+    ) -> RouteBuilder<'_>
+    where
+        F: for<'a> Fn(&'a mut Context) -> R + Send + Sync + 'static,
+        R: HandlerOutput + Send + 'static,
+    {
+        self.register_with("PUT", path, middlewares, handler)
     }
 
     /// Fluent route registration: DELETE method.
@@ -256,7 +325,21 @@ impl Router {
         F: for<'a> Fn(&'a mut Context) -> R + Send + Sync + 'static,
         R: HandlerOutput + Send + 'static,
     {
-        self.register_handler("DELETE", path, handler)
+        self.register_handler("DELETE", path, handler, Vec::new())
+    }
+
+    /// Fluent route registration: DELETE method with middlewares.
+    pub fn delete_with<F, R>(
+        &mut self,
+        path: &str,
+        middlewares: impl Into<Vec<Arc<Executor>>>,
+        handler: F,
+    ) -> RouteBuilder<'_>
+    where
+        F: for<'a> Fn(&'a mut Context) -> R + Send + Sync + 'static,
+        R: HandlerOutput + Send + 'static,
+    {
+        self.register_with("DELETE", path, middlewares, handler)
     }
 
     /// Fluent route registration: PATCH method.
@@ -265,7 +348,21 @@ impl Router {
         F: for<'a> Fn(&'a mut Context) -> R + Send + Sync + 'static,
         R: HandlerOutput + Send + 'static,
     {
-        self.register_handler("PATCH", path, handler)
+        self.register_handler("PATCH", path, handler, Vec::new())
+    }
+
+    /// Fluent route registration: PATCH method with middlewares.
+    pub fn patch_with<F, R>(
+        &mut self,
+        path: &str,
+        middlewares: impl Into<Vec<Arc<Executor>>>,
+        handler: F,
+    ) -> RouteBuilder<'_>
+    where
+        F: for<'a> Fn(&'a mut Context) -> R + Send + Sync + 'static,
+        R: HandlerOutput + Send + 'static,
+    {
+        self.register_with("PATCH", path, middlewares, handler)
     }
 
     /// Fluent route registration: OPTIONS method.
@@ -274,7 +371,21 @@ impl Router {
         F: for<'a> Fn(&'a mut Context) -> R + Send + Sync + 'static,
         R: HandlerOutput + Send + 'static,
     {
-        self.register_handler("OPTIONS", path, handler)
+        self.register_handler("OPTIONS", path, handler, Vec::new())
+    }
+
+    /// Fluent route registration: OPTIONS method with middlewares.
+    pub fn options_with<F, R>(
+        &mut self,
+        path: &str,
+        middlewares: impl Into<Vec<Arc<Executor>>>,
+        handler: F,
+    ) -> RouteBuilder<'_>
+    where
+        F: for<'a> Fn(&'a mut Context) -> R + Send + Sync + 'static,
+        R: HandlerOutput + Send + 'static,
+    {
+        self.register_with("OPTIONS", path, middlewares, handler)
     }
 
     /// Fluent route registration: HEAD method.
@@ -283,7 +394,21 @@ impl Router {
         F: for<'a> Fn(&'a mut Context) -> R + Send + Sync + 'static,
         R: HandlerOutput + Send + 'static,
     {
-        self.register_handler("HEAD", path, handler)
+        self.register_handler("HEAD", path, handler, Vec::new())
+    }
+
+    /// Fluent route registration: HEAD method with middlewares.
+    pub fn head_with<F, R>(
+        &mut self,
+        path: &str,
+        middlewares: impl Into<Vec<Arc<Executor>>>,
+        handler: F,
+    ) -> RouteBuilder<'_>
+    where
+        F: for<'a> Fn(&'a mut Context) -> R + Send + Sync + 'static,
+        R: HandlerOutput + Send + 'static,
+    {
+        self.register_with("HEAD", path, middlewares, handler)
     }
 
     /// Fluent route registration: matches all HTTP methods.
@@ -292,7 +417,82 @@ impl Router {
         F: for<'a> Fn(&'a mut Context) -> R + Send + Sync + 'static,
         R: HandlerOutput + Send + 'static,
     {
-        self.register_handler("*", path, handler)
+        self.register_handler("*", path, handler, Vec::new())
+    }
+
+    /// Fluent route registration: all HTTP methods with middlewares.
+    pub fn all_with<F, R>(
+        &mut self,
+        path: &str,
+        middlewares: impl Into<Vec<Arc<Executor>>>,
+        handler: F,
+    ) -> RouteBuilder<'_>
+    where
+        F: for<'a> Fn(&'a mut Context) -> R + Send + Sync + 'static,
+        R: HandlerOutput + Send + 'static,
+    {
+        self.register_with("*", path, middlewares, handler)
+    }
+
+    /// Mount a class instance whose `&self` methods declare routes via
+    /// `#[aex::routes]`.
+    ///
+    /// Registers every declared route (and its middlewares) in one call. The
+    /// instance is captured, so handlers can operate on its state:
+    ///
+    /// ```rust,ignore
+    /// #[aex::routes]
+    /// impl Class {
+    ///     // [auth] 是裸标识符，解析为同一实例上的对象中间件（&self 方法）
+    ///     #[get(["/", "/"], [auth])]
+    ///     fn index(&self, ctx: &mut Context) { ctx.text(&self.name); }
+    ///
+    ///     fn auth(&self, ctx: &mut Context) -> bool { /* 用 self 鉴权 */ true }
+    /// }
+    /// let mut router = Router::default();
+    /// let instance = Class { name: "aex".into() };
+    /// router.push(instance);
+    /// ```
+    pub fn push<C: AexRoutes + Send + Sync + 'static>(&mut self, instance: C) {
+        C::__aex_register(self, Arc::new(instance));
+    }
+
+    /// Register a static file service. Files under `dir` are served at the URL
+    /// prefix `prefix` with automatic MIME detection:
+    ///
+    /// ```rust,ignore
+    /// router.static_files("/static", "public");
+    /// // GET /static/app.js     -> public/app.js
+    /// // GET /static            -> public/index.html
+    /// // GET /static/sub/       -> public/sub/index.html
+    /// ```
+    ///
+    /// Basic website resources (html/css/js/images/...) are supported out of
+    /// the box. Files larger than 100 MiB are rejected with 404 — large files
+    /// should be served by a dedicated download service. Use
+    /// [`Router::static_files_with`] to customize the size limit / index file.
+    pub fn static_files(&mut self, prefix: &str, dir: impl Into<PathBuf>) {
+        self.static_files_with(prefix, crate::http::static_files::StaticFiles::new(dir));
+    }
+
+    /// Register a static file service with custom [`StaticFiles`] settings.
+    ///
+    /// [`StaticFiles`]: crate::http::static_files::StaticFiles
+    pub fn static_files_with(
+        &mut self,
+        prefix: &str,
+        config: crate::http::static_files::StaticFiles,
+    ) {
+        let prefix = prefix.trim();
+        let exact = if prefix.starts_with('/') {
+            prefix.to_string()
+        } else {
+            format!("/{prefix}")
+        };
+        let handler = config.build();
+        // 通配路由覆盖前缀下的所有路径；精确路由让前缀本身也落到入口文件。
+        self.insert(&format!("{exact}/*"), Some("GET"), handler.clone(), None);
+        self.insert(&exact, Some("GET"), handler, None);
     }
 
     /// Register a handler for a specific path and method.
@@ -346,6 +546,10 @@ impl Router {
     ///   1. Exact match (static/param) — continue to next segment
     ///   2. Current node's wildcard — matches remaining segments
     ///   3. Backtrack to ancestor wildcard — fallback when a deeper branch fails
+    ///
+    /// When a wildcard matches, the remaining segments (joined with `/`) are
+    /// stored under the `"*"` param, so handlers can recover the rest of the
+    /// path (e.g. for static file serving).
     #[inline]
     pub fn match_route<'a>(
         &'a self,
@@ -353,13 +557,15 @@ impl Router {
         params: &mut SmallParams,
     ) -> Option<&'a Router> {
         let mut current = self;
-        let mut backtrack: Option<&'a Router> = None;
+        let mut backtrack: Option<(usize, &'a Router)> = None;
 
-        for seg in segs {
+        for (i, seg) in segs.iter().enumerate() {
             // Before descending into exact children, save this node's wildcard
             // as a backtrack target in case the branch fails deeper.
             if backtrack.is_none() {
-                backtrack = current.wildcard.as_ref().map(|n| n.as_ref());
+                if let Some(n) = current.wildcard.as_ref().map(|n| n.as_ref()) {
+                    backtrack = Some((i, n));
+                }
             }
 
             // 1. Try exact match (static or param)
@@ -370,14 +576,28 @@ impl Router {
 
             // 2. No exact match — if this node has a wildcard, it matches the rest
             if let Some(wildcard) = &current.wildcard {
+                Self::capture_wildcard(segs, i, params);
                 return Some(wildcard.as_ref());
             }
 
             // 3. No wildcard here either — backtrack to ancestor wildcard
-            return backtrack;
+            if let Some((wi, wnode)) = backtrack {
+                Self::capture_wildcard(segs, wi, params);
+                return Some(wnode);
+            }
+
+            return None;
         }
 
         Some(current)
+    }
+
+    /// 剩余段匹配通配符时，捕获 `segs[start..]`（以 `/` 拼接）为 `"*"` 参数。
+    fn capture_wildcard(segs: &[&str], start: usize, params: &mut SmallParams) {
+        let rest = segs[start..].join("/");
+        if !rest.is_empty() {
+            params.insert("*".to_string(), rest);
+        }
     }
 
     /// 从路由树中查找处理器（供 HTTP/2 使用）
@@ -420,7 +640,11 @@ impl Router {
             }
         };
 
-        let pure_path = meta.path.split_once('?').map(|(p, _)| p).unwrap_or(&meta.path);
+        let pure_path = meta
+            .path
+            .split_once('?')
+            .map(|(p, _)| p)
+            .unwrap_or(&meta.path);
 
         let segments: Vec<&str> = pure_path
             .trim_start_matches('/')

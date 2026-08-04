@@ -158,6 +158,58 @@ impl SubMediaType {
         }
     }
 
+    /// 完整的 MIME 字符串（如 `text/html`、`image/png`），用于响应头。
+    /// 文本类型（text/*）默认附加 `charset=utf-8`，避免浏览器误判编码。
+    pub fn full_str(&self) -> &'static str {
+        match self {
+            SubMediaType::Json => "application/json",
+            SubMediaType::UrlEncoded => "application/x-www-form-urlencoded",
+            SubMediaType::OctetStream => "application/octet-stream",
+            SubMediaType::Xml => "application/xml",
+            SubMediaType::Pdf => "application/pdf",
+            SubMediaType::Zip => "application/zip",
+            SubMediaType::Javascript => "application/javascript",
+            SubMediaType::FormData => "multipart/form-data",
+            SubMediaType::Mixed => "multipart/mixed",
+            SubMediaType::Plain => "text/plain; charset=utf-8",
+            SubMediaType::Html => "text/html; charset=utf-8",
+            SubMediaType::Css => "text/css; charset=utf-8",
+            SubMediaType::Csv => "text/csv; charset=utf-8",
+            SubMediaType::Png => "image/png",
+            SubMediaType::Jpeg => "image/jpeg",
+            SubMediaType::Gif => "image/gif",
+            SubMediaType::Webp => "image/webp",
+            SubMediaType::Svg => "image/svg+xml",
+            SubMediaType::Icon => "image/x-icon",
+            SubMediaType::Wasm => "application/wasm",
+            SubMediaType::Unknown => "application/octet-stream",
+        }
+    }
+
+    /// 按文件扩展名自动推测 MIME 类型，未识别时回退为 `application/octet-stream`。
+    /// 默认覆盖 html/css/js/json/txt 等基本网站资源与常见图片/文档格式。
+    pub fn guess(path: &Path) -> SubMediaType {
+        match path.extension().and_then(|s| s.to_str()) {
+            Some("html") | Some("htm") => SubMediaType::Html,
+            Some("css") => SubMediaType::Css,
+            Some("js") | Some("mjs") => SubMediaType::Javascript,
+            Some("json") => SubMediaType::Json,
+            Some("txt") | Some("md") => SubMediaType::Plain,
+            Some("csv") => SubMediaType::Csv,
+            Some("xml") => SubMediaType::Xml,
+            Some("pdf") => SubMediaType::Pdf,
+            Some("zip") => SubMediaType::Zip,
+            Some("wasm") => SubMediaType::Wasm,
+            Some("png") => SubMediaType::Png,
+            Some("jpg") | Some("jpeg") => SubMediaType::Jpeg,
+            Some("gif") => SubMediaType::Gif,
+            Some("webp") => SubMediaType::Webp,
+            Some("svg") => SubMediaType::Svg,
+            Some("ico") => SubMediaType::Icon,
+            _ => SubMediaType::OctetStream,
+        }
+    }
+
     /// 从 Content-Type 的子类型部分解析
     pub fn from_str(s: &str) -> Self {
         // 1. 先按分号分割，取第一部分

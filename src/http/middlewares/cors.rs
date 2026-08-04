@@ -1,7 +1,9 @@
 use crate::{
     connection::context::Context,
     http::{
-        meta::HttpMetadata, protocol::header::HeaderKey, protocol::status::StatusCode,
+        meta::HttpMetadata,
+        protocol::header::HeaderKey,
+        protocol::status::StatusCode,
         types::{Executor, IntoExecutor},
     },
 };

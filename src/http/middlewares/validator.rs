@@ -9,7 +9,11 @@ use zz_validator::{
 
 use crate::{
     connection::context::Context,
-    http::{meta::HttpMetadata, protocol::status::StatusCode, types::{Executor, IntoExecutor}},
+    http::{
+        meta::HttpMetadata,
+        protocol::status::StatusCode,
+        types::{Executor, IntoExecutor},
+    },
 };
 
 /// 1. 独立转换函数：确保在 to_value_optimized 作用域内可见

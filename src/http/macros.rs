@@ -24,8 +24,8 @@ macro_rules! exe {
     (move | $ctx:ident | $body:block) => {{
         #[allow(unused_variables)]
         {
-            use futures::future::FutureExt;
             use std::sync::Arc;
+            use $crate::FutureExt;
             use $crate::connection::context::Context;
 
             #[allow(unused_imports)]
@@ -41,8 +41,8 @@ macro_rules! exe {
     (move | $ctx:ident, $data:ident | $body:block, | $pre_ctx:ident | $pre:block) => {{
         #[allow(unused_variables)]
         {
-            use futures::future::FutureExt;
             use std::sync::Arc;
+            use $crate::FutureExt;
             use $crate::connection::context::Context;
 
             #[allow(unused_imports)]
@@ -69,8 +69,8 @@ macro_rules! exe {
     (| $ctx:ident, $data:ident | $body:block, | $pre_ctx:ident | $pre:block) => {{
         #[allow(unused_variables)]
         {
-            use futures::future::FutureExt;
             use std::sync::Arc;
+            use $crate::FutureExt;
             use $crate::connection::context::Context;
 
             #[allow(unused_imports)]
@@ -98,8 +98,8 @@ macro_rules! exe {
     (| $ctx:ident | $body:block) => {{
         #[allow(unused_variables)]
         {
-            use futures::future::FutureExt;
             use std::sync::Arc;
+            use $crate::FutureExt;
             use $crate::connection::context::Context;
 
             #[allow(unused_imports)]

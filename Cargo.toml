@@ -1,6 +1,6 @@
 [package]
 name = "aex"
-version = "0.1.9"
+version = "0.1.19"
 edition = "2024"
 description = "A web server for rust."
 license = "GPL-3.0-or-later"
@@ -14,6 +14,7 @@ router-cache = []
 http-timeout = []
 
 [dependencies]
+aex-macros = { path = "src/aex-macros", version = "0.1.0" }
 smol = "2.0"
 tokio = { version = "1.40", features = ["full"] }
 anyhow = "1.0"
@@ -100,6 +101,10 @@ name = "http_router"
 harness = false
 
 [[bench]]
+name = "macro_routes"
+harness = false
+
+[[bench]]
 name = "middleware_performance"
 harness = false
 
@@ -110,3 +115,6 @@ harness = false
 [[bench]]
 name = "connection_performance"
 harness = false
+
+[workspace]
+members = [".", "src/aex-macros"]

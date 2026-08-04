@@ -41,8 +41,7 @@ async fn test_to_validator_integration_full() {
         ctx.local.set_value(meta);
         true
     })
-        .middleware(mw_validator)
-        ;
+    .middleware(mw_validator);
 
     let server = HTTPServer::new(actual_addr, None).http(hr).clone();
     tokio::spawn(async move {
@@ -116,8 +115,7 @@ async fn test_v_macro_integration_full() {
         ctx.local.set_value(meta);
         true
     })
-        .middleware(mw_validator)
-        ;
+    .middleware(mw_validator);
 
     let server = HTTPServer::new(actual_addr, None).http(hr).clone();
     tokio::spawn(async move {
@@ -198,8 +196,7 @@ async fn test_validator_to_handler_data_flow() {
         ctx.local.set_value(meta);
         true
     })
-        .middleware(mw_validator)
-        ;
+    .middleware(mw_validator);
 
     let server = HTTPServer::new(actual_addr, None).http(hr).clone();
     tokio::spawn(async move {
@@ -380,7 +377,9 @@ async fn test_validator_boolean_strict_error_integration() {
     hr.insert(
         "/check",
         Some("GET"),
-        aex::http::types::IntoExecutor::into_executor(|_ctx: &mut aex::connection::context::Context| true),
+        aex::http::types::IntoExecutor::into_executor(
+            |_ctx: &mut aex::connection::context::Context| true,
+        ),
         Some(vec![validator_mw]),
     );
 
@@ -434,7 +433,9 @@ async fn test_validator_integer_strict_error_integration() {
     hr.insert(
         "/user",
         Some("GET"),
-        aex::http::types::IntoExecutor::into_executor(|_ctx: &mut aex::connection::context::Context| true),
+        aex::http::types::IntoExecutor::into_executor(
+            |_ctx: &mut aex::connection::context::Context| true,
+        ),
         Some(vec![validator_mw]),
     );
 
@@ -505,7 +506,9 @@ async fn test_validator_float_strict_error_integration() {
     hr.insert(
         "/product",
         Some("GET"),
-        aex::http::types::IntoExecutor::into_executor(|_ctx: &mut aex::connection::context::Context| true),
+        aex::http::types::IntoExecutor::into_executor(
+            |_ctx: &mut aex::connection::context::Context| true,
+        ),
         Some(vec![validator_mw]),
     );
 
@@ -574,22 +577,24 @@ async fn test_validator_float_auto_completion_promotion() {
     hr.insert(
         "/promote",
         Some("GET"),
-        aex::http::types::IntoExecutor::into_executor(|ctx: &mut aex::connection::context::Context| {
-            // 💡 重点：从 Context 拿到转换后的 HttpMetadata
-            let mut meta = ctx.local.get_value::<HttpMetadata>().unwrap();
+        aex::http::types::IntoExecutor::into_executor(
+            |ctx: &mut aex::connection::context::Context| {
+                // 💡 重点：从 Context 拿到转换后的 HttpMetadata
+                let mut meta = ctx.local.get_value::<HttpMetadata>().unwrap();
 
-            println!("meta = {:?}", meta);
+                println!("meta = {:?}", meta);
 
-            // 获取转换后的 params
-            if let Some(params) = &meta.params {
-                if let Some(final_val) = params.query.get("val") {
-                    // 将转换后的字符串（期望是 "100.0"）写回响应 Body
-                    meta.body = final_val.join("").as_bytes().to_vec();
-                    ctx.local.set_value(meta);
+                // 获取转换后的 params
+                if let Some(params) = &meta.params {
+                    if let Some(final_val) = params.query.get("val") {
+                        // 将转换后的字符串（期望是 "100.0"）写回响应 Body
+                        meta.body = final_val.join("").as_bytes().to_vec();
+                        ctx.local.set_value(meta);
+                    }
                 }
-            }
-            true
-        }),
+                true
+            },
+        ),
         Some(vec![to_validator(dsl_map)]),
     );
 
@@ -643,28 +648,30 @@ async fn test_validator_value_to_string_fallback() {
     hr.insert(
         "/fallback",
         Some("GET"),
-        aex::http::types::IntoExecutor::into_executor(|ctx: &mut aex::connection::context::Context| {
-            let mut meta = ctx.local.get_value::<HttpMetadata>().unwrap();
-            let mut found_empty = false;
+        aex::http::types::IntoExecutor::into_executor(
+            |ctx: &mut aex::connection::context::Context| {
+                let mut meta = ctx.local.get_value::<HttpMetadata>().unwrap();
+                let mut found_empty = false;
 
-            if let Some(params) = &meta.params {
-                if let Some(val) = params.query.get("tag") {
-                    // 如果落入了 _ => "".to_string()，这里拿到的就是空
-                    if val.is_empty() {
-                        found_empty = true;
+                if let Some(params) = &meta.params {
+                    if let Some(val) = params.query.get("tag") {
+                        // 如果落入了 _ => "".to_string()，这里拿到的就是空
+                        if val.is_empty() {
+                            found_empty = true;
+                        }
                     }
                 }
-            }
 
-            if found_empty {
-                meta.body = b"fallback_to_empty".to_vec();
-            } else {
-                meta.body = b"has_value".to_vec();
-            }
-            ctx.local.set_value(meta);
+                if found_empty {
+                    meta.body = b"fallback_to_empty".to_vec();
+                } else {
+                    meta.body = b"has_value".to_vec();
+                }
+                ctx.local.set_value(meta);
 
-            true
-        }),
+                true
+            },
+        ),
         Some(vec![to_validator(dsl_map)]),
     );
 
@@ -740,15 +747,17 @@ async fn test_validator_params_none_fallback() {
     hr.insert(
         "/fallback_params",
         Some("GET"),
-        aex::http::types::IntoExecutor::into_executor(|ctx: &mut aex::connection::context::Context| {
-            let mut meta = ctx.local.get_value::<HttpMetadata>().unwrap();
-            // 验证 params 是否已经不再是 None (被 unwrap_or_else 补全并后续写回)
-            if meta.params.is_some() {
-                meta.body = b"params_initialized".to_vec();
-                ctx.local.set_value(meta);
-            }
-            true
-        }),
+        aex::http::types::IntoExecutor::into_executor(
+            |ctx: &mut aex::connection::context::Context| {
+                let mut meta = ctx.local.get_value::<HttpMetadata>().unwrap();
+                // 验证 params 是否已经不再是 None (被 unwrap_or_else 补全并后续写回)
+                if meta.params.is_some() {
+                    meta.body = b"params_initialized".to_vec();
+                    ctx.local.set_value(meta);
+                }
+                true
+            },
+        ),
         Some(vec![to_validator(dsl_map)]),
     );
 

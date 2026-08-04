@@ -2,7 +2,10 @@ use std::sync::Arc;
 
 use crate::{
     connection::context::Context,
-    http::{meta::HttpMetadata, types::{Executor, IntoExecutor}},
+    http::{
+        meta::HttpMetadata,
+        types::{Executor, IntoExecutor},
+    },
 };
 
 #[derive(Clone, Default)]

@@ -184,8 +184,19 @@ impl Context {
             let bytes: Vec<u8> = content.into().into_bytes();
             let mime_str = mime.unwrap_or(SubMediaType::Plain);
             meta.headers
-                .insert(HeaderKey::ContentType, mime_str.as_str().to_string());
+                .insert(HeaderKey::ContentType, mime_str.full_str().to_string());
             meta.body = bytes;
+        }
+    }
+
+    /// Send a raw byte body (e.g. static files / binary data) with a guessed
+    /// or explicit MIME type.
+    pub fn send_bytes(&mut self, content: Vec<u8>, mime: Option<SubMediaType>) {
+        if let Some(meta) = self.local.get_mut::<HttpMetadata>() {
+            let mime_str = mime.unwrap_or(SubMediaType::OctetStream);
+            meta.headers
+                .insert(HeaderKey::ContentType, mime_str.full_str().to_string());
+            meta.body = content;
         }
     }
 

@@ -63,4 +63,8 @@ pub mod time;
 pub mod udp;
 pub mod unified;
 
+pub use aex_macros::routes;
 pub use server::{HTTPServer, HttpVersions, Server};
+
+#[doc(hidden)]
+pub use futures::future::FutureExt;
