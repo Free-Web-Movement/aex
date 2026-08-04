@@ -60,7 +60,7 @@ async fn main() -> anyhow::Result<()> {
     });
 
     router
-        .get("/api/users", |ctx| {
+        .get("/api/users", |ctx: &mut Context| {
             let users: Vec<_> = USERS.lock().unwrap().values().cloned().collect();
             ctx.send(serde_json::to_string(&users).unwrap(), None);
             true
@@ -68,7 +68,7 @@ async fn main() -> anyhow::Result<()> {
         .middleware(logger.clone());
 
     router
-        .get("/api/users/:id", |ctx| {
+        .get("/api/users/:id", |ctx: &mut Context| {
             let meta = ctx.local.get_value::<HttpMetadata>().unwrap();
             let id = meta
                 .params
@@ -89,7 +89,7 @@ async fn main() -> anyhow::Result<()> {
         .middleware(logger.clone());
 
     router
-        .post("/api/users", move |ctx| {
+        .post("/api/users", move |ctx: &mut Context| {
             let meta = ctx.local.get_value::<HttpMetadata>().unwrap();
             let body_str = String::from_utf8_lossy(&meta.body);
             let user: serde_json::Value = match serde_json::from_str(&body_str) {
@@ -120,7 +120,7 @@ async fn main() -> anyhow::Result<()> {
         .middleware(logger.clone());
 
     router
-        .put("/api/users/:id", |ctx| {
+        .put("/api/users/:id", |ctx: &mut Context| {
             let meta = ctx.local.get_value::<HttpMetadata>().unwrap();
             let id = meta
                 .params
@@ -155,7 +155,7 @@ async fn main() -> anyhow::Result<()> {
         .middleware(logger.clone());
 
     router
-        .delete("/api/users/:id", |ctx| {
+        .delete("/api/users/:id", |ctx: &mut Context| {
             let meta = ctx.local.get_value::<HttpMetadata>().unwrap();
             let id = meta
                 .params
@@ -175,7 +175,7 @@ async fn main() -> anyhow::Result<()> {
         .middleware(auth.clone())
         .middleware(logger.clone());
 
-    router.get("/health", |ctx| {
+    router.get("/health", |ctx: &mut Context| {
         ctx.send(r#"{"status":"healthy"}"#, None);
         true
     });

@@ -1,5 +1,6 @@
 use aex::communicators::event::Event;
 use aex::http::router::Router as HttpRouter;
+use aex::connection::context::Context;
 use aex::server::Server;
 use futures::FutureExt;
 use std::net::SocketAddr;
@@ -12,7 +13,7 @@ async fn test_server_http() {
     let server = Server::new(addr, None);
 
     let mut http_router = HttpRouter::default();
-    http_router.get("/", |_ctx| {
+    http_router.get("/", |_ctx: &mut Context| {
         println!("HTTP handler executed");
         true
     });

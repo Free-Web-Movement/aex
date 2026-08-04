@@ -1,3 +1,4 @@
+use aex::connection::context::Context;
 use aex::http::router::{NodeType, Router as HttpRouter};
 use aex::server::Server;
 use std::net::SocketAddr;
@@ -7,12 +8,12 @@ async fn main() -> anyhow::Result<()> {
     let addr: SocketAddr = "0.0.0.0:8080".parse()?;
     let mut router = HttpRouter::default();
 
-    router.get("/", |ctx| {
+    router.get("/", |ctx: &mut Context| {
         ctx.send("Hello from HTTP/2 server!", None);
         true
     });
 
-    router.get("/api/users", |ctx| {
+    router.get("/api/users", |ctx: &mut Context| {
         ctx.send(r#"{"users": ["alice", "bob"]}"#, None);
         true
     });

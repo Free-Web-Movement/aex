@@ -32,17 +32,17 @@ mod tests {
 
     #[test]
     fn test_exe_macro_builds_executor() {
-        let simple: Arc<Executor> = aex::exe!(|ctx| {
+        let simple: Arc<Executor> = aex::_async!(|ctx| {
             let _ = ctx;
             true
         });
 
-        let moved: Arc<Executor> = aex::exe!(move |ctx| {
+        let moved: Arc<Executor> = aex::_async!(move |ctx| {
             let _ = ctx;
             true
         });
 
-        let with_pre: Arc<Executor> = aex::exe!(
+        let with_pre: Arc<Executor> = aex::_async!(
             |ctx, data| {
                 let _ = ctx;
                 let _ = data;
@@ -51,7 +51,7 @@ mod tests {
             |_ctx| { 42usize }
         );
 
-        let moved_pre: Arc<Executor> = aex::exe!(
+        let moved_pre: Arc<Executor> = aex::_async!(
             move |ctx, data| {
                 let _ = ctx;
                 let _ = data;
@@ -68,24 +68,80 @@ mod tests {
         // 三种等价的路由写法都必须可编译：
         // 1. 直接返回字符串
         let mut router = Router::default();
-        router.get("/a", |_| "Hello world!");
+        router.get("/a", |_: &mut Context| "Hello world!");
         // 2. 单参数便捷方法，闭包无需返回 true
-        router.get("/b", |ctx| {
+        router.get("/b", |ctx: &mut Context| {
             ctx.text("Hello world!");
         });
         // 3. 原始写法：2 参数 send + 显式 true
-        router.get("/c", |ctx| {
+        router.get("/c", |ctx: &mut Context| {
             ctx.send("Hello world!", None);
             true
         });
         // 4. 其他常用 mime 便捷方法
-        router.get("/d", |ctx| {
+        router.get("/d", |ctx: &mut Context| {
             ctx.json(r#"{"ok":true}"#);
         });
-        router.get("/e", |ctx| {
+        router.get("/e", |ctx: &mut Context| {
             ctx.html("<h1>Hi</h1>");
         });
         assert!(router.has_route("GET", "/a"));
+    }
+
+    #[tokio::test]
+    async fn test_sync_macro_forms() {
+        // `_sync!` 恢复 `|_| "OK"` 的免标注写法，与 `_async!` 混用
+        use aex::{_async, _sync};
+        let mut router = Router::default();
+        router.get("/a", _sync!(|_| "Hello world!"));
+        router.get("/b", _sync!(|ctx| {
+            ctx.text("Hello world!");
+        }));
+        router.get("/c", _sync!(|ctx| {
+            ctx.send("Hello world!", None);
+            true
+        }));
+        router.get("/d", _async!(|ctx| {
+            ctx.text("async Hello");
+            true
+        }));
+        // 中间件链也支持 _sync! + _async! 混排
+        router.get("/e", _sync!(|_| true)).middleware(_sync!(|_| true));
+        assert!(router.has_route("GET", "/a"));
+        assert!(router.has_route("GET", "/b"));
+        assert!(router.has_route("GET", "/c"));
+        assert!(router.has_route("GET", "/d"));
+        assert!(router.has_route("GET", "/e"));
+    }
+
+    #[tokio::test]
+    async fn test_alias_macro_forms() {
+        // `exe!` / `now!` / `then!` 分别是 `_async!` / `_sync!` / `_async!` 的别名
+        use aex::{_async, _sync, exe, now, then};
+        let mut router = Router::default();
+        router.get("/a", exe!(|ctx| {
+            ctx.text("exe alias");
+            true
+        }));
+        router.get("/b", now!(|_| "now alias"));
+        router.get("/c", then!(|ctx| {
+            ctx.text("then alias");
+            true
+        }));
+        // 别名产物与 _sync!/_async! 一致，可与主宏混排
+        router.get("/d", _sync!(|_| true)).middleware(_async!(|ctx| {
+            let _ = ctx;
+            true
+        }));
+        // `|_|` 通配参数：body 内不引用 ctx 即可
+        router.get("/e", _async!(|_| { true }));
+        router.get("/f", _async!(move |_| { false }));
+        assert!(router.has_route("GET", "/a"));
+        assert!(router.has_route("GET", "/b"));
+        assert!(router.has_route("GET", "/c"));
+        assert!(router.has_route("GET", "/d"));
+        assert!(router.has_route("GET", "/e"));
+        assert!(router.has_route("GET", "/f"));
     }
 
     #[tokio::test]
@@ -113,9 +169,9 @@ mod tests {
 
         let mut router = Router::default();
         // 数组形式 + 直接返回字符串
-        router.get_with("/admin", [mw_a.clone(), mw_b.clone()], |_| "Admin OK");
+        router.get_with("/admin", [mw_a.clone(), mw_b.clone()], |_: &mut Context| "Admin OK");
         // Vec 形式 + ctx 便捷方法
-        router.get_with("/api", vec![mw_a.clone()], |ctx| {
+        router.get_with("/api", vec![mw_a.clone()], |ctx: &mut Context| {
             ctx.text("API OK");
         });
 

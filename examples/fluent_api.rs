@@ -29,20 +29,20 @@ async fn main() -> anyhow::Result<()> {
         true
     });
 
-    router.get("/", |ctx| {
+    router.get("/", |ctx: &mut Context| {
         ctx.send("Welcome to AEX!", None);
         true
     });
 
     router
-        .get("/api/users", |ctx| {
+        .get("/api/users", |ctx: &mut Context| {
             ctx.send(r#"["user1", "user2", "user3"]"#, None);
             true
         })
         .middleware(logger.clone());
 
     router
-        .get("/api/users/:id", |ctx| {
+        .get("/api/users/:id", |ctx: &mut Context| {
             let meta = ctx.local.get_value::<HttpMetadata>().unwrap();
             let id = meta
                 .params
@@ -57,7 +57,7 @@ async fn main() -> anyhow::Result<()> {
         .middleware(auth.clone())
         .middleware(logger.clone());
 
-    router.get("/health", |ctx| {
+    router.get("/health", |ctx: &mut Context| {
         ctx.send(r#"{"status":"healthy"}"#, None);
         true
     });

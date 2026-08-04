@@ -7,7 +7,7 @@
 //! ```rust,ignore
 //! use aex::unified::{UnifiedServer, Protocol};
 //! use aex::http::router::Router as HttpRouter;
-//! use aex::exe;
+//! use aex::_async;
 //!
 //! let server = UnifiedServer::new(addr, globals)
 //!     .http_handler(my_http_handler)

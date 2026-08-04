@@ -1,3 +1,4 @@
+use aex::connection::context::Context;
 use aex::connection::global::GlobalContext;
 use aex::http::middlewares::websocket::WebSocket;
 use aex::http::router::Router as HttpRouter;
@@ -56,12 +57,12 @@ async fn main() -> anyhow::Result<()> {
 
     let mut router = HttpRouter::new(aex::http::router::NodeType::default());
 
-    router.get("/", |ctx| {
+    router.get("/", |ctx: &mut Context| {
         ctx.send("AEX Unified Server + TCP Frame!", None);
         true
     });
 
-    router.get("/info", |ctx| {
+    router.get("/info", |ctx: &mut Context| {
         let info = serde_json::json!({
             "protocols": ["http1", "http2", "ws", "tcp_frame", "udp"],
             "frame_format": "MyFrame (id:u32, data:Vec<u8>)"
@@ -71,7 +72,7 @@ async fn main() -> anyhow::Result<()> {
         true
     });
 
-    router.get("/test", |ctx| {
+    router.get("/test", |ctx: &mut Context| {
         ctx.send(
             r#"<!DOCTYPE html>
 <html><body>
@@ -108,7 +109,7 @@ s.close()
 
     let ws_middleware: Arc<Executor> = Arc::from(WebSocket::to_middleware(ws_handler));
 
-    router.get("/ws", |_ctx| true).middleware(ws_middleware);
+    router.get("/ws", |_ctx: &mut Context| true).middleware(ws_middleware);
 
     unified = unified
         .http_router(router)

@@ -46,14 +46,14 @@ async fn main() -> anyhow::Result<()> {
     let logger = logging_middleware();
 
     router
-        .get("/api/users", |ctx| {
+        .get("/api/users", |ctx: &mut Context| {
             ctx.send(r#"["user1", "user2", "user3"]"#, None);
             true
         })
         .middleware(logger.clone());
 
     router
-        .get("/api/users/:id", |ctx| {
+        .get("/api/users/:id", |ctx: &mut Context| {
             let meta = ctx.local.get_value::<HttpMetadata>().unwrap();
             let id = meta
                 .params
@@ -69,7 +69,7 @@ async fn main() -> anyhow::Result<()> {
         .middleware(logger.clone());
 
     router
-        .post("/api/users", |ctx| {
+        .post("/api/users", |ctx: &mut Context| {
             let meta = ctx.local.get_value::<HttpMetadata>().unwrap();
             let body = String::from_utf8_lossy(&meta.body);
             println!("Create user: {}", body);
@@ -79,7 +79,7 @@ async fn main() -> anyhow::Result<()> {
         .middleware(auth.clone())
         .middleware(logger.clone());
 
-    router.get("/public/*", |ctx| {
+    router.get("/public/*", |ctx: &mut Context| {
         let meta = ctx.local.get_value::<HttpMetadata>().unwrap();
         ctx.send(format!(r#"{{"path":"{}"}}"#, meta.path), None);
         true

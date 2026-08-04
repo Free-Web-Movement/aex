@@ -1,3 +1,4 @@
+use aex::connection::context::Context;
 use aex::http::middlewares::websocket::WebSocket;
 use aex::http::router::{NodeType, Router as HttpRouter};
 use aex::http::types::Executor;
@@ -29,12 +30,12 @@ async fn main() -> anyhow::Result<()> {
 
     let ws_middleware: Arc<Executor> = Arc::from(WebSocket::to_middleware(ws_handler));
 
-    router.get("/", |ctx| {
+    router.get("/", |ctx: &mut Context| {
         ctx.send("WebSocket server. Connect to /ws", None);
         true
     });
 
-    router.get("/ws", |_ctx| true).middleware(ws_middleware);
+    router.get("/ws", |_ctx: &mut Context| true).middleware(ws_middleware);
 
     println!("Server running at http://{}", addr);
     println!("WebSocket endpoint: ws://{}/ws", addr);

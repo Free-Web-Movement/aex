@@ -27,6 +27,14 @@ struct User {
     created: Arc<Mutex<Vec<String>>>,
 }
 
+// 全局函数中间件（仅同步；async 需 _async! 包装）
+fn global_auth(ctx: &mut Context) -> bool {
+    let key = HeaderKey::from_str("x-api-key").unwrap();
+    ctx.get::<HttpMetadata>()
+        .map(|m| m.headers.get(&key).is_some_and(|v| v == "secret"))
+        .unwrap_or(false)
+}
+
 #[aex::routes]
 impl User {
     // 多路径 + 中间件，&self 方法使用实例状态
@@ -55,16 +63,34 @@ impl User {
         true
     }
 
-    // 对象中间件（同步）：裸标识符 -> &self 方法，读取实例的 api_key
+    // 裸标识符 [auth] → 级联：先找 &self 方法 auth（找到，走实例方法）
     #[get("/secret", [auth])]
     fn secret(&self, ctx: &mut Context) {
         ctx.text("secret-ok");
     }
 
-    // 对象中间件（异步）：同样能读 self
-    #[get("/secure", [auth, audit])]
+    // self.auth → 显式实例方法
+    #[get("/secret2", [self.auth])]
+    fn secret2(&self, ctx: &mut Context) {
+        ctx.text("secret2-ok");
+    }
+
+    // [self.auth, audit] → 混排：self.auth（显式实例）+ audit（裸标识符→找self方法）
+    #[get("/secure", [self.auth, audit])]
     fn secure(&self, ctx: &mut Context) {
         ctx.text("secure-ok");
+    }
+
+    // 裸标识符 [global_auth] → 级联：不在 impl → 全局函数（sync）
+    #[get("/public", [global_auth])]
+    fn public(&self, ctx: &mut Context) {
+        ctx.text("public-ok");
+    }
+
+    // 裸标识符 [check] → 级联：找关联函数（None receiver）check
+    #[get("/checked", [check])]
+    fn checked(&self, ctx: &mut Context) {
+        ctx.text("checked-ok");
     }
 
     fn auth(&self, ctx: &mut Context) -> bool {
@@ -78,6 +104,14 @@ impl User {
         let key = HeaderKey::from_str("x-api-key").unwrap();
         ctx.get::<HttpMetadata>()
             .map(|m| m.headers.get(&key).is_some_and(|v| v == &self.api_key))
+            .unwrap_or(false)
+    }
+
+    // 关联函数（无 self）：裸标识符 `check` 级联到 step 2
+    fn check(ctx: &mut Context) -> bool {
+        let key = HeaderKey::from_str("x-check").unwrap();
+        ctx.get::<HttpMetadata>()
+            .map(|m| m.headers.contains_key(&key))
             .unwrap_or(false)
     }
 
@@ -113,9 +147,16 @@ fn test_routes_attribute_registers_all_paths() {
     // async 路由
     assert!(router.has_route("POST", "/resources"));
     assert!(router.has_route("GET", "/health"));
-    // 对象中间件路由
+    // 对象中间件路由（bare ident）
     assert!(router.has_route("GET", "/secret"));
+    // 显式 self.method 路由
+    assert!(router.has_route("GET", "/secret2"));
+    // 混排路由
     assert!(router.has_route("GET", "/secure"));
+    // 全局函数中间件路由
+    assert!(router.has_route("GET", "/public"));
+    // 关联函数中间件路由
+    assert!(router.has_route("GET", "/checked"));
     // 另一个实例
     assert!(router.has_route("GET", "/admin"));
 }
@@ -221,7 +262,7 @@ async fn test_routes_attribute_mount_http() {
     let response = res.expect("Server failed to respond");
     assert_eq!(response.text().await.unwrap(), "healthy");
 
-    // 对象中间件：无正确 header -> 拦截（400）
+    // 裸标识符 [auth]：无正确 header → 拦截（400）
     let mut res = None;
     for _ in 0..10 {
         sleep(Duration::from_millis(100)).await;
@@ -237,7 +278,7 @@ async fn test_routes_attribute_mount_http() {
     let response = res.expect("Server failed to respond");
     assert_eq!(response.status().as_u16(), 400);
 
-    // 对象中间件：带正确 header -> 放行，handler 执行
+    // 裸标识符 [auth]：带正确 header → 放行，handler 执行
     let mut res = None;
     for _ in 0..10 {
         sleep(Duration::from_millis(100)).await;
@@ -255,7 +296,57 @@ async fn test_routes_attribute_mount_http() {
     assert_eq!(response.status().as_u16(), 200);
     assert_eq!(response.text().await.unwrap(), "secret-ok");
 
-    // async 对象中间件链 [auth, audit]
+    // self.auth（显式实例方法）：无 header → 400
+    let mut res = None;
+    for _ in 0..10 {
+        sleep(Duration::from_millis(100)).await;
+        if let Ok(r) = client
+            .get(format!("http://{}/secret2", actual_addr))
+            .send()
+            .await
+        {
+            res = Some(r);
+            break;
+        }
+    }
+    let response = res.expect("Server failed to respond");
+    assert_eq!(response.status().as_u16(), 400);
+
+    // self.auth（显式实例方法）：带正确 header → 200
+    let mut res = None;
+    for _ in 0..10 {
+        sleep(Duration::from_millis(100)).await;
+        if let Ok(r) = client
+            .get(format!("http://{}/secret2", actual_addr))
+            .header("x-api-key", "secret")
+            .send()
+            .await
+        {
+            res = Some(r);
+            break;
+        }
+    }
+    let response = res.expect("Server failed to respond");
+    assert_eq!(response.status().as_u16(), 200);
+    assert_eq!(response.text().await.unwrap(), "secret2-ok");
+
+    // 混排 [self.auth, audit]：无 header → 400
+    let mut res = None;
+    for _ in 0..10 {
+        sleep(Duration::from_millis(100)).await;
+        if let Ok(r) = client
+            .get(format!("http://{}/secure", actual_addr))
+            .send()
+            .await
+        {
+            res = Some(r);
+            break;
+        }
+    }
+    let response = res.expect("Server failed to respond");
+    assert_eq!(response.status().as_u16(), 400);
+
+    // 混排 [self.auth, audit]：带 header → 200
     let mut res = None;
     for _ in 0..10 {
         sleep(Duration::from_millis(100)).await;
@@ -272,4 +363,72 @@ async fn test_routes_attribute_mount_http() {
     let response = res.expect("Server failed to respond");
     assert_eq!(response.status().as_u16(), 200);
     assert_eq!(response.text().await.unwrap(), "secure-ok");
+
+    // 全局函数 [global_auth]：无 header → 400
+    let mut res = None;
+    for _ in 0..10 {
+        sleep(Duration::from_millis(100)).await;
+        if let Ok(r) = client
+            .get(format!("http://{}/public", actual_addr))
+            .send()
+            .await
+        {
+            res = Some(r);
+            break;
+        }
+    }
+    let response = res.expect("Server failed to respond");
+    assert_eq!(response.status().as_u16(), 400);
+
+    // 全局函数 [global_auth]：带 header → 200
+    let mut res = None;
+    for _ in 0..10 {
+        sleep(Duration::from_millis(100)).await;
+        if let Ok(r) = client
+            .get(format!("http://{}/public", actual_addr))
+            .header("x-api-key", "secret")
+            .send()
+            .await
+        {
+            res = Some(r);
+            break;
+        }
+    }
+    let response = res.expect("Server failed to respond");
+    assert_eq!(response.status().as_u16(), 200);
+    assert_eq!(response.text().await.unwrap(), "public-ok");
+
+    // 关联函数 [check]：无 header → 400
+    let mut res = None;
+    for _ in 0..10 {
+        sleep(Duration::from_millis(100)).await;
+        if let Ok(r) = client
+            .get(format!("http://{}/checked", actual_addr))
+            .send()
+            .await
+        {
+            res = Some(r);
+            break;
+        }
+    }
+    let response = res.expect("Server failed to respond");
+    assert_eq!(response.status().as_u16(), 400);
+
+    // 关联函数 [check]：带 header → 200
+    let mut res = None;
+    for _ in 0..10 {
+        sleep(Duration::from_millis(100)).await;
+        if let Ok(r) = client
+            .get(format!("http://{}/checked", actual_addr))
+            .header("x-check", "yes")
+            .send()
+            .await
+        {
+            res = Some(r);
+            break;
+        }
+    }
+    let response = res.expect("Server failed to respond");
+    assert_eq!(response.status().as_u16(), 200);
+    assert_eq!(response.text().await.unwrap(), "checked-ok");
 }

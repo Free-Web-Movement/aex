@@ -23,7 +23,7 @@ fn main() {
     };
 
     // 异步中间件
-    let rate_limiter = aex::exe!(|ctx| {
+    let rate_limiter = aex::_async!(|ctx| {
         let _ = ctx;
         true
     });
@@ -48,9 +48,9 @@ fn main() {
     router.get_with(
         "/y",
         [IntoExecutor::into_executor(auth), RateLimit::build()],
-        |_| "ok",
+        |_: &mut Context| "ok",
     );
-    router.get("/z", |_| "z");
+    router.get("/z", |_: &mut Context| "z");
 
     // 对象中间件：裸标识符 -> &self 方法，能读实例状态
     struct Api {

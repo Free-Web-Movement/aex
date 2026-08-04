@@ -25,6 +25,29 @@ where
     Arc::new(f)
 }
 
+/// Build an `Arc<Executor>` from a plain (non-async) closure.
+///
+/// This keeps the ergonomic `|_| "OK"` form working: a generic function call
+/// lets the compiler infer the closure's parameter type from the `Fn` bound,
+/// which the `IntoExecutor` blanket impl (used by `router.get(...)`) cannot.
+///
+/// Use the `_sync!` macro (or call `sync` directly):
+///
+/// ```rust
+/// use aex::http::router::Router as HttpRouter;
+/// use aex::_sync;
+///
+/// let mut router = HttpRouter::default();
+/// router.get("/", _sync!(|_| "OK")); // 等价于 |_ctx: &mut Context| "OK"
+/// ```
+pub fn sync<F, R>(f: F) -> Arc<Executor>
+where
+    F: for<'a> Fn(&'a mut Context) -> R + Send + Sync + 'static,
+    R: HandlerOutput + Send + 'static,
+{
+    Arc::new(move |ctx: &mut Context| Box::pin(f(ctx).into_boxed(ctx)))
+}
+
 /// The value a route handler produces.
 ///
 /// Implemented for:

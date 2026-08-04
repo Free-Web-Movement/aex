@@ -1,5 +1,6 @@
 use ahash::AHashMap;
 
+use aex::connection::context::Context;
 use aex::{
     connection::context::TypeMapExt,
     http::{
@@ -32,7 +33,7 @@ async fn test_to_validator_integration_full() {
     let mw_validator = to_validator(dsl_map);
 
     // 路由中的 :id 必须对应 DSL 里的 id
-    hr.post("/check/:id", |ctx| {
+    hr.post("/check/:id", |ctx: &mut Context| {
         let mut meta = ctx.local.get_value::<HttpMetadata>().unwrap();
         println!("params: {:?}", meta.params.clone().unwrap().data);
         println!("body: {:?}", meta.params.clone().unwrap().form);
@@ -109,7 +110,7 @@ async fn test_v_macro_integration_full() {
         body   => "(tags:array<string>)"
     );
 
-    hr.post("/check/:id", |ctx| {
+    hr.post("/check/:id", |ctx: &mut Context| {
         let mut meta = ctx.local.get_value::<HttpMetadata>().unwrap();
         meta.body = b"Macro Success".to_vec();
         ctx.local.set_value(meta);
@@ -172,7 +173,7 @@ async fn test_validator_to_handler_data_flow() {
 
     // 2. 编写最终 Handler 进行数据断言
     // 路由绑定：:id 对应 params 规则
-    hr.post("/user/:id", |ctx| {
+    hr.post("/user/:id", |ctx: &mut Context| {
         // 从 local 提取 HttpMetadata
         let mut meta = ctx.local.get_value::<HttpMetadata>().unwrap();
 
@@ -244,7 +245,7 @@ async fn test_validator_conversion_logic_hardcore() {
         query => "(i:int, b_true:bool, b_false:bool, f:float)"
     );
 
-    hr.get("/test", |ctx| {
+    hr.get("/test", |ctx: &mut Context| {
         let mut meta = ctx.local.get_value::<HttpMetadata>().unwrap();
         meta.body = b"Conversion Verified".to_vec();
         ctx.local.set_value(meta);
@@ -306,7 +307,7 @@ async fn test_validator_edge_cases_and_fallback() {
         query => "(b_off:bool, mixed:string)"
     );
 
-    hr.get("/edge", |ctx| {
+    hr.get("/edge", |ctx: &mut Context| {
         let mut meta = ctx.local.get_value::<HttpMetadata>().unwrap();
         meta.body = b"Edge Cases Verified".to_vec();
         ctx.local.set_value(meta);

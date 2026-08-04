@@ -1,3 +1,4 @@
+use aex::connection::context::Context;
 use aex::connection::global::GlobalContext;
 use aex::http::router::Router as HttpRouter;
 use aex::http::websocket::{WSCodec, WSFrame};
@@ -14,7 +15,7 @@ use tokio_util::codec::{Decoder, Encoder};
 fn make_http_router() -> HttpRouter {
     let mut router = HttpRouter::new(aex::http::router::NodeType::default());
 
-    router.get("/", |_ctx| true);
+    router.get("/", |_ctx: &mut Context| true);
     router
 }
 

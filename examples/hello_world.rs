@@ -1,3 +1,4 @@
+use aex::connection::context::Context;
 use aex::http::router::{NodeType, Router as HttpRouter};
 use aex::server::HTTPServer;
 use aex::tcp::types::{Command, RawCodec};
@@ -8,7 +9,7 @@ async fn main() -> anyhow::Result<()> {
     let addr: SocketAddr = "0.0.0.0:8080".parse()?;
     let mut router = HttpRouter::default();
 
-    router.get("/", |_| "Hello world!");
+    router.get("/", |_: &mut Context| "Hello world!");
 
     HTTPServer::new(addr, None).http(router).start().await?;
     Ok(())

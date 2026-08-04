@@ -1,3 +1,4 @@
+use aex::connection::context::Context;
 use aex::connection::global::GlobalContext;
 use aex::http::router::Router as HttpRouter;
 use aex::unified::UnifiedServer;
@@ -11,7 +12,7 @@ use tokio::time::{Duration, sleep};
 fn make_http_router() -> HttpRouter {
     let mut router = HttpRouter::new(aex::http::router::NodeType::default());
 
-    router.get("/", |_ctx| {
+    router.get("/", |_ctx: &mut Context| {
         println!("[Test] HTTP handler executed");
         true
     });

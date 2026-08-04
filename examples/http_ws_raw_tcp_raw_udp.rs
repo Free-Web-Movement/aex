@@ -7,6 +7,7 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
+use aex::connection::context::Context;
 use aex::http::middlewares::websocket::WebSocket;
 use aex::http::router::{NodeType, Router as HttpRouter};
 use aex::http::types::Executor;
@@ -17,12 +18,12 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 fn setup_http() -> HttpRouter {
     let mut router = HttpRouter::default();
 
-    router.get("/", |ctx| {
+    router.get("/", |ctx: &mut Context| {
         ctx.send("{\"combo\":\"http_ws_raw_tcp_raw_udp\",\"protocols\":[\"http1\",\"http2\",\"ws\",\"raw_tcp\",\"raw_udp\"]}", None);
         true
     });
 
-    router.get("/health", |ctx| {
+    router.get("/health", |ctx: &mut Context| {
         ctx.send("{\"status\":\"ok\"}", None);
         true
     });
@@ -51,7 +52,7 @@ async fn main() -> Result<()> {
     let addr: SocketAddr = "0.0.0.0:8080".parse()?;
 
     let mut http = setup_http();
-    http.get("/ws", |_ctx| true).middleware(setup_ws());
+    http.get("/ws", |_ctx: &mut Context| true).middleware(setup_ws());
 
     let srv = Server::new(addr, None).http(http).http2();
     tokio::spawn(async move {

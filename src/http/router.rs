@@ -24,7 +24,7 @@ use crate::http::protocol::header::HeaderKey;
 use crate::http::protocol::method::HttpMethod;
 use crate::http::protocol::status::StatusCode;
 use crate::http::protocol::version::HttpVersion;
-use crate::http::types::{Executor, HandlerOutput, IntoExecutor};
+use crate::http::types::{Executor, IntoExecutor};
 
 #[derive(Debug, Clone)]
 pub enum NodeType {
@@ -215,222 +215,150 @@ impl Router {
         None
     }
 
-    fn register_handler<F, R>(
+    fn register_handler(
         &mut self,
         method: &'static str,
         path: &str,
-        handler: F,
+        handler: impl IntoExecutor,
         middlewares: Vec<Arc<Executor>>,
-    ) -> RouteBuilder<'_>
-    where
-        F: for<'a> Fn(&'a mut Context) -> R + Send + Sync + 'static,
-        R: HandlerOutput + Send + 'static,
-    {
-        let executor: Arc<Executor> =
-            Arc::new(move |ctx: &mut Context| Box::pin(handler(ctx).into_boxed(ctx)));
+    ) -> RouteBuilder<'_> {
+        let executor = handler.into_executor();
         RouteBuilder::new(self, method, path.to_string(), executor, middlewares)
     }
 
-    fn register_with<F, R>(
+    fn register_with(
         &mut self,
         method: &'static str,
         path: &str,
         middlewares: impl Into<Vec<Arc<Executor>>>,
-        handler: F,
-    ) -> RouteBuilder<'_>
-    where
-        F: for<'a> Fn(&'a mut Context) -> R + Send + Sync + 'static,
-        R: HandlerOutput + Send + 'static,
-    {
+        handler: impl IntoExecutor,
+    ) -> RouteBuilder<'_> {
         self.register_handler(method, path, handler, middlewares.into())
     }
 
     /// Fluent route registration: GET method.
     /// Registers automatically when the builder goes out of scope, so
-    /// `router.get("/", |_| "Hello")`, `router.get("/", |ctx| { ... })` and the
-    /// chained `router.get("/", handler).middleware(mw)` forms all work.
-    pub fn get<F, R>(&mut self, path: &str, handler: F) -> RouteBuilder<'_>
-    where
-        F: for<'a> Fn(&'a mut Context) -> R + Send + Sync + 'static,
-        R: HandlerOutput + Send + 'static,
-    {
+    /// `router.get("/", _sync!(|_| "Hello"))`, `router.get("/", |ctx| { ... })`,
+    /// `router.get("/", _async!(async_handler))` and the chained
+    /// `router.get("/", handler).middleware(mw)` forms all work.
+    pub fn get(&mut self, path: &str, handler: impl IntoExecutor) -> RouteBuilder<'_> {
         self.register_handler("GET", path, handler, Vec::new())
     }
 
     /// Fluent route registration: GET method with middlewares.
     /// Middlewares run before the handler; they sit between path and handler:
     /// `router.get_with("/admin", [auth, logger], |_| "Admin")`.
-    pub fn get_with<F, R>(
+    pub fn get_with(
         &mut self,
         path: &str,
         middlewares: impl Into<Vec<Arc<Executor>>>,
-        handler: F,
-    ) -> RouteBuilder<'_>
-    where
-        F: for<'a> Fn(&'a mut Context) -> R + Send + Sync + 'static,
-        R: HandlerOutput + Send + 'static,
-    {
+        handler: impl IntoExecutor,
+    ) -> RouteBuilder<'_> {
         self.register_with("GET", path, middlewares, handler)
     }
 
     /// Fluent route registration: POST method.
-    pub fn post<F, R>(&mut self, path: &str, handler: F) -> RouteBuilder<'_>
-    where
-        F: for<'a> Fn(&'a mut Context) -> R + Send + Sync + 'static,
-        R: HandlerOutput + Send + 'static,
-    {
+    pub fn post(&mut self, path: &str, handler: impl IntoExecutor) -> RouteBuilder<'_> {
         self.register_handler("POST", path, handler, Vec::new())
     }
 
     /// Fluent route registration: POST method with middlewares.
-    pub fn post_with<F, R>(
+    pub fn post_with(
         &mut self,
         path: &str,
         middlewares: impl Into<Vec<Arc<Executor>>>,
-        handler: F,
-    ) -> RouteBuilder<'_>
-    where
-        F: for<'a> Fn(&'a mut Context) -> R + Send + Sync + 'static,
-        R: HandlerOutput + Send + 'static,
-    {
+        handler: impl IntoExecutor,
+    ) -> RouteBuilder<'_> {
         self.register_with("POST", path, middlewares, handler)
     }
 
     /// Fluent route registration: PUT method.
-    pub fn put<F, R>(&mut self, path: &str, handler: F) -> RouteBuilder<'_>
-    where
-        F: for<'a> Fn(&'a mut Context) -> R + Send + Sync + 'static,
-        R: HandlerOutput + Send + 'static,
-    {
+    pub fn put(&mut self, path: &str, handler: impl IntoExecutor) -> RouteBuilder<'_> {
         self.register_handler("PUT", path, handler, Vec::new())
     }
 
     /// Fluent route registration: PUT method with middlewares.
-    pub fn put_with<F, R>(
+    pub fn put_with(
         &mut self,
         path: &str,
         middlewares: impl Into<Vec<Arc<Executor>>>,
-        handler: F,
-    ) -> RouteBuilder<'_>
-    where
-        F: for<'a> Fn(&'a mut Context) -> R + Send + Sync + 'static,
-        R: HandlerOutput + Send + 'static,
-    {
+        handler: impl IntoExecutor,
+    ) -> RouteBuilder<'_> {
         self.register_with("PUT", path, middlewares, handler)
     }
 
     /// Fluent route registration: DELETE method.
-    pub fn delete<F, R>(&mut self, path: &str, handler: F) -> RouteBuilder<'_>
-    where
-        F: for<'a> Fn(&'a mut Context) -> R + Send + Sync + 'static,
-        R: HandlerOutput + Send + 'static,
-    {
+    pub fn delete(&mut self, path: &str, handler: impl IntoExecutor) -> RouteBuilder<'_> {
         self.register_handler("DELETE", path, handler, Vec::new())
     }
 
     /// Fluent route registration: DELETE method with middlewares.
-    pub fn delete_with<F, R>(
+    pub fn delete_with(
         &mut self,
         path: &str,
         middlewares: impl Into<Vec<Arc<Executor>>>,
-        handler: F,
-    ) -> RouteBuilder<'_>
-    where
-        F: for<'a> Fn(&'a mut Context) -> R + Send + Sync + 'static,
-        R: HandlerOutput + Send + 'static,
-    {
+        handler: impl IntoExecutor,
+    ) -> RouteBuilder<'_> {
         self.register_with("DELETE", path, middlewares, handler)
     }
 
     /// Fluent route registration: PATCH method.
-    pub fn patch<F, R>(&mut self, path: &str, handler: F) -> RouteBuilder<'_>
-    where
-        F: for<'a> Fn(&'a mut Context) -> R + Send + Sync + 'static,
-        R: HandlerOutput + Send + 'static,
-    {
+    pub fn patch(&mut self, path: &str, handler: impl IntoExecutor) -> RouteBuilder<'_> {
         self.register_handler("PATCH", path, handler, Vec::new())
     }
 
     /// Fluent route registration: PATCH method with middlewares.
-    pub fn patch_with<F, R>(
+    pub fn patch_with(
         &mut self,
         path: &str,
         middlewares: impl Into<Vec<Arc<Executor>>>,
-        handler: F,
-    ) -> RouteBuilder<'_>
-    where
-        F: for<'a> Fn(&'a mut Context) -> R + Send + Sync + 'static,
-        R: HandlerOutput + Send + 'static,
-    {
+        handler: impl IntoExecutor,
+    ) -> RouteBuilder<'_> {
         self.register_with("PATCH", path, middlewares, handler)
     }
 
     /// Fluent route registration: OPTIONS method.
-    pub fn options<F, R>(&mut self, path: &str, handler: F) -> RouteBuilder<'_>
-    where
-        F: for<'a> Fn(&'a mut Context) -> R + Send + Sync + 'static,
-        R: HandlerOutput + Send + 'static,
-    {
+    pub fn options(&mut self, path: &str, handler: impl IntoExecutor) -> RouteBuilder<'_> {
         self.register_handler("OPTIONS", path, handler, Vec::new())
     }
 
     /// Fluent route registration: OPTIONS method with middlewares.
-    pub fn options_with<F, R>(
+    pub fn options_with(
         &mut self,
         path: &str,
         middlewares: impl Into<Vec<Arc<Executor>>>,
-        handler: F,
-    ) -> RouteBuilder<'_>
-    where
-        F: for<'a> Fn(&'a mut Context) -> R + Send + Sync + 'static,
-        R: HandlerOutput + Send + 'static,
-    {
+        handler: impl IntoExecutor,
+    ) -> RouteBuilder<'_> {
         self.register_with("OPTIONS", path, middlewares, handler)
     }
 
     /// Fluent route registration: HEAD method.
-    pub fn head<F, R>(&mut self, path: &str, handler: F) -> RouteBuilder<'_>
-    where
-        F: for<'a> Fn(&'a mut Context) -> R + Send + Sync + 'static,
-        R: HandlerOutput + Send + 'static,
-    {
+    pub fn head(&mut self, path: &str, handler: impl IntoExecutor) -> RouteBuilder<'_> {
         self.register_handler("HEAD", path, handler, Vec::new())
     }
 
     /// Fluent route registration: HEAD method with middlewares.
-    pub fn head_with<F, R>(
+    pub fn head_with(
         &mut self,
         path: &str,
         middlewares: impl Into<Vec<Arc<Executor>>>,
-        handler: F,
-    ) -> RouteBuilder<'_>
-    where
-        F: for<'a> Fn(&'a mut Context) -> R + Send + Sync + 'static,
-        R: HandlerOutput + Send + 'static,
-    {
+        handler: impl IntoExecutor,
+    ) -> RouteBuilder<'_> {
         self.register_with("HEAD", path, middlewares, handler)
     }
 
     /// Fluent route registration: matches all HTTP methods.
-    pub fn all<F, R>(&mut self, path: &str, handler: F) -> RouteBuilder<'_>
-    where
-        F: for<'a> Fn(&'a mut Context) -> R + Send + Sync + 'static,
-        R: HandlerOutput + Send + 'static,
-    {
+    pub fn all(&mut self, path: &str, handler: impl IntoExecutor) -> RouteBuilder<'_> {
         self.register_handler("*", path, handler, Vec::new())
     }
 
     /// Fluent route registration: all HTTP methods with middlewares.
-    pub fn all_with<F, R>(
+    pub fn all_with(
         &mut self,
         path: &str,
         middlewares: impl Into<Vec<Arc<Executor>>>,
-        handler: F,
-    ) -> RouteBuilder<'_>
-    where
-        F: for<'a> Fn(&'a mut Context) -> R + Send + Sync + 'static,
-        R: HandlerOutput + Send + 'static,
-    {
+        handler: impl IntoExecutor,
+    ) -> RouteBuilder<'_> {
         self.register_with("*", path, middlewares, handler)
     }
 

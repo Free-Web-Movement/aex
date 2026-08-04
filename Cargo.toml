@@ -1,11 +1,21 @@
 [package]
 name = "aex"
-version = "0.1.19"
+version = "0.1.20"
 edition = "2024"
-description = "A web server for rust."
+description = "A server beyond web for rust."
 license = "GPL-3.0-or-later"
 repository = "https://github.com/Free-Web-Movement/aex"
-keywords = ["rust", "web", "http", "server", "router"]
+keywords = [
+    "rust",
+    "web",
+    "http",
+    "tcp",
+    "upd",
+    "websocket",
+    "uniserver",
+    "server",
+    "router",
+]
 authors = ["Eric <calidion@gmail.com>"]
 
 [features]

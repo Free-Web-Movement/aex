@@ -21,11 +21,13 @@ cargo add tokio --features full
 ```rust
 use aex::http::router::Router as HttpRouter;
 use aex::server::HTTPServer;
+use aex::_sync;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let mut router = HttpRouter::default();
-    router.get("/", |_| "Hello, World!");
+    // 同步闭包：`_sync!` 保留免标注写法 `|_| "OK"`（与 `_async!` 同为 Arc<Executor>）
+    router.get("/", _sync!(|_| "Hello, World!"));
 
     HTTPServer::new("0.0.0.0:8080".parse()?, None)
         .http(router)
@@ -34,6 +36,46 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 ```
+
+**异步 handler 用 `_async!` 包一下即可**
+
+```rust
+use aex::http::router::Router as HttpRouter;
+use aex::server::HTTPServer;
+use aex::_async;
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let mut router = HttpRouter::default();
+    // 异步闭包：`_async!` 内部支持 await，同样免标注
+    router.get("/", _async!(|ctx| {
+        let html = fetch_home_page().await; // 任意 async 逻辑
+        ctx.html(&html);
+        true
+    }));
+
+    HTTPServer::new("0.0.0.0:8080".parse()?, None)
+        .http(router)
+        .start()
+        .await?;
+    Ok(())
+}
+```
+
+**两种写法都是 `Arc<Executor>`，可在同一 router 上混用**
+
+| | 同步 | 异步 |
+|---|---|---|
+| 宏名 | `_sync!`（主）、`now!`（别名） | `_async!`（主）、`then!`（别名）、`exe!`（早期写法，兼容保留） |
+| 示例 | `_sync!(\|_\| "OK")` | `_async!(\|ctx\| { ...await... })` |
+| 用途 | 纯同步 handler / 中间件 | 需要 `await` 的异步 handler / 中间件 |
+| `ctx` 参数 | 免标注（泛型函数推断） | 免标注；不引用 ctx 时可写 `\|_\|` |
+| 内部能否 `await` | 不能 | 可以 |
+| 产物 | `Arc<Executor>` | `Arc<Executor>` |
+
+>`_sync!` 通过泛型函数 `aex::http::types::sync` 恢复闭包参数推断，因此
+>`|_| "OK"`、`|ctx| {...}` 无需写 `&mut Context` 标注；直接传给
+>`router.get(...)`（走 `IntoExecutor`）则必须标注。
 
 **路由即方法，一次挂载多个 URL（推荐）**
 
@@ -88,7 +130,7 @@ router.push(User {
 
 ## 版本
 
-当前版本: **0.1.19**
+当前版本: **0.1.20**
 
 - 依赖配置见上方 [Get Started](#get-started-快速开始)。
 
@@ -96,6 +138,7 @@ router.push(User {
 
 - **统一端口多协议** - HTTP/1.1、HTTP/2、WebSocket、TCP、UDP 共用同一端口，自动协议检测
 - **直觉的 HTTP 路由** - Trie 树路由，支持静态路径、参数路径、通配符
+- **同步 / 异步 handler 双写法** - 同步闭包与 `_async!` 异步闭包统一由 `IntoExecutor` 接受，可混用
 - **显式中间件链** - 线性执行顺序，可预测的控制流（非洋葱模型）
 - **原生 WebSocket 支持** - 作为中间件自然集成，共享 HTTP 上下文
 - **多协议支持** - HTTP/1.1、HTTP/2、TCP、UDP 服务器统一接口
@@ -142,7 +185,7 @@ async fn main() -> anyhow::Result<()> {
     
     // HTTP 路由
     let mut http_router = HttpRouter::default();
-    http_router.get("/", |_| "Hello from unified server!");
+    http_router.get("/", _async!(|ctx| { ctx.text("Hello from unified server!"); true }));
     
     // 创建统一服务器
     let server = UnifiedServer::new(addr, globals)
@@ -218,12 +261,18 @@ server.start_udp::<OtherFrame, OtherCommand>().await?;
 
 ### 构建一个 Web 服务器
 
-三步走：**建 Router → 注册路由 → 交给 HTTPServer 启动**。Handler 就是一个
-`&mut Context -> 返回值` 的函数（返回值遵循 `HandlerOutput`，见下节）：
+三步走：**建 Router → 注册路由 → 交给 HTTPServer 启动**。
+
+Handler 有两种形态，都是 `Arc<Executor>`，`IntoExecutor` trait 统一接受，可混用：
+- **同步** `_sync!(|ctx| R)`（别名 `now!`）：免标注，不能 `await`；效果等价于直接传 `|ctx: &mut Context| R`；
+- **异步** `_async!(|ctx| R)`（别名 `then!`，早期名 `exe!`）：内部可 `await`，免标注。
+
+下面先看同步最简写法：
 
 ```rust
 use aex::http::router::{NodeType, Router as HttpRouter};
 use aex::server::HTTPServer;
+use aex::_sync;
 use std::net::SocketAddr;
 
 #[tokio::main]
@@ -231,7 +280,7 @@ async fn main() -> anyhow::Result<()> {
     let addr: SocketAddr = "0.0.0.0:8080".parse()?;
     let mut router = HttpRouter::default();
 
-    router.get("/", |_| "Hello, World!");
+    router.get("/", _sync!(|_| "Hello, World!"));
 
     HTTPServer::new(addr, None)
         .http(router)
@@ -246,50 +295,60 @@ async fn main() -> anyhow::Result<()> {
 
 ### HTTP 路由详解
 
+> **同步与异步两种写法，本质是两种不同的 handler 类型**（由 `IntoExecutor` trait 统一接受）：
+> - **同步** `_sync!(|ctx| R)`：R 为 `bool`/`()`/`String`/`&str`，免标注，不能 `await`
+> - **异步** `_async!(|ctx| R)`：内部可 `await`，由 `_async!` 包装成 `Arc<Executor>`，免标注
+
 ```rust
 use aex::http::router::{NodeType, Router as HttpRouter};
 use aex::http::params::Params;
+use aex::_sync;
 
 // 1. 创建路由器
 let mut router = HttpRouter::default();
 
-// 2. 静态路由
-router.get("/api/health", |_| "OK");
+// 2. 静态路由（同步闭包：_sync! 免标注）
+router.get("/api/health", _sync!(|_| "OK"));
 
-// 3. 参数路由
-router.get("/api/users/:id", |ctx| {
+// 3. 参数路由（同步闭包）
+router.get("/api/users/:id", _sync!(|ctx| {
     let params = ctx.local.get_ref::<Params>();
     if let Some(p) = params {
         let id = p.data.as_ref().and_then(|d| d.get("id").cloned());
         ctx.send(format!("User: {}", id.unwrap_or_default()), None);
     }
-});
+}));
 
-// 4. 通配符路由
-router.get("/api/files/*", |ctx| {
+// 4. 通配符路由（异步闭包：_async! 包装，内部可 await）
+router.get("/api/files/*", _async!(|ctx| {
     let params = ctx.local.get_ref::<Params>();
     if let Some(p) = params {
         let path = p.data.as_ref().and_then(|d| d.get("*").cloned());
         ctx.send(format!("File: {}", path.unwrap_or_default()), None);
     }
-});
+    true
+}));
 
-// 5. 带中间件的路由
-router.post("/api/users", |ctx| {
+// 5. 带中间件的路由（同步写法 + 链式中间件）
+router.post("/api/users", _sync!(|ctx| {
     ctx.text("Created");
-}).middleware(auth_middleware);
+})).middleware(auth_middleware);
 ```
 
 路由 handler 支持多种等价写法：直接返回字符串、`ctx.text(...)`/`ctx.json(...)`/`ctx.html(...)` 便捷方法、或原始 `ctx.send(content, mime)`：
 
 ```rust
-router.get("/a", |_| "Hello world!");          // 直接返回字符串
-router.get("/b", |ctx| { ctx.text("Hello"); }); // 便捷方法，无需 true
-router.get("/c", |ctx| {                        // 原始写法
+// 同步写法：_sync! 免标注
+router.get("/a", _sync!(|_| "Hello world!"));                       // 直接返回字符串
+router.get("/b", _sync!(|ctx| { ctx.text("Hello"); }));             // 便捷方法，无需 true
+router.get("/c", _sync!(|ctx| {                                     // 原始写法
     ctx.send("Hello world!", None);
     true
-});
+}));
 ```
+
+> 若不用 `_sync!`，直接把同步闭包传给 `router.get(...)`（走 `IntoExecutor`）也等价，
+> 只是必须标注参数类型：`|ctx: &mut Context| R`。
 
 ### 基于对象的路由方法（核心）
 
@@ -382,7 +441,7 @@ let ws = WebSocket {
     on_binary: None,
 };
 
-router.get("/ws", |_ctx| true)
+router.get("/ws", _sync!(|_| true))
     .middleware(WebSocket::to_middleware(ws));
 ```
 
@@ -474,24 +533,43 @@ pub type Executor = dyn for<'a> Fn(&'a mut Context) -> BoxFuture<'a, bool> + Sen
 use aex::connection::context::Context;
 use aex::http::protocol::status::StatusCode;
 
-let auth = |ctx: &mut Context| {
+let auth = _sync!(|ctx| {
     if ctx.req().query("token").as_deref() == Some("secret") {
         true
     } else {
         ctx.status(StatusCode::Unauthorized).text("forbidden");
         false
     }
-};
+});
 ```
 
-#### 异步中间件：用 `exe!` 即可
+#### 异步中间件：用 `_async!` 即可
 
 ```rust
-let rate_limiter = aex::exe!(|ctx| {
+let rate_limiter = _async!(|ctx| {
     // 任意 async 逻辑：查库、计数、IO……
     true
 });
 ```
+
+#### 同步 vs 异步：写法差异一览
+
+| | `_sync!(|ctx| { ... })` / `now!(...)` | `_async!(|ctx| { ... })` / `then!(...)` / `exe!(...)` |
+|---|---|---|
+| 用途 | 纯同步 handler / 中间件 | 需要 `await` 的异步 handler / 中间件 |
+| `ctx` 参数 | 免标注（泛型函数推断） | 免标注；不引用 ctx 时可写 `\|_\|` |
+| 返回值 | 直接返回 `bool`/`()`/`String`/`&str` | 返回 `bool`（可省略，body 内 await 后返回 true） |
+| 内部能否 `await` | 不能 | 可以（查库 / IO / 调用 async fn） |
+| 产物类型 | `Arc<Executor>` | `Arc<Executor>` |
+| 使用位置 | `.middleware(...)` / `router.get(...)` | 与同步完全一致，可混排 |
+
+> 免标注是 `_sync!`/`_async!` 独有的便利：`_sync!` 通过泛型函数 `aex::http::types::sync`
+> 恢复闭包参数推断。若把同步闭包**直接**传给 `router.get(...)`（走 `IntoExecutor`），
+> 则必须标注 `|ctx: &mut Context|`——效果等价，只是多写几个字。
+
+**一句话**：同步用 `_sync!`（或别名 `now!`），需要 `await` 就用 `_async!`（或别名 `then!`，
+早期版本名 `exe!`），两个都是 `Arc<Executor>`，同一路由的中间件链可以**同步 + 异步混排**：
+`.middleware(_sync!(auth)).middleware(_async!(async_log))`。
 
 #### 中间件能做什么
 
@@ -499,88 +577,119 @@ let rate_limiter = aex::exe!(|ctx| {
 - **写响应**：`ctx.text()` / `ctx.json()` / `ctx.html()` / `ctx.send()`、`ctx.status(...)`、`ctx.redirect(url)`
 - **传状态**：`ctx.set(data)` / `ctx.get::<T>()` 在中间件与 handler 之间共享数据
 
-#### 可复用中间件：返回 `Arc<Executor>` 即可
+#### 两种使用场景，中间件形式不同
 
-内置中间件全部遵循同一个模式——配置构建器返回 `Arc<Executor>`：
+##### 场景一：链式 API（`router.get` / `.middleware(...)`）
+
+链式 API 没有 `self` 上下文，中间件**只接受全局函数**和**匿名闭包**（返回 `Arc<Executor>`）：
 
 ```rust
 use aex::connection::context::Context;
-use aex::http::types::{Executor, IntoExecutor};
-use std::sync::Arc;
+use aex::http::types::IntoExecutor;
 
-pub struct RateLimit { /* 配置项 */ }
+// 匿名闭包（同步 / 异步均可）
+router.get("/x", _sync!(|_| true)).middleware(_sync!(|ctx| {
+    // 同步逻辑
+    true
+}));
+router.get("/x", _async!(|_| { true })).middleware(_async!(|ctx| {
+    do_async().await;
+    true
+}));
 
-impl RateLimit {
-    pub fn build(self) -> Arc<Executor> {
-        IntoExecutor::into_executor(move |ctx: &mut Context| {
-            // ... 限流逻辑
-            true
-        })
-    }
+// 全局函数
+fn auth(ctx: &mut Context) -> bool {
+    ctx.req().header("x-api-key").is_some()
 }
+router.get("/secret", handler).middleware(auth);
+
+// 配置构建器
+router.get("/x", handler).middleware(RateLimitConfig::new(100, 60).by_ip().build());
 ```
 
-#### 对象中间件：把 `self` 带进中间件
-
-上面的写法是无状态的（闭包 / 自由函数）。当中间件需要业务状态时，把它写成
-**同一实例上的 `&self` 方法**——中间件数组里的**裸标识符**会被解析为对象方法，
-执行时直接拿到被挂载实例，与 handler 看到**同一个 `self`**。这是函数式中间件做不到的：
+`router.get_with(...)` / `router.post_with(...)` 等内联写法同样只接受 `Arc<Executor>`：
 
 ```rust
-use aex::http::meta::HttpMetadata;
-use aex::http::protocol::header::HeaderKey;
+router.get_with("/x", [_sync!(|_| true), auth], |_ctx: &mut Context| true);
+```
 
+##### 场景二：属性宏（`#[get]` / `#[post]` / ...，在 impl 块内）
+
+属性宏的中间件数组有**更丰富的解析能力**——因为宏知道 impl 块里有哪些方法：
+
+| 写法 | 分类 | 查找顺序 |
+|------|------|----------|
+| `self.auth` | SelfMethod | 强制实例方法（`&self`，返回 `bool`）；找不到 → 编译报错 |
+| `auth` | BareIdent | 级联：① self 方法（`&self`，`→ bool`）→ ② 关联函数（无 self，`→ bool`）→ ③ 全局函数（仅同步） |
+| `_sync!(...)` / `_async!(...)` | Expr | 经 `IntoExecutor` 转换，与链式 API 等价 |
+| `logger!()` / `v!(...)` | Expr | 内置中间件，同上 |
+
+```rust
 struct Api {
-    api_key: String,      // 鉴权所需的状态
+    api_key: String,
 }
 
 #[aex::routes]
 impl Api {
-    // [auth] 是裸标识符 -> 解析为下面的对象方法
-    #[get("/admin", [auth])]
+    // self.auth → 显式实例方法
+    #[get("/admin", [self.auth])]
     fn admin(&self, ctx: &mut Context) {
         ctx.text("admin-only");
     }
 
-    // 对象中间件：&self 方法，返回 bool
-    fn auth(&self, ctx: &mut Context) -> bool {
-        let key = HeaderKey::from_str("x-api-key").unwrap();
-        ctx.get::<HttpMetadata>()
-            .map(|m| m.headers.get(&key).is_some_and(|v| v == &self.api_key))
-            .unwrap_or(false)
+    // auth → 级联：先找 self.auth（找到，走实例方法）
+    #[get("/secret", [auth])]
+    fn secret(&self, ctx: &mut Context) {
+        ctx.text("secret-ok");
     }
+
+    // global_auth → 级联：不在 impl 块 → 全局函数
+    #[get("/public", [global_auth])]
+    fn public(&self, ctx: &mut Context) {
+        ctx.text("public-ok");
+    }
+
+    // check → 级联：找关联函数 check（无 self，返回 bool）
+    #[get("/checked", [check])]
+    fn checked(&self, ctx: &mut Context) {
+        ctx.text("checked-ok");
+    }
+
+    // 实例方法
+    fn auth(&self, ctx: &mut Context) -> bool { /* ... */ }
+
+    // 关联函数（无 self）
+    fn check(ctx: &mut Context) -> bool { /* ... */ }
 }
 
-router.push(Api { api_key: "secret".into() });
+// 全局函数
+fn global_auth(ctx: &mut Context) -> bool { /* ... */ }
 ```
 
-- **`&self` 直接可用**：`self.api_key`、`self.config`、`self.db`——鉴权、限流、校验需要
-  的状态与 handler 共放一处，中间件和 handler 看到的是**同一个对象**。
-- **同步 / 异步都行**：`fn auth(&self, ctx) -> bool` 或 `async fn auth(&self, ctx) -> bool` 均可。
-- **与普通中间件混排**：`[auth, RateLimitConfig::new(100, 60).build()]`——裸标识符走对象方法，
-  其余表达式走 `IntoExecutor`，同一条链上自由组合。
-- **判定规则一致**：`true` 放行，`false` 拦截（默认 400，可先 `ctx.status(...)` 覆盖）。
-- 对象中间件也可以不写 `&self`，退化为普通关联函数中间件。
+**关键区别**：
+- 链式 API 没有 `self` 上下文，实例方法无法调用 → 只有全局函数 + 闭包。
+- 属性宏知道 impl 块的方法列表，所以支持**实例方法**和**关联函数**的级联查找。
+- 裸标识符 `auth` 在属性宏里是**级联查找**（self → 关联 → 全局），在链式 API 里如果传一个函数名就直接走 `IntoExecutor`（无级联）。
 
-#### 挂载：任何写法都接受同一个中间件
+#### 挂载
+
+两种方式最终都走 `Router::push(instance)`：
 
 ```rust
-// 1. 链式
-router.get("/x", handler).middleware(rate_limiter);
+// 链式：中间件通过 .middleware() 追加
+router.get("/x", _sync!(|_| true)).middleware(auth);
+router.get_with("/x", [_sync!(|_| true), rate_limiter], |_ctx: &mut Context| true);
 
-// 2. 内联数组（元素需已是 Arc<Executor>，可先用 IntoExecutor 转换）
-router.get_with("/x", [IntoExecutor::into_executor(auth), rate_limiter], handler);
-
-// 3. 属性宏：路由数组 + 中间件数组（每个元素独立转换，混合类型也允许）
-#[get(["/", "/profile"], [auth, RateLimitConfig::new(100, 60).build()])]
+// 属性宏：路由 + 中间件在 #[get/post] 里声明，router.push(instance) 一次性挂载
+#[get(["/", "/profile"], [self.auth, RateLimitConfig::new(100, 60).build()])]
 ```
 
 `post_with`/`put_with`/`delete_with`/`patch_with`/`options_with`/`head_with`/`all_with`
 提供同样的内联写法。
 
-> 注意：属性宏生成的注册代码在 `impl` 块作用域内，所以中间件数组只能引用**对象方法**和
-> **模块级条目**（自由函数、`logger!()`/`v!(...)` 宏调用、`RateLimitConfig::new(...).build()`
-> 等自包含表达式），不能引用 `main`/闭包内的局部变量。
+> 注意：属性宏生成的注册代码在 `impl` 块作用域内，所以中间件数组只能引用**实例方法**、
+> **关联函数**、**全局函数**，以及 **模块级条目**（自由函数、`logger!()`/`v!(...)` 宏调用、
+> `RateLimitConfig::new(...).build()` 等自包含表达式），不能引用 `main`/闭包内的局部变量。
 
 #### 内置中间件
 

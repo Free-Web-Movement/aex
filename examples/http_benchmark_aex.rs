@@ -2,6 +2,7 @@
 //!
 //! Tests: no URL, static URL, dynamic URL
 
+use aex::connection::context::Context;
 use aex::http::router::Router as HttpRouter;
 use aex::server::Server;
 use std::net::SocketAddr;
@@ -15,19 +16,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut http_router = HttpRouter::default();
 
     // 1. No URL (root)
-    http_router.get("/", |ctx| {
+    http_router.get("/", |ctx: &mut Context| {
         ctx.send("Hello", None);
         true
     });
 
     // 2. Static URL
-    http_router.get("/api/users", |ctx| {
+    http_router.get("/api/users", |ctx: &mut Context| {
         ctx.send(r#"[{"id":1,"name":"alice"}]"#, None);
         true
     });
 
     // 3. Dynamic URL
-    http_router.get("/api/users/:id", |ctx| {
+    http_router.get("/api/users/:id", |ctx: &mut Context| {
         ctx.send(r#"{"id":1}"#, None);
         true
     });

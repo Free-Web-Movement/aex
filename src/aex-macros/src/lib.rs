@@ -1,9 +1,26 @@
 //! Procedural macros for the aex web framework.
 //!
 //! Provides the `#[aex::routes]` attribute for declaring routes on methods
-//! inside an `impl` block and mounting them with a single instance:
+//! inside an `impl` block and mounting them with a single instance.
 //!
-//! # Examples
+//! ## Middleware resolution
+//!
+//! Middleware array entries (`[auth]`, `[self.auth]`, `[logger!()]`) are
+//! classified by the macro:
+//!
+//! | 写法              | 分类         | 查找顺序                                        |
+//! |-------------------|--------------|-------------------------------------------------|
+//! | `self.auth`       | SelfMethod   | 强制实例方法（`&self`，返回 `bool`）            |
+//! | `auth`            | BareIdent    | 级联：self 方法 → 关联函数 → 全局函数           |
+//! | `logger!()` 等    | Expr         | 经 `IntoExecutor` 转换                          |
+//!
+//! - `auth` 裸标识符：先在 impl 块中找同名 **实例方法**（`&self`，`→ bool`），
+//!   再找同名 **关联函数**（无 self，`→ bool`），最后 fallback 为 **全局函数**
+//!   （仅支持同步；异步全局函数需用 `_async!(|ctx| auth(ctx).await)` 包装）。
+//! - `self.auth`：强制走实例方法路径，找不到或签名不匹配则编译报错。
+//! - 其他表达式：直接经 `IntoExecutor` 转换为 `Arc<Executor>`。
+//!
+//! ## Example
 //!
 //! ```rust,ignore
 //! use aex::connection::context::Context;
@@ -16,37 +33,33 @@
 //!
 //! #[aex::routes]
 //! impl Class {
-//!     // `[auth]` is a bare identifier, so it resolves to the object method
-//!     // `auth` below and can read `self.api_key`.
-//!     #[get(["/", "/profile"], [auth, logger_mw()])]
+//!     // `self.auth` → explicit instance method
+//!     // `audit` → bare ident: try self.auth (no, different name) → assoc fn → global
+//!     #[get(["/", "/profile"], [self.auth])]
 //!     fn profile(&self, ctx: &mut Context) {
 //!         ctx.text(&self.name);
 //!     }
 //!
-//!     #[post("/resources")]
+//!     #[post("/resources", [self.auth])]
 //!     async fn create(&self, ctx: &mut Context) {
 //!         ctx.text("created");
 //!     }
 //!
+//!     // instance method — must return bool, called via `self.auth`
 //!     fn auth(&self, ctx: &mut Context) -> bool {
 //!         ctx.header("x-api-key").is_some_and(|k| k == self.api_key)
 //!     }
 //! }
 //!
+//! // global fn — callable as bare `[require_key]`
+//! fn require_key(ctx: &mut Context) -> bool {
+//!     ctx.req().query("token") == Some("secret")
+//! }
+//!
 //! let mut router = Router::default();
 //! let instance = Class { name: "aex".into(), api_key: "secret".into() };
-//! router.push(instance); // 挂载该实例的路由与中间件
+//! router.push(instance); // mounts all routes + middleware for this instance
 //! ```
-//!
-//! `#[get]`/`#[post]`/... only *declare* the routes; `Router::push(instance)`
-//! performs the actual mounting, so one instance registers all its URLs at
-//! once. `&self` methods run against the mounted instance's state.
-//!
-//! Middleware entries in the second argument come in two flavors:
-//! - a bare identifier names a **method on the same instance** — it runs with
-//!   `&self`, so it can use the object's state and return `true`/`false`;
-//! - any other expression is an ordinary middleware value (closure, function
-//!   call, or `Arc<Executor>`) converted through `IntoExecutor`.
 
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
@@ -73,8 +86,14 @@ enum ReceiverKind {
     Invalid,
 }
 
+/// Middleware resolution strategy.
+///
+/// - `BareIdent`: cascade lookup — self method → associated fn → global fn
+/// - `SelfMethod`: explicit `self.method` — must be a `&self` method on the impl
+/// - `Expr`: any other expression, passed through `IntoExecutor`
 enum MiddlewareSpec {
-    Method(syn::Ident),
+    BareIdent(syn::Ident),
+    SelfMethod(syn::Ident),
     Expr(Expr),
 }
 
@@ -96,18 +115,32 @@ fn receiver_kind(f: &ImplItemFn) -> ReceiverKind {
     }
 }
 
-/// A bare identifier middleware entry resolves to a method on the mounted
-/// instance (`this.#ident(ctx)`, so it can read `self`); any other expression
-/// is treated as an ordinary middleware value (closure / `Arc<Executor>` /
-/// function call) via `IntoExecutor`.
+/// Middleware entry classification:
+///
+/// 1. `self.method` (Expr::Field, base = self) → **SelfMethod** — explicit
+///    instance method, must be `&self` in this impl.
+/// 2. Bare single-segment path (`auth`) → **BareIdent** — cascade lookup:
+///    self method → associated fn → global fn.
+/// 3. Anything else → **Expr** — ordinary value via `IntoExecutor`.
 fn classify_middleware(e: &Expr) -> MiddlewareSpec {
+    // `self.auth` → explicit instance method
+    if let Expr::Field(field) = e {
+        if let Expr::Path(base) = &*field.base {
+            if base.qself.is_none() && base.path.is_ident("self") {
+                if let syn::Member::Named(ident) = &field.member {
+                    return MiddlewareSpec::SelfMethod(ident.clone());
+                }
+            }
+        }
+    }
+    // bare ident → cascade: self method → assoc fn → global fn
     if let Expr::Path(p) = e {
         let single = p.qself.is_none()
             && p.path.leading_colon.is_none()
             && p.path.segments.len() == 1
             && p.path.segments[0].arguments.is_none();
         if single {
-            return MiddlewareSpec::Method(p.path.segments[0].ident.clone());
+            return MiddlewareSpec::BareIdent(p.path.segments[0].ident.clone());
         }
     }
     MiddlewareSpec::Expr(e.clone())
@@ -252,22 +285,52 @@ pub fn routes(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
     for d in &decls {
         for m in &d.middlewares {
-            if let MiddlewareSpec::Method(ident) = m
-                && let Some((_, _, returns_bool, receiver)) =
-                    methods.iter().find(|(n, _, _, _)| n == ident)
-            {
-                if matches!(receiver, ReceiverKind::Invalid) {
-                    errors.push(syn::Error::new_spanned(
-                        ident,
-                        "middleware methods must take `&self` or no receiver, not `&mut self`/`self`",
-                    ));
+            match m {
+                MiddlewareSpec::BareIdent(ident) => {
+                    // Cascade: if found in impl, validate; if not → free fn (compile error if absent)
+                    if let Some((_, _, returns_bool, receiver)) =
+                        methods.iter().find(|(n, _, _, _)| n == ident)
+                    {
+                        if matches!(receiver, ReceiverKind::Invalid) {
+                            errors.push(syn::Error::new_spanned(
+                                ident,
+                                "middleware must take `&self` or no receiver, not `&mut self`/`self`",
+                            ));
+                        }
+                        if !returns_bool {
+                            errors.push(syn::Error::new_spanned(
+                                ident,
+                                "middleware must return `bool` (true = pass, false = block)",
+                            ));
+                        }
+                    }
+                    // Not found → free fn, compile error will surface if absent
                 }
-                if !returns_bool {
-                    errors.push(syn::Error::new_spanned(
-                        ident,
-                        "middleware methods must return `bool` (true = pass, false = block)",
-                    ));
+                MiddlewareSpec::SelfMethod(ident) => {
+                    // Must be a `&self` method returning bool
+                    match methods.iter().find(|(n, _, _, _)| n == ident) {
+                        Some((_, _, true, ReceiverKind::Ref)) => {}
+                        Some((_, _, false, ReceiverKind::Ref)) => {
+                            errors.push(syn::Error::new_spanned(
+                                ident,
+                                "`self.method` middleware must return `bool`",
+                            ));
+                        }
+                        Some((_, _, _, _)) => {
+                            errors.push(syn::Error::new_spanned(
+                                ident,
+                                "`self.method` middleware must be a `&self` method (not `&mut self`, not associated)",
+                            ));
+                        }
+                        None => {
+                            errors.push(syn::Error::new_spanned(
+                                ident,
+                                "middleware method not found in this impl block",
+                            ));
+                        }
+                    }
                 }
+                MiddlewareSpec::Expr(_) => {}
             }
         }
     }
@@ -297,7 +360,47 @@ pub fn routes(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 quote!(None)
             } else {
                 let mws = d.middlewares.iter().map(|m| match m {
-                    MiddlewareSpec::Method(ident) => {
+                    MiddlewareSpec::BareIdent(ident) => {
+                        match methods.iter().find(|(n, _, _, _)| n == ident) {
+                            // self method (async)
+                            Some((_, true, _, ReceiverKind::Ref)) => quote! {
+                                ::std::sync::Arc::new({
+                                    let this = ::std::sync::Arc::clone(&this);
+                                    move |ctx: &mut ::aex::connection::context::Context| {
+                                        let this = ::std::sync::Arc::clone(&this);
+                                        Box::pin(async move { this.#ident(ctx).await })
+                                    }
+                                })
+                            },
+                            // self method (sync)
+                            Some((_, false, _, ReceiverKind::Ref)) => quote! {
+                                ::aex::http::types::IntoExecutor::into_executor({
+                                    let this = ::std::sync::Arc::clone(&this);
+                                    move |ctx: &mut ::aex::connection::context::Context| this.#ident(ctx)
+                                })
+                            },
+                            // associated fn (async, no self)
+                            Some((_, true, _, ReceiverKind::None)) => quote! {
+                                ::std::sync::Arc::new({
+                                    move |ctx: &mut ::aex::connection::context::Context| {
+                                        Box::pin(async move { Self::#ident(ctx).await })
+                                    }
+                                })
+                            },
+                            // associated fn (sync, no self)
+                            Some((_, false, _, ReceiverKind::None)) => quote! {
+                                ::aex::http::types::IntoExecutor::into_executor({
+                                    move |ctx: &mut ::aex::connection::context::Context| Self::#ident(ctx)
+                                })
+                            },
+                            // free function (not in impl block)
+                            None => {
+                                quote!(::aex::http::types::IntoExecutor::into_executor(#ident))
+                            }
+                            _ => unreachable!(),
+                        }
+                    }
+                    MiddlewareSpec::SelfMethod(ident) => {
                         match methods.iter().find(|(n, _, _, _)| n == ident) {
                             Some((_, true, _, _)) => quote! {
                                 ::std::sync::Arc::new({
@@ -314,9 +417,7 @@ pub fn routes(_attr: TokenStream, item: TokenStream) -> TokenStream {
                                     move |ctx: &mut ::aex::connection::context::Context| this.#ident(ctx)
                                 })
                             },
-                            None => {
-                                quote!(::aex::http::types::IntoExecutor::into_executor(#ident))
-                            }
+                            None => unreachable!("validated above"),
                         }
                     }
                     MiddlewareSpec::Expr(e) => {
@@ -359,7 +460,7 @@ pub fn routes(_attr: TokenStream, item: TokenStream) -> TokenStream {
                     } else {
                         quote!(Self::#fn_name(ctx).await; true)
                     };
-                    quote!(::aex::exe!(move |ctx| { #body }))
+                    quote!(::aex::_async!(move |ctx| { #body }))
                 }
                 (ReceiverKind::None, false) => {
                     quote! {

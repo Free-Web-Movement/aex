@@ -1,3 +1,4 @@
+use aex::connection::context::Context;
 use aex::connection::global::GlobalContext;
 use aex::http::middlewares::websocket::WebSocket;
 use aex::http::router::Router as HttpRouter;
@@ -20,12 +21,12 @@ async fn main() -> anyhow::Result<()> {
 
     let mut router = HttpRouter::new(aex::http::router::NodeType::default());
 
-    router.get("/", |ctx| {
+    router.get("/", |ctx: &mut Context| {
         ctx.send("Hello from HTTP/1.1!", None);
         true
     });
 
-    router.get("/info", |ctx| {
+    router.get("/info", |ctx: &mut Context| {
         ctx.send(
             r#"{"protocol":"HTTP/1.1","message":"Welcome to AEX Unified Server"}"#,
             None,
@@ -50,9 +51,9 @@ async fn main() -> anyhow::Result<()> {
 
     let ws_middleware: Arc<Executor> = Arc::from(WebSocket::to_middleware(ws_handler));
 
-    router.get("/ws", |_ctx| true).middleware(ws_middleware);
+    router.get("/ws", |_ctx: &mut Context| true).middleware(ws_middleware);
 
-    router.get("/test", |ctx| {
+    router.get("/test", |ctx: &mut Context| {
         let html = r#"<!DOCTYPE html>
 <html>
 <head>
