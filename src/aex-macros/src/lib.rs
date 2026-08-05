@@ -105,6 +105,7 @@ struct RouteDecl {
     is_async: bool,
     returns_bool: bool,
     receiver: ReceiverKind,
+    no_prefix: bool,
 }
 
 fn receiver_kind(f: &ImplItemFn) -> ReceiverKind {
@@ -194,11 +195,25 @@ fn parse_route_decl(f: &ImplItemFn) -> syn::Result<RouteDecl> {
         }
     };
 
-    let middlewares = match args.get(1) {
-        None => Vec::new(),
-        Some(Expr::Array(arr)) => arr.elems.iter().map(classify_middleware).collect(),
-        Some(other) => vec![classify_middleware(other)],
-    };
+    let mut middlewares = Vec::new();
+    let mut no_prefix = false;
+    for arg in args.iter().skip(1) {
+        match arg {
+            Expr::Path(p)
+                if p.qself.is_none()
+                    && p.path.leading_colon.is_none()
+                    && p.path.segments.len() == 1
+                    && p.path.segments[0].arguments.is_none()
+                    && p.path.segments[0].ident == "no_prefix" =>
+            {
+                no_prefix = true;
+            }
+            Expr::Array(arr) => {
+                middlewares.extend(arr.elems.iter().map(classify_middleware));
+            }
+            other => middlewares.push(classify_middleware(other)),
+        }
+    }
 
     let returns_bool = matches!(
         &f.sig.output,
@@ -215,7 +230,35 @@ fn parse_route_decl(f: &ImplItemFn) -> syn::Result<RouteDecl> {
         is_async: f.sig.asyncness.is_some(),
         returns_bool,
         receiver,
+        no_prefix,
     })
+}
+
+/// Optional prefix argument for `#[aex::routes(prefix = "/api")]` or
+/// `#[aex::routes("/api")]`. Prepended to every path in the impl block.
+///
+/// A single route may opt out of the prefix by appending the `no_prefix`
+/// marker: `#[get("/health", no_prefix)]` registers the path verbatim
+/// (`/health`) instead of `{prefix}/health`.
+fn parse_prefix(attr: TokenStream) -> syn::Result<String> {
+    if attr.is_empty() {
+        return Ok(String::new());
+    }
+    let ts = TokenStream2::from(attr);
+    if let Ok(pe) = syn::parse2::<syn::MetaNameValue>(ts.clone()) {
+        if pe.path.is_ident("prefix") {
+            if let syn::Expr::Lit(syn::ExprLit {
+                lit: syn::Lit::Str(s),
+                ..
+            }) = pe.value
+            {
+                return Ok(s.value());
+            }
+        }
+        return Err(syn::Error::new_spanned(pe, "expected `prefix = \"...\"`"));
+    }
+    let lit = syn::parse2::<syn::LitStr>(ts)?;
+    Ok(lit.value())
 }
 
 /// Declares routes on an `impl` block and generates `AexRoutes` for it.
@@ -236,10 +279,37 @@ fn parse_route_decl(f: &ImplItemFn) -> syn::Result<RouteDecl> {
 /// let instance = Class { name: "aex".into() };
 /// router.push(instance);
 /// ```
+///
+/// A path prefix may be supplied to mount every route in the impl under a
+/// common base path:
+///
+/// ```rust,ignore
+/// #[aex::routes(prefix = "/backend")]
+/// impl Class {
+///     #[get("/users")]
+///     fn users(&self, ctx: &mut Context) { ... }   // GET /backend/users
+///
+///     // opt out of the prefix for this route
+///     #[get("/health", no_prefix)]
+///     fn health(&self, ctx: &mut Context) { ... }  // GET /health
+/// }
+/// ```
 #[proc_macro_attribute]
-pub fn routes(_attr: TokenStream, item: TokenStream) -> TokenStream {
+pub fn routes(attr: TokenStream, item: TokenStream) -> TokenStream {
     let mut imp = parse_macro_input!(item as ItemImpl);
     imp.attrs.retain(|a| !a.path().is_ident("routes"));
+
+    let prefix: String = match parse_prefix(attr) {
+        Ok(p) if p.is_empty() => String::new(),
+        Ok(p) => {
+            if p.starts_with('/') {
+                p.trim_end_matches('/').to_string()
+            } else {
+                format!("/{}", p.trim_end_matches('/'))
+            }
+        }
+        Err(e) => return e.into_compile_error().into(),
+    };
 
     let mut decls = Vec::new();
     let mut errors: Vec<syn::Error> = Vec::new();
@@ -356,6 +426,20 @@ pub fn routes(_attr: TokenStream, item: TokenStream) -> TokenStream {
         let fn_name = &d.fn_name;
 
         for path in &d.paths {
+            let full_path = match path {
+                Expr::Lit(syn::ExprLit {
+                    lit: Lit::Str(s), ..
+                }) => {
+                    let joined = if d.no_prefix {
+                        s.value()
+                    } else {
+                        format!("{prefix}{}", s.value())
+                    };
+                    let lit = syn::LitStr::new(&joined, s.span());
+                    quote!(#lit)
+                }
+                _ => unreachable!("path validated as string literal"),
+            };
             let mws = if d.middlewares.is_empty() {
                 quote!(None)
             } else {
@@ -474,7 +558,7 @@ pub fn routes(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
             stmts.push(quote! {
                 router.insert(
-                    #path,
+                    #full_path,
                     Some(#method),
                     #executor,
                     #mws,

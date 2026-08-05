@@ -1,6 +1,6 @@
 [package]
 name = "aex"
-version = "0.1.20"
+version = "0.1.21"
 edition = "2024"
 description = "A server beyond web for rust."
 license = "GPL-3.0-or-later"
@@ -20,7 +20,7 @@ router-cache = []
 http-timeout = []
 
 [dependencies]
-aex-macros = { path = "src/aex-macros", version = "0.1.0" }
+aex-macros = { path = "src/aex-macros", version = "0.1.1" }
 smol = "2.0"
 tokio = { version = "1.40", features = ["full"] }
 anyhow = "1.0"

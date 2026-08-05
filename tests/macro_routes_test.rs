@@ -35,6 +35,14 @@ fn global_auth(ctx: &mut Context) -> bool {
         .unwrap_or(false)
 }
 
+// 名为 no_prefix 的全局中间件：必须用数组 [no_prefix] 包裹才会被当作中间件
+fn no_prefix(ctx: &mut Context) -> bool {
+    let key = HeaderKey::from_str("x-np").unwrap();
+    ctx.get::<HttpMetadata>()
+        .map(|m| m.headers.contains_key(&key))
+        .unwrap_or(false)
+}
+
 #[aex::routes]
 impl User {
     // 多路径 + 中间件，&self 方法使用实例状态
@@ -131,6 +139,43 @@ impl Admin {
     }
 }
 
+struct Api;
+
+#[aex::routes(prefix = "/backend")]
+impl Api {
+    #[get("/login")]
+    fn login(ctx: &mut Context) -> &'static str {
+        "login"
+    }
+
+    #[post("/api/orders")]
+    fn orders(ctx: &mut Context) -> &'static str {
+        "orders"
+    }
+
+    // no_prefix：注册为 /ping 而非 /backend/ping
+    #[get("/ping", no_prefix)]
+    fn ping(ctx: &mut Context) -> &'static str {
+        "ping"
+    }
+
+    // [no_prefix] 在数组内 → 是中间件（全局函数 no_prefix），不是标记；前缀仍生效 → /backend/np-mid
+    #[get("/np-mid", [no_prefix])]
+    fn np_mid(ctx: &mut Context) -> &'static str {
+        "np-mid-ok"
+    }
+}
+
+struct Nested;
+
+#[aex::routes("/backend/api")]
+impl Nested {
+    #[get("/users")]
+    fn users(ctx: &mut Context) -> &'static str {
+        "users"
+    }
+}
+
 #[test]
 fn test_routes_attribute_registers_all_paths() {
     let mut router = Router::default();
@@ -140,6 +185,8 @@ fn test_routes_attribute_registers_all_paths() {
         created: Arc::new(Mutex::new(Vec::new())),
     });
     router.push(Admin);
+    router.push(Api);
+    router.push(Nested);
 
     // 多路径
     assert!(router.has_route("GET", "/"));
@@ -159,6 +206,16 @@ fn test_routes_attribute_registers_all_paths() {
     assert!(router.has_route("GET", "/checked"));
     // 另一个实例
     assert!(router.has_route("GET", "/admin"));
+    // prefix 路由
+    assert!(router.has_route("GET", "/backend/login"));
+    assert!(router.has_route("POST", "/backend/api/orders"));
+    assert!(router.has_route("GET", "/backend/api/users"));
+    // no_prefix 路由（跳过 prefix，注册在根路径）
+    assert!(router.has_route("GET", "/ping"));
+    assert!(!router.has_route("GET", "/backend/ping"));
+    // [no_prefix] 数组内是中间件而非标记 → 前缀仍生效，注册在 /backend/np-mid
+    assert!(router.has_route("GET", "/backend/np-mid"));
+    assert!(!router.has_route("GET", "/np-mid"));
 }
 
 #[tokio::test]
@@ -170,6 +227,7 @@ async fn test_routes_attribute_mount_http() {
         api_key: "secret".into(),
         created: Arc::new(Mutex::new(Vec::new())),
     });
+    router.push(Api);
     let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
     let actual_addr = listener.local_addr().unwrap();
@@ -431,4 +489,71 @@ async fn test_routes_attribute_mount_http() {
     let response = res.expect("Server failed to respond");
     assert_eq!(response.status().as_u16(), 200);
     assert_eq!(response.text().await.unwrap(), "checked-ok");
+
+    // [no_prefix] 数组内是中间件：无 x-np header → 400
+    let mut res = None;
+    for _ in 0..10 {
+        sleep(Duration::from_millis(100)).await;
+        if let Ok(r) = client
+            .get(format!("http://{}/backend/np-mid", actual_addr))
+            .send()
+            .await
+        {
+            res = Some(r);
+            break;
+        }
+    }
+    let response = res.expect("Server failed to respond");
+    assert_eq!(response.status().as_u16(), 400);
+
+    // [no_prefix] 数组内是中间件：带 x-np header → 200
+    let mut res = None;
+    for _ in 0..10 {
+        sleep(Duration::from_millis(100)).await;
+        if let Ok(r) = client
+            .get(format!("http://{}/backend/np-mid", actual_addr))
+            .header("x-np", "yes")
+            .send()
+            .await
+        {
+            res = Some(r);
+            break;
+        }
+    }
+    let response = res.expect("Server failed to respond");
+    assert_eq!(response.status().as_u16(), 200);
+    assert_eq!(response.text().await.unwrap(), "np-mid-ok");
+
+    // no_prefix 路由注册在根路径：GET /ping 直接可访问
+    let mut res = None;
+    for _ in 0..10 {
+        sleep(Duration::from_millis(100)).await;
+        if let Ok(r) = client
+            .get(format!("http://{}/ping", actual_addr))
+            .send()
+            .await
+        {
+            res = Some(r);
+            break;
+        }
+    }
+    let response = res.expect("Server failed to respond");
+    assert_eq!(response.status().as_u16(), 200);
+    assert_eq!(response.text().await.unwrap(), "ping");
+
+    // no_prefix 路由：/backend/ping 不应存在
+    let mut res = None;
+    for _ in 0..10 {
+        sleep(Duration::from_millis(100)).await;
+        if let Ok(r) = client
+            .get(format!("http://{}/backend/ping", actual_addr))
+            .send()
+            .await
+        {
+            res = Some(r);
+            break;
+        }
+    }
+    let response = res.expect("Server failed to respond");
+    assert_eq!(response.status().as_u16(), 404);
 }

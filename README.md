@@ -124,13 +124,92 @@ router.push(User {
 
 > **`&self` 就是你的状态** —— 路由方法和对象中间件都天然持有同一个实例：不用闭包套闭包、不用全局变量、不用手动传参。
 
+**`push` 收的是「实例」，不是「类型」** —— 两种写法都合法，取决于结构体怎么定义：
+
+```rust
+// ① 单元结构体（无字段）：类名即实例，直接 push 类名
+struct Health;
+#[aex::routes(prefix = "/backend")]
+impl Health {
+    #[get("/ping", no_prefix)]
+    fn ping(ctx: &mut Context) -> &'static str { "pong" }
+}
+router.push(Health);                       // 构造零字段实例，等价于 push(Health {})
+
+// ② 带字段结构体：必须显式构造实例，把状态一并传入
+struct User { name: String, api_key: String }
+#[aex::routes]
+impl User {
+    #[get("/me")]
+    fn me(&self, ctx: &mut Context) { ctx.text(&self.name); }
+}
+router.push(User { name: "aex".into(), api_key: "secret".into() });
+```
+
+- 内部实现：`push` 收到的是**值**，`router.push<C: AexRoutes>(instance: C)` 会 `Arc::new(instance)`，宏生成的路由/中间件各自 `Arc::clone` 持有同一实例；`&self` 方法直接读该实例状态。
+- 单元结构体 `struct Health;` 写 `push(Health)` 是**构造值**（零大小实例），不是传类型。
+- 无状态需求 → 用单元结构体（省事）；需要共享状态（连接池、配置、计数器等）→ 定义字段并在 push 时传入。
+
+**路由组前缀（`prefix`）** —— 一组路由共用一个前缀，适合按层级/子系统组织：
+
+```rust
+// #[aex::routes]               → 无前缀（根路径）
+// #[aex::routes("/api")]       → 字符串字面量前缀
+#[aex::routes(prefix = "/backend")]
+impl BackendApi {
+    // 属性里的路径与 prefix 拼接：/backend/admin/users
+    #[get("/admin/users")]
+    async fn users(ctx: &mut Context) { /* ... */ }
+
+    // "/" 与 "" 双写法都可用：/backend/ 与 /backend 均可访问
+    #[get(["/", ""])]
+    async fn home(ctx: &mut Context) { /* ... */ }
+}
+
+let mut router = HttpRouter::default();
+router.push(BackendApi);
+```
+
+- `#[aex::routes(prefix = "/...")]` 与 `#[aex::routes("/...")]` 两种写法等价；
+- 前缀自动规范化（保证前导 `/`、去掉尾斜杠），属性路径原样拼接在后方；
+- 空前缀（`#[aex::routes]`）等价于不加 prefix，路径保持不变；
+- **个别路由可跳过前缀**：在路径属性里追加 `no_prefix` 标记，该路由按原样注册在根路径（`#[get("/health", no_prefix)]` → `/health`，而非 `/backend/health`）。
+
+**`no_prefix` 与中间件不会混淆** —— 判定规则很明确：只看它是不是**属性里的直接位置参数**（裸标识符，不在 `[]` 内）：
+
+| 写法 | 含义 |
+|------|------|
+| `#[get("/health", no_prefix)]` | `no_prefix` 是直接参数 → **跳过前缀**标记 |
+| `#[get("/x", [auth], no_prefix)]` | 中间件数组在前、标记在后 → 既挂中间件又跳过前缀 |
+| `#[get("/x", no_prefix, [auth])]` | 标记在前 → 跳过前缀 + 挂中间件 |
+| `#[get("/x", [no_prefix])]` | 在 `[]` **数组内** → 是**中间件**（名为 `no_prefix`），前缀照常生效 |
+
+> 结论：**裸的 `no_prefix` = 跳过前缀**；**`[no_prefix]` = 名为 no_prefix 的中间件**。两者靠「是否在数组内」区分，不会打架。
+> 唯一要注意：若你的中间件恰好叫 `no_prefix`，请务必用 `[no_prefix]` 包裹，否则会被当成跳过前缀的标记。
+
+```rust
+#[aex::routes(prefix = "/backend")]
+impl Demo {
+    // 跳过前缀 → GET /ping（不带 /backend）
+    #[get("/ping", no_prefix)]
+    fn ping(ctx: &mut Context) -> &'static str { "pong" }
+
+    // [no_prefix] 是中间件，前缀仍生效 → GET /backend/secure，先过 no_prefix 中间件
+    #[get("/secure", [no_prefix])]
+    fn secure(ctx: &mut Context) -> &'static str { "ok" }
+}
+
+// 全局中间件函数（名字恰好叫 no_prefix，必须用 [no_prefix] 包裹才生效）
+fn no_prefix(ctx: &mut Context) -> bool { /* 鉴权逻辑 */ }
+```
+
 完整的 HTTP 路由、中间件、HTTP/2、WebSocket 用法见 [HTTP 快速开始](#http-快速开始)。
 
 ---
 
 ## 版本
 
-当前版本: **0.1.20**
+当前版本: **0.1.21**
 
 - 依赖配置见上方 [Get Started](#get-started-快速开始)。
 
@@ -399,8 +478,9 @@ router.push(User { name: "aex".into(), db: "...".into() });
 - 第一个参数是路径：字符串，或字符串数组（`["/", "/profile"]`）；第二个参数是中间件数组。
 - handler 支持 async 与同步，返回值遵循 `HandlerOutput`（`bool`/`()`/`String`/`&'static str`）。
 - 被挂载的实例被捕获到每个路由闭包中，`&self` 方法可读写该实例的状态。
-- `#[get]` 等属性只负责声明，真正的联结由 `router.push(实例)` 完成。
+- `#[get]` 等属性只负责声明，真正的联结由 `router.push(实例)` 完成；push 收的是**实例**——单元结构体可直接写类名，带字段结构体须 `router.push(User { ... })`（详见 [push 收实例而非类型](#路由即方法一次挂载多个-url推荐)）。
 - 没有 `&self` 的关联函数（`fn f(ctx: &mut Context)`）同样可以作为路由或中间件使用。
+- 整组路由可加前缀：`#[aex::routes(prefix = "/backend")]`（或 `#[aex::routes("/backend")]`），块内所有路径自动拼接该前缀（详见 [路由组前缀](#路由即方法一次挂载多个-url推荐)）。
 
 ### HTTP/2 支持
 
