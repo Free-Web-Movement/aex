@@ -1,5 +1,5 @@
 use aex::connection::context::Context;
-use aex::http::router::{NodeType, Router as HttpRouter};
+use aex::http::router::Router as HttpRouter;
 use aex::server::Server;
 use std::net::SocketAddr;
 

@@ -1,10 +1,9 @@
-use aex::connection::context::{Context, TypeMapExt};
+use aex::connection::context::Context;
 use aex::http::meta::HttpMetadata;
 use aex::http::protocol::header::HeaderKey;
-use aex::http::router::{NodeType, Router as HttpRouter};
+use aex::http::router::Router as HttpRouter;
 use aex::http::types::IntoExecutor;
 use aex::server::HTTPServer;
-use aex::tcp::types::{Command, RawCodec};
 use std::net::SocketAddr;
 
 #[tokio::main]

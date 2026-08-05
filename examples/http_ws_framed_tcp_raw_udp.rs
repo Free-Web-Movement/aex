@@ -9,11 +9,11 @@ use std::sync::Arc;
 
 use aex::connection::context::Context;
 use aex::http::middlewares::websocket::WebSocket;
-use aex::http::router::{NodeType, Router as HttpRouter};
+use aex::http::router::Router as HttpRouter;
 use aex::http::types::Executor;
 use aex::server::Server;
 use aex::tcp::router::Router as TcpRouter;
-use aex::tcp::types::{Codec, RawCodec};
+use aex::tcp::types::RawCodec;
 use anyhow::Result;
 
 fn setup_http() -> HttpRouter {

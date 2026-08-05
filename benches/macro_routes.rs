@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use aex::connection::context::Context;
 use aex::http::params::SmallParams;
-use aex::http::router::{AexRoutes, Router};
+use aex::http::router::Router;
 use aex::http::types::Executor;
 
 // 宏注册的模块

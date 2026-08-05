@@ -3,7 +3,6 @@ use std::sync::Arc;
 
 fn bench_middleware_overhead(c: &mut Criterion) {
     use aex::http::middlewares::rate_limit::RateLimitConfig;
-    use aex::http::types::Executor;
 
     c.bench_function("rate_limit_middleware_build", |b| {
         b.iter(|| {

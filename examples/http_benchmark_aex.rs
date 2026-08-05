@@ -36,7 +36,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let server = Server::new(addr, None).http(http_router);
     println!("AEX server on {}", addr);
 
-    let handle = tokio::spawn(async move {
+    let _handle = tokio::spawn(async move {
         if let Err(e) = server.start().await {
             eprintln!("Server error: {}", e);
         }

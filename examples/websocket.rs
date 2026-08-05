@@ -1,10 +1,9 @@
 use aex::connection::context::Context;
 use aex::http::middlewares::websocket::WebSocket;
-use aex::http::router::{NodeType, Router as HttpRouter};
+use aex::http::router::Router as HttpRouter;
 use aex::http::types::Executor;
 use aex::http::websocket::WSFrame;
 use aex::server::HTTPServer;
-use aex::tcp::types::{Command, RawCodec};
 use std::net::SocketAddr;
 use std::sync::Arc;
 

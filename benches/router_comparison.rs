@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use aex::http::params::SmallParams;
-use aex::http::router::{NodeType, Router as AexRouter};
+use aex::http::router::Router as AexRouter;
 use aex::http::types::Executor;
 
 fn bench_aex_router(c: &mut Criterion) {

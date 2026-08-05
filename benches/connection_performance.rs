@@ -1,6 +1,5 @@
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use std::net::SocketAddr;
-use std::sync::Arc;
 
 fn bench_connection_manager_creation(c: &mut Criterion) {
     use aex::connection::manager::ConnectionManager;

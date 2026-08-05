@@ -1,12 +1,12 @@
 use aex::connection::context::Context;
 use aex::http::meta::HttpMetadata;
 use aex::http::protocol::header::HeaderKey;
-use aex::http::router::{NodeType, Router as HttpRouter};
+use aex::http::router::Router as HttpRouter;
 use aex::http::types::IntoExecutor;
 use aex::server::Server;
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 
 static USERS: once_cell::sync::Lazy<Mutex<HashMap<String, serde_json::Value>>> =
     once_cell::sync::Lazy::new(|| {

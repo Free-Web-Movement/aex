@@ -3,8 +3,6 @@
 use std::net::TcpListener;
 use std::thread;
 
-use aex::connection::context::Context;
-
 fn handle_client(mut stream: std::net::TcpStream) {
     use std::io::{Read, Write};
 
@@ -17,17 +15,6 @@ fn handle_client(mut stream: std::net::TcpStream) {
                 let request = std::str::from_utf8(&buf[..n]).unwrap_or("");
 
                 if request.starts_with("GET / ") || request.starts_with("GET /\r") {
-                    // Parse headers like AEX does
-                    let mut lines = 0;
-                    for line in request.lines() {
-                        if line.is_empty() {
-                            break;
-                        }
-                        lines += 1;
-                    }
-                    // Route matching (Trie simulation)
-                    let path = "/";
-
                     // Build response (format! like AEX does)
                     let response = format!("HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nHello");
                     if stream.write_all(response.as_bytes()).is_err() {
