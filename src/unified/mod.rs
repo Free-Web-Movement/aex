@@ -2,26 +2,39 @@
 //!
 //! Unified server supporting HTTP/1.1, HTTP/2, WebSocket, TCP, and UDP protocols on the same port.
 //!
+//! Protocol identification is performed by pluggable [`detect`]ors held in a
+//! [`DetectorRegistry`]. Built-in HTTP/1.1 and HTTP/2 detectors are registered
+//! by default; additional detectors can be added, removed, reordered, or
+//! replaced at runtime — including through the builder while composing the
+//! server. Custom protocols get their own handler via [`UnifiedServer::custom_handler`].
+//!
 //! ## Usage
 //!
 //! ```rust,ignore
-//! use aex::unified::{UnifiedServer, Protocol};
-//! use aex::http::router::Router as HttpRouter;
-//! use aex::_async;
+//! use aex::unified::{UnifiedServer, DetectorRegistry};
 //!
 //! let server = UnifiedServer::new(addr, globals)
 //!     .http_handler(my_http_handler)
 //!     .tcp_handler(my_tcp_handler)
-//!     .udp_handler(my_udp_handler);
+//!     .udp_handler(my_udp_handler)
+//!     .detector(Arc::new(MyTlsDetector))
+//!     .custom_handler("my-proto", Arc::new(|ctx| tokio::spawn(async move { /* ... */ })));
 //! ```
 
 use bytes::Bytes;
 use h2::server;
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::os::fd::AsRawFd;
 use std::sync::Arc;
 use tokio::io::AsyncReadExt;
 use tokio::net::{TcpListener, TcpStream, UdpSocket};
+
+pub mod detect;
+pub use detect::{
+    run_pipeline, Claim, DetectionEvent, DetectionState, DetectorMode, DetectorRegistry,
+    Http11Detector, Http2Detector, Position, ProtocolDetector, RegisterError, Verdict, MAX_PEEK,
+};
 
 use crate::connection::context::{BoxReader, BoxWriter, ConnectionFd, Context};
 use crate::http::meta::HttpMetadata;
@@ -55,6 +68,8 @@ pub enum Protocol {
 }
 
 impl Protocol {
+    /// Legacy prefix-based classification kept for compatibility; new code
+    /// should use the pluggable [`DetectorRegistry`] pipeline instead.
     pub fn detect(bytes: &[u8], is_udp: bool) -> Self {
         if is_udp {
             return Protocol::UDP;
@@ -94,6 +109,16 @@ pub struct UnifiedServer {
     pub http2_handler: Option<Http2Handler>,
     pub tcp_handler: Option<TCPHandler>,
     pub udp_handler: Option<UDPHandler>,
+    /// Ordered protocol detectors consulted before dispatching a TCP
+    /// connection. Shared via `Arc`, so runtime mutations are visible to the
+    /// running server.
+    pub registry: Arc<DetectorRegistry>,
+    /// Handlers for protocols claimed by custom detectors, keyed by the
+    /// detector's `protocol()` label.
+    pub custom_handlers: HashMap<String, TCPHandler>,
+    /// Master switch for the detection phase; when off, connections go
+    /// straight to the TCP handler without any peeking.
+    pub detect_enabled: bool,
     #[doc(hidden)]
     pub _udp_socket: Option<UdpSocket>,
 }
@@ -109,6 +134,9 @@ impl UnifiedServer {
             http2_handler: None,
             tcp_handler: None,
             udp_handler: None,
+            registry: Arc::new(DetectorRegistry::new()),
+            custom_handlers: HashMap::new(),
+            detect_enabled: true,
             _udp_socket: None,
         }
     }
@@ -143,37 +171,130 @@ impl UnifiedServer {
         self
     }
 
-    pub async fn handle_tcp_connection(&self, mut socket: TcpStream, peer_addr: SocketAddr) {
-        let mut peek_buf = [0u8; 24];
-        let n = match socket.read(&mut peek_buf).await {
-            Ok(n) => n,
-            Err(_) => return,
-        };
-        if n == 0 {
-            return;
+    /// Register a protocol detector at the back of the detection pipeline.
+    /// Registration errors (duplicate name, conflict) are logged, not fatal.
+    pub fn detector(self, d: Arc<dyn ProtocolDetector>) -> Self {
+        self.detector_at(Position::Back, d)
+    }
+
+    /// Register a protocol detector at an explicit position.
+    pub fn detector_at(self, pos: Position, d: Arc<dyn ProtocolDetector>) -> Self {
+        if let Err(e) = self.registry.register_at(pos, d) {
+            tracing::warn!("[Unified] detector registration failed: {}", e);
         }
+        self
+    }
 
-        let protocol = Protocol::detect(&peek_buf[..n], false);
-        let initial_data = peek_buf[..n].to_vec();
+    /// Share an externally-managed registry, e.g. one mutated at runtime by
+    /// other parts of the application.
+    pub fn with_registry(mut self, registry: Arc<DetectorRegistry>) -> Self {
+        self.registry = registry;
+        self
+    }
 
-        match protocol {
-            Protocol::Http2 => {
-                if self.enable_http2 {
-                    self.handle_http2(socket, peer_addr).await;
-                } else {
-                    self.handle_tcp(socket, peer_addr, initial_data).await;
+    /// Route connections claimed as `protocol` to a dedicated handler.
+    pub fn custom_handler<P: Into<String>>(mut self, protocol: P, handler: TCPHandler) -> Self {
+        self.custom_handlers.insert(protocol.into(), handler);
+        self
+    }
+
+    /// Enable/disable the detection phase entirely. When disabled, TCP
+    /// connections go straight to the TCP handler without peeking.
+    pub fn detection(mut self, enabled: bool) -> Self {
+        self.detect_enabled = enabled;
+        self
+    }
+
+    pub async fn handle_tcp_connection(&self, mut socket: TcpStream, peer_addr: SocketAddr) {
+        // Detection phase: buffer bytes and run the detector pipeline until
+        // some detector claims the connection, every pending detector has
+        // passed, or the peek cap is reached. With an empty registry (or
+        // detection disabled) nothing is read here at all.
+        let detectors = self.registry.snapshot();
+        let mut initial_data: Vec<u8> = Vec::with_capacity(256);
+        let mut state = DetectionState::new();
+
+        if self.detect_enabled && !detectors.is_empty() {
+            let mut chunk = [0u8; 2048];
+            loop {
+                match socket.read(&mut chunk).await {
+                    Ok(0) | Err(_) => {
+                        if initial_data.is_empty() {
+                            return;
+                        }
+                        state.finish();
+                        break;
+                    }
+                    Ok(n) => initial_data.extend_from_slice(&chunk[..n]),
+                }
+                run_pipeline(&detectors, &initial_data, &mut state);
+                if state.is_finished() || initial_data.len() >= MAX_PEEK {
+                    break;
                 }
             }
-            Protocol::Http11 => {
+        }
+
+        let claim = state.claim();
+        match claim.map(|c| (c.protocol.as_str(), c.mode)) {
+            Some(("http", DetectorMode::Standard)) => {
                 self.handle_http11(socket, peer_addr, initial_data).await;
             }
-            Protocol::TCP | Protocol::Unknown => {
-                self.handle_tcp(socket, peer_addr, initial_data).await;
+            Some(("http2", DetectorMode::Standard)) if self.enable_http2 => {
+                self.handle_http2(socket, peer_addr).await;
             }
-            Protocol::UDP => {
-                self.handle_tcp(socket, peer_addr, initial_data).await;
+            Some((protocol, mode)) => {
+                let handler = self.custom_handlers.get(protocol).cloned().or_else(|| {
+                    tracing::warn!(
+                        "[Unified] no handler for detected protocol `{protocol}` ({mode:?}), falling back to TCP"
+                    );
+                    self.tcp_handler.clone()
+                });
+                match handler {
+                    Some(h) => {
+                        self.dispatch_tcp(socket, peer_addr, initial_data, state, h)
+                            .await;
+                    }
+                    None => {
+                        tracing::warn!(
+                            "[Unified] No TCP handler registered, dropping connection from {}",
+                            peer_addr
+                        );
+                    }
+                }
+            }
+            None => {
+                self.handle_tcp(socket, peer_addr, initial_data, Some(state))
+                    .await;
             }
         }
+    }
+
+    /// Install the split socket halves plus link-state attributes into a
+    /// fresh context and hand it to `handler`.
+    async fn dispatch_tcp(
+        &self,
+        socket: TcpStream,
+        peer_addr: SocketAddr,
+        initial_data: Vec<u8>,
+        state: DetectionState,
+        handler: TCPHandler,
+    ) {
+        let fd = socket.as_raw_fd();
+        let (reader, writer) = socket.into_split();
+        let cursor = std::io::Cursor::new(initial_data);
+        let reader_with_buf = tokio::io::BufReader::new(cursor.chain(reader));
+        let boxed_reader: BoxReader = Box::new(reader_with_buf);
+        let writer = Box::new(writer) as BoxWriter;
+
+        let mut ctx = Context::new(
+            Some(boxed_reader),
+            Some(writer),
+            self.globals.clone(),
+            peer_addr,
+        );
+        ctx.local.set_value(ConnectionFd(fd));
+        ctx.local.set_value(state);
+        handler(ctx);
     }
 
     async fn handle_http11(
@@ -308,7 +429,13 @@ impl UnifiedServer {
         }
     }
 
-    async fn handle_tcp(&self, socket: TcpStream, peer_addr: SocketAddr, initial_data: Vec<u8>) {
+    async fn handle_tcp(
+        &self,
+        socket: TcpStream,
+        peer_addr: SocketAddr,
+        initial_data: Vec<u8>,
+        detection: Option<DetectionState>,
+    ) {
         let fd = socket.as_raw_fd();
         let (reader, writer) = socket.into_split();
         let cursor = std::io::Cursor::new(initial_data);
@@ -323,6 +450,9 @@ impl UnifiedServer {
             peer_addr,
         );
         ctx.local.set_value(ConnectionFd(fd));
+        if let Some(state) = detection {
+            ctx.local.set_value(state);
+        }
 
         tracing::info!(
             "[Unified] TCP handler invoked for connection from {}",
@@ -473,6 +603,9 @@ impl Clone for UnifiedServer {
             http2_handler: self.http2_handler.clone(),
             tcp_handler: self.tcp_handler.clone(),
             udp_handler: self.udp_handler.clone(),
+            registry: self.registry.clone(),
+            custom_handlers: self.custom_handlers.clone(),
+            detect_enabled: self.detect_enabled,
             _udp_socket: None,
         }
     }

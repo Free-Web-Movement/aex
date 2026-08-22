@@ -239,6 +239,7 @@ dependencies = [
  "serde_json",
  "sha1 0.10.7",
  "smol",
+ "thiserror 2.0.19",
  "tokio",
  "tokio-util",
  "tracing",
