@@ -18,6 +18,10 @@ authors = ["Eric <calidion@gmail.com>"]
 default = ["router-cache"]
 router-cache = []
 http-timeout = []
+## Built-in HTTP forward proxy (absolute-form + CONNECT) and SOCKS4/4a/5
+## CONNECT service on the unified server. Opt-in: an open relay is a
+## liability, so nothing proxy-related is compiled in by default.
+proxy = []
 
 [dependencies]
 aex-macros = { path = "src/aex-macros", version = "0.1.1" }

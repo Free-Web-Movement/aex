@@ -119,6 +119,16 @@ pub struct UnifiedServer {
     /// Master switch for the detection phase; when off, connections go
     /// straight to the TCP handler without any peeking.
     pub detect_enabled: bool,
+    #[cfg(feature = "proxy")]
+    /// Serve absolute-form requests and CONNECT tunnels as an HTTP forward
+    /// proxy on the same port as website traffic.
+    pub http_proxy_enabled: bool,
+    #[cfg(feature = "proxy")]
+    /// Claim "socks" greetings internally and serve SOCKS4/4a/5 CONNECT.
+    pub socks_proxy_enabled: bool,
+    #[cfg(feature = "proxy")]
+    /// Shared credential checker for both proxy services.
+    pub proxy_authorizer: Option<crate::proxy::ProxyAuthorizer>,
     #[doc(hidden)]
     pub _udp_socket: Option<UdpSocket>,
 }
@@ -137,6 +147,12 @@ impl UnifiedServer {
             registry: Arc::new(DetectorRegistry::new()),
             custom_handlers: HashMap::new(),
             detect_enabled: true,
+            #[cfg(feature = "proxy")]
+            http_proxy_enabled: false,
+            #[cfg(feature = "proxy")]
+            socks_proxy_enabled: false,
+            #[cfg(feature = "proxy")]
+            proxy_authorizer: None,
             _udp_socket: None,
         }
     }
@@ -203,6 +219,66 @@ impl UnifiedServer {
     pub fn detection(mut self, enabled: bool) -> Self {
         self.detect_enabled = enabled;
         self
+    }
+
+    #[cfg(feature = "proxy")]
+    /// Serve HTTP forward-proxy traffic (absolute-form requests and CONNECT
+    /// tunnels) on this server. Website traffic is unaffected — the client's
+    /// request line decides which service handles each connection.
+    pub fn enable_http_proxy(mut self) -> Self {
+        // Proxy traffic arrives as ordinary HTTP/1.x — without this detector
+        // nothing claims the connection and the proxy hook never runs.
+        if let Err(e) = self
+            .registry
+            .register_at(Position::Back, Arc::new(Http11Detector))
+        {
+            tracing::warn!("[Unified] http11 detector registration failed: {}", e);
+        }
+        self.http_proxy_enabled = true;
+        self
+    }
+
+    #[cfg(feature = "proxy")]
+    /// Serve SOCKS4/4a/5 CONNECT on this server. Registers the internal
+    /// SOCKS greeting detector; claimed connections are handled before any
+    /// user `custom_handler("socks")`.
+    pub fn enable_socks_proxy(mut self) -> Self {
+        use crate::proxy::{SocksDetector, socks_tcp_handler};
+        if let Err(e) = self.registry.register(Arc::new(SocksDetector)) {
+            tracing::warn!("[Unified] socks detector registration failed: {}", e);
+        }
+        self.socks_proxy_enabled = true;
+        // Pre-seed the internal handler; users may still override it via
+        // custom_handler("socks", ...) for full control.
+        self.custom_handlers
+            .entry("socks".to_string())
+            .or_insert_with(|| {
+                socks_tcp_handler(self.proxy_authorizer.clone())
+            });
+        self
+    }
+
+    #[cfg(feature = "proxy")]
+    /// Credential gate shared by the HTTP and SOCKS proxy services.
+    pub fn proxy_authenticator(
+        mut self,
+        f: Arc<dyn Fn(&str, &str) -> bool + Send + Sync>,
+    ) -> Self {
+        self.proxy_authorizer = Some(f);
+        // Refresh a pre-existing socks handler so it sees the authenticator.
+        if self.socks_proxy_enabled {
+            self.custom_handlers.insert(
+                "socks".to_string(),
+                crate::proxy::socks_tcp_handler(self.proxy_authorizer.clone()),
+            );
+        }
+        self
+    }
+
+    #[cfg(feature = "proxy")]
+    /// Convenience: enable both proxy services.
+    pub fn enable_proxies(self) -> Self {
+        self.enable_http_proxy().enable_socks_proxy()
     }
 
     pub async fn handle_tcp_connection(&self, mut socket: TcpStream, peer_addr: SocketAddr) {
@@ -319,6 +395,14 @@ impl UnifiedServer {
         if ctx.req().parse_to_local().await.is_err() {
             let _ = ctx.res().send_failure().await;
             return;
+        }
+
+        #[cfg(feature = "proxy")]
+        if self.http_proxy_enabled
+            && crate::proxy::maybe_handle_http_proxy(&mut ctx, self.proxy_authorizer.as_ref())
+                .await
+        {
+            return; // connection fully served as proxy traffic
         }
 
         let is_ws = {
@@ -606,6 +690,12 @@ impl Clone for UnifiedServer {
             registry: self.registry.clone(),
             custom_handlers: self.custom_handlers.clone(),
             detect_enabled: self.detect_enabled,
+            #[cfg(feature = "proxy")]
+            http_proxy_enabled: self.http_proxy_enabled,
+            #[cfg(feature = "proxy")]
+            socks_proxy_enabled: self.socks_proxy_enabled,
+            #[cfg(feature = "proxy")]
+            proxy_authorizer: self.proxy_authorizer.clone(),
             _udp_socket: None,
         }
     }

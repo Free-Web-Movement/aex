@@ -244,11 +244,45 @@ Aex 是目前 Rust 生态中**协议支持最全面**的 web 框架之一，可�
 │  HTTP/1.1     │ Http11Detector        │ 标准 HTTP 请求       │
 │  HTTP/2       │ Http2Detector         │ HTTP/2 协议 preface │
 │  WebSocket    │ HTTP 升级请求内识别     │ Upgrade 头          │
+│  HTTP 代理     │ Http11Detector 内分流  │ absolute-form / CONNECT（feature=proxy）│
+│  SOCKS4/4a/5  │ SocksDetector（内置）  │ CONNECT 隧道（feature=proxy）│
 │  自定义协议     │ 自定义 ProtocolDetector │ trojan/NAT/私有协议 │
 │  TCP          │ 兜底 handler           │ 其他所有流量         │
 │  UDP          │ 独立 UDP Socket        │ 数据报通信           │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+#### 内置 HTTP / SOCKS 代理（`feature = "proxy"`）
+
+单端口同时承载多个服务，**由客户端首字节决定走哪条服务线**，无服务器端模式切换：
+
+| 客户端行为 | 服务线 |
+|---|---|
+| `GET /path HTTP/1.1`（origin-form） | 网站路由 / handler |
+| `GET http://host/path HTTP/1.1`（absolute-form） | HTTP 正向代理 → 上游 |
+| `CONNECT host:port HTTP/1.1` | HTTP 隧道 → 上游 |
+| `\x05\x01\x00...`（SOCKS 问候） | SOCKS4/4a/5 CONNECT |
+| TLS ClientHello | 检测器认领 → 自定义 handler |
+
+```bash
+# Cargo.toml
+aex = { version = "0.1", features = ["proxy"] }
+```
+
+```rust
+let server = UnifiedServer::new(addr, globals)
+    .enable_http_proxy()   // 自动挂载 Http11Detector，origin-form 仍走网站
+    .enable_socks_proxy()  // 自动注册 SocksDetector 与内部 handler
+    .proxy_authenticator(Arc::new(|u, p| u == "alice" && p == "secret"))
+    // .enable_proxies()    // 或一次性开启两个
+    .http_handler(/* 网站业务 */);
+server.start().await?;
+```
+
+- HTTP 代理：absolute-form 请求改写为 origin-form 后中继（剥离 hop-by-hop 头、注入 `Via`）；CONNECT 建隧道后原始字节双向转发。
+- SOCKS 代理：仅 CONNECT（BIND / UDP ASSOCIATE 回“不支持”）；认证支持无认证与 RFC 1929 用户名/密码（`proxy_authenticator` 统一控制 HTTP 与 SOCKS 两端）。
+- 默认不编译任何代理逻辑（开放代理是风险资产）；示例见 `examples/proxy_demo`。
+- 测试：`cargo test --features proxy`（`tests/proxy_builtin_test.rs`：单端口网站+代理混跑、CONNECT 隧道、SOCKS4/4a/5、认证成败）。
 
 ### 统一服务器 (UnifiedServer)
 
