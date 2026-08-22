@@ -112,6 +112,13 @@ pub type AexWriter = dyn AsyncWrite + Send + Sync + Unpin;
 pub type BoxReader = Box<AexReader>;
 pub type BoxWriter = Box<AexWriter>;
 
+/// Connection attribute carrying the underlying OS file descriptor. It is set
+/// when a connection is accepted so that handlers can still perform fd-level
+/// operations (e.g. NAT original-destination lookups via SO_ORIGINAL_DST)
+/// after the stream has been split into reader/writer halves.
+#[derive(Debug, Clone, Copy)]
+pub struct ConnectionFd(pub std::os::fd::RawFd);
+
 /// Per-request context containing connection info, I/O, and data storage.
 pub struct Context {
     pub addr: SocketAddr,

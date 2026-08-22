@@ -18,11 +18,12 @@
 use bytes::Bytes;
 use h2::server;
 use std::net::SocketAddr;
+use std::os::fd::AsRawFd;
 use std::sync::Arc;
 use tokio::io::AsyncReadExt;
 use tokio::net::{TcpListener, TcpStream, UdpSocket};
 
-use crate::connection::context::{BoxReader, BoxWriter, Context};
+use crate::connection::context::{BoxReader, BoxWriter, ConnectionFd, Context};
 use crate::http::meta::HttpMetadata;
 use crate::http::middlewares::websocket::WebSocket;
 use crate::http::protocol::header::HeaderKey;
@@ -308,18 +309,20 @@ impl UnifiedServer {
     }
 
     async fn handle_tcp(&self, socket: TcpStream, peer_addr: SocketAddr, initial_data: Vec<u8>) {
+        let fd = socket.as_raw_fd();
         let (reader, writer) = socket.into_split();
         let cursor = std::io::Cursor::new(initial_data);
         let reader_with_buf = tokio::io::BufReader::new(cursor.chain(reader));
         let boxed_reader: BoxReader = Box::new(reader_with_buf);
         let writer = Box::new(writer) as BoxWriter;
 
-        let ctx = Context::new(
+        let mut ctx = Context::new(
             Some(boxed_reader),
             Some(writer),
             self.globals.clone(),
             peer_addr,
         );
+        ctx.local.set_value(ConnectionFd(fd));
 
         tracing::info!(
             "[Unified] TCP handler invoked for connection from {}",
@@ -404,13 +407,15 @@ impl UnifiedServer {
                     let handler = tcp_handler.clone();
                     let globals = globals.clone();
                     tokio::spawn(async move {
+                        let fd = socket.as_raw_fd();
                         let (reader, writer) = socket.into_split();
                         let reader = tokio::io::BufReader::new(reader);
                         let boxed_reader: BoxReader = Box::new(reader);
                         let writer = Box::new(writer) as BoxWriter;
 
-                        let ctx =
+                        let mut ctx =
                             Context::new(Some(boxed_reader), Some(writer), globals, peer_addr);
+                        ctx.local.set_value(ConnectionFd(fd));
                         if let Some(h) = handler {
                             h(ctx);
                         }
