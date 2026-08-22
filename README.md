@@ -335,6 +335,43 @@ let server = UnifiedServer::new(addr, globals)
 
 `Verdict` 三态：`Match`（认领）/ `Pass`（不匹配）/ `NeedMore(n)`（数据不足，最多缓冲 16 KiB）。
 
+#### 代理协议检测示例（examples/detectors_*）
+
+核心只保留主流 Web 协议（HTTP/1.1、HTTP/2；HTTP/3/QUIC 后续加入）。TLS、SOCKS、
+trojan、VLESS 等代理协议的检测器与验证中间件作为**开发示例**放在 examples 目录，
+全部基于公开框架 API 组合，可直接运行、可作模板：
+
+| 示例 | 内容 |
+|------|------|
+| `examples/detectors_common/mod.rs` | 共享实现：`TlsDetector`（ClientHello 被动解析，提取 SNI/ALPN）、`SocksDetector`（SOCKS4/5 问候识别）、`TlsLoader` + `TlsMiddleware::accept`（证书加载 + rustls TLS 终结）、`TrojanMiddleware::validate`、`VlessMiddleware::validate` |
+| `examples/detector_tls/` | SNI/ALPN 路由：检测层认领 "tls"，按 ClientHello 名字分发 |
+| `examples/detector_socks5/` | SOCKS5/SOCKS4 混合监听 |
+| `examples/detector_trojan/` | 单端口 trojan-over-TLS 全链路：嗅探 → TLS 终结 → 头部校验剥离 |
+| `examples/detector_vless/` | VLESS 结构校验（UUID 鉴权留待业务层） |
+
+```bash
+cargo test --test proxy_detectors_test   # 解析器单测 + 真实 socket 端到端
+cargo run --example detector_trojan cert.pem key.pem
+```
+
+分层语义：
+
+```text
+原始字节 ──► 嗅探检测器（TlsDetector / SocksDetector / Http*）
+                 │ 首个 Match 获胜
+                 ▼
+         custom_handler(protocol) 分发
+                 ▼
+ TlsMiddleware::accept(cert,key) ──► ctx 流变为解密后的明文
+                 ▼
+ Trojan/VLESS validate ──► 业务 handler / fallback
+```
+
+**边界说明**：VMess 与 Shadowsocks 的请求头在 UUID/PSK 派生密钥加密之下，被动字节
+层面无法与随机流量区分，因此不存在"被动检测器"——支持它们需要持有用户库并做试解密
+的完整协议中间件（应用层职责）。Clash 是客户端而非线上协议，无独立检测可言。
+所有 validator 内置 10 秒读超时（`VALIDATION_TIMEOUT`），半包挂起的对端会被切断。
+
 ### Handler 类型签名
 
 ```rust

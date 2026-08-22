@@ -102,6 +102,10 @@ actix-web = "4"
 axum = "0.8"
 criterion = "0.5"
 h2 = "0.4"
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "tls12", "std"] }
+rustls-pemfile = "2.2"
+rcgen = "0.13"
 
 [[bench]]
 name = "http_router"
