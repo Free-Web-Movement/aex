@@ -89,6 +89,20 @@ where
     })
 }
 
+pub fn get_udp_router<F, C>(
+    global: &ConcurrentTypeMap,
+) -> Option<Arc<crate::udp::router::Router<F, C>>>
+where
+    F: Send + Sync + 'static,
+    C: Send + Sync + 'static,
+{
+    global.get(&TypeId::of::<UdpRouterKey>()).and_then(|r| {
+        r.value()
+            .downcast_ref::<Arc<crate::udp::router::Router<F, C>>>()
+            .cloned()
+    })
+}
+
 /// Extension trait for ConcurrentTypeMap to get/set values by type.
 pub trait TypeMapExt {
     fn get_value<T: Clone + 'static>(&self) -> Option<T>;

@@ -119,4 +119,87 @@ mod tests {
             assert!(!status.to_str().is_empty());
         }
     }
+
+    #[test]
+    fn test_to_http_status_all_mapped() {
+        use http::StatusCode as HttpStatus;
+        let cases = [
+            (StatusCode::Ok, HttpStatus::OK),
+            (StatusCode::Created, HttpStatus::CREATED),
+            (StatusCode::Accepted, HttpStatus::ACCEPTED),
+            (StatusCode::NoContent, HttpStatus::NO_CONTENT),
+            (StatusCode::BadRequest, HttpStatus::BAD_REQUEST),
+            (StatusCode::Unauthorized, HttpStatus::UNAUTHORIZED),
+            (StatusCode::Forbidden, HttpStatus::FORBIDDEN),
+            (StatusCode::NotFound, HttpStatus::NOT_FOUND),
+            (StatusCode::MethodNotAllowed, HttpStatus::METHOD_NOT_ALLOWED),
+            (StatusCode::RequestTimeout, HttpStatus::REQUEST_TIMEOUT),
+            (StatusCode::Conflict, HttpStatus::CONFLICT),
+            (StatusCode::Gone, HttpStatus::GONE),
+            (StatusCode::InternalServerError, HttpStatus::INTERNAL_SERVER_ERROR),
+            (StatusCode::NotImplemented, HttpStatus::NOT_IMPLEMENTED),
+            (StatusCode::BadGateway, HttpStatus::BAD_GATEWAY),
+            (StatusCode::ServiceUnavailable, HttpStatus::SERVICE_UNAVAILABLE),
+            (StatusCode::GatewayTimeout, HttpStatus::GATEWAY_TIMEOUT),
+        ];
+        for (aex_status, http_status) in cases.iter() {
+            assert_eq!(aex_status.to_http_status(), *http_status);
+        }
+    }
+
+    #[test]
+    fn test_to_http_status_unmapped_falls_back_to_ok() {
+        use http::StatusCode as HttpStatus;
+        // 未显式映射的变体应回退到 OK
+        let unmapped = [
+            StatusCode::Continue,
+            StatusCode::SwitchingProtocols,
+            StatusCode::Processing,
+            StatusCode::EarlyHints,
+            StatusCode::NonAuthoritativeInformation,
+            StatusCode::ResetContent,
+            StatusCode::PartialContent,
+            StatusCode::MultiStatus,
+            StatusCode::AlreadyReported,
+            StatusCode::ImUsed,
+            StatusCode::MultipleChoices,
+            StatusCode::MovedPermanently,
+            StatusCode::Found,
+            StatusCode::SeeOther,
+            StatusCode::NotModified,
+            StatusCode::UseProxy,
+            StatusCode::TemporaryRedirect,
+            StatusCode::PermanentRedirect,
+            StatusCode::PaymentRequired,
+            StatusCode::NotAcceptable,
+            StatusCode::ProxyAuthenticationRequired,
+            StatusCode::LengthRequired,
+            StatusCode::PreconditionFailed,
+            StatusCode::PayloadTooLarge,
+            StatusCode::URITooLong,
+            StatusCode::UnsupportedMediaType,
+            StatusCode::RangeNotSatisfiable,
+            StatusCode::ExpectationFailed,
+            StatusCode::ImATeapot,
+            StatusCode::MisdirectedRequest,
+            StatusCode::UnprocessableEntity,
+            StatusCode::Locked,
+            StatusCode::FailedDependency,
+            StatusCode::TooEarly,
+            StatusCode::UpgradeRequired,
+            StatusCode::PreconditionRequired,
+            StatusCode::TooManyRequests,
+            StatusCode::RequestHeaderFieldsTooLarge,
+            StatusCode::UnavailableForLegalReasons,
+            StatusCode::HTTPVersionNotSupported,
+            StatusCode::VariantAlsoNegotiates,
+            StatusCode::InsufficientStorage,
+            StatusCode::LoopDetected,
+            StatusCode::NotExtended,
+            StatusCode::NetworkAuthenticationRequired,
+        ];
+        for status in unmapped.iter() {
+            assert_eq!(status.to_http_status(), HttpStatus::OK);
+        }
+    }
 }

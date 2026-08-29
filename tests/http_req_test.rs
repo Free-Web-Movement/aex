@@ -129,4 +129,92 @@ mod tests {
         // 虽然代码里没直接检查长度，但 read_until 内部 buf 会增长。
         // 这里可以通过 Mock 来模拟超时。
     }
+
+    #[tokio::test]
+    async fn test_request_line_too_long() {
+        use aex::constants::http::MAX_REQUEST_LINE_SIZE;
+        let mut local = LocalTypeMap::new();
+        // 请求行超过 MAX_REQUEST_LINE_SIZE
+        let long = format!("GET /{} HTTP/1.1\r\n\r\n", "a".repeat(MAX_REQUEST_LINE_SIZE + 100));
+        let reader = BufReader::new(Cursor::new(long.into_bytes()));
+        let mut reader: Option<BoxReader> = Some(Box::new(reader));
+        let mut req = Request::new(&mut reader, &mut local);
+        let result = req.parse_to_local().await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_too_many_headers() {
+        use aex::constants::http::MAX_HEADER_COUNT;
+        let mut local = LocalTypeMap::new();
+        let mut input = String::from("GET / HTTP/1.1\r\n");
+        for i in 0..(MAX_HEADER_COUNT + 10) {
+            input.push_str(&format!("X-Custom-{i}: value\r\n"));
+        }
+        input.push_str("\r\n");
+        let reader = BufReader::new(Cursor::new(input.into_bytes()));
+        let mut reader: Option<BoxReader> = Some(Box::new(reader));
+        let mut req = Request::new(&mut reader, &mut local);
+        assert!(req.parse_to_local().await.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_header_size_too_large() {
+        use aex::constants::http::MAX_HEADER_SIZE;
+        let mut local = LocalTypeMap::new();
+        let big_value = "v".repeat(MAX_HEADER_SIZE);
+        let input = format!("GET / HTTP/1.1\r\nX-Big: {big_value}\r\n\r\n");
+        let reader = BufReader::new(Cursor::new(input.into_bytes()));
+        let mut reader: Option<BoxReader> = Some(Box::new(reader));
+        let mut req = Request::new(&mut reader, &mut local);
+        assert!(req.parse_to_local().await.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_reader_taken_error() {
+        let mut local = LocalTypeMap::new();
+        // reader 为 None（已被取出）时应报 "Reader taken!"
+        let mut reader: Option<BoxReader> = None;
+        let mut req = Request::new(&mut reader, &mut local);
+        let result = req.parse_to_local().await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_method_and_path_defaults() {
+        let mut local = LocalTypeMap::new();
+        let reader = BufReader::new(Cursor::new(b""));
+        let mut reader: Option<BoxReader> = Some(Box::new(reader));
+        let req = Request::new(&mut reader, &mut local);
+        // 无 HttpMetadata 时 method 默认 GET，path 默认 "/"
+        assert_eq!(req.method(), HttpMethod::GET);
+        assert_eq!(req.path(), "/");
+        assert!(req.params().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_non_chunked_and_no_content_type() {
+        let mut local = LocalTypeMap::new();
+        // 无 Transfer-Encoding 且无 Content-Type
+        let input = b"POST /submit HTTP/1.1\r\nHost: localhost\r\n\r\n";
+        let reader = BufReader::new(Cursor::new(input));
+        let mut reader: Option<BoxReader> = Some(Box::new(reader));
+        let mut req = Request::new(&mut reader, &mut local);
+        req.parse_to_local().await.unwrap();
+
+        let meta = local.get_value::<HttpMetadata>().unwrap();
+        assert!(!meta.is_chunked);
+        assert!(meta.transfer_encoding.is_none());
+        assert!(meta.multipart_boundary.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_unknown_method_error() {
+        let mut local = LocalTypeMap::new();
+        let input = b"FETCH / HTTP/1.1\r\n\r\n";
+        let reader = BufReader::new(Cursor::new(input));
+        let mut reader: Option<BoxReader> = Some(Box::new(reader));
+        let mut req = Request::new(&mut reader, &mut local);
+        assert!(req.parse_to_local().await.is_err());
+    }
 }

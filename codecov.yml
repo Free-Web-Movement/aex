@@ -1,0 +1,33 @@
+# Codecov 配置：任何提交的覆盖率不能低于上一次（base 分支）。
+# project status 对比 base 分支：覆盖率下降即 PR 检查失败。
+codecov:
+  require_ci_to_pass: true
+  notify:
+    wait_for_ci: true
+
+coverage:
+  precision: 2
+  round: down
+  range: "70...100"
+
+  status:
+    # 整体项目覆盖率对比 base 分支，阈值 0 = 不允许任何下降
+    project:
+      default:
+        target: auto        # 以 base 分支为准
+        threshold: 0        # 0 = 覆盖率下降即失败
+        base: auto
+        if_ci_failed: error
+        if_not_found: success
+        informational: false
+    # patch（本次改动新增代码）覆盖率
+    patch:
+      default:
+        target: 80%         # 新增代码至少 80% 覆盖率
+        threshold: 0
+        informational: false
+
+comment:
+  layout: "reach, diff, flags, files"
+  behavior: default
+  require_changes: false

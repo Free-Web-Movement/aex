@@ -158,4 +158,95 @@ mod tests {
 
         assert_eq!(limits.inbound_count().await, 1);
     }
+
+    #[tokio::test]
+    async fn test_remove_connection_decrements_all_counts() {
+        let config = ConnectionPoolConfig::new(100).with_per_ip_limit(100);
+        let limits = ConnectionPoolLimits::new(config);
+
+        let addr1 = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
+        let addr2 = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 2)), 8080);
+        limits.add_connection(addr1, true).await;
+        limits.add_connection(addr2, true).await;
+        assert_eq!(limits.total_connections().await, 2);
+        assert_eq!(limits.outbound_count().await, 2);
+
+        limits.remove_connection(&addr1).await;
+        assert_eq!(limits.total_connections().await, 1);
+        assert_eq!(limits.per_ip_count(&addr1).await, 0);
+        assert_eq!(limits.outbound_count().await, 1);
+
+        limits.remove_connection(&addr2).await;
+        assert_eq!(limits.total_connections().await, 0);
+        assert_eq!(limits.per_ip_count(&addr2).await, 0);
+        assert_eq!(limits.outbound_count().await, 0);
+    }
+
+    #[tokio::test]
+    async fn test_remove_connection_unknown_addr_noop() {
+        let config = ConnectionPoolConfig::new(100);
+        let limits = ConnectionPoolLimits::new(config);
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
+        // 移除不存在的地址：不应 panic，计数保持 0
+        limits.remove_connection(&addr).await;
+        assert_eq!(limits.total_connections().await, 0);
+    }
+
+    #[tokio::test]
+    async fn test_subnet_limit() {
+        // max_total 很大，但 max_connections_per_subnet = 2
+        let config = ConnectionPoolConfig::new(1000).with_subnet_limit(2);
+        let limits = ConnectionPoolLimits::new(config);
+
+        let addr1 = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)), 8080);
+        let addr2 = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 2)), 8080);
+        let addr3 = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 3)), 8080);
+
+        limits.add_connection(addr1, true).await;
+        limits.add_connection(addr2, true).await;
+
+        let result = limits.can_connect(&addr3, true).await;
+        assert!(matches!(result, PoolAllowResult::SubnetLimit));
+    }
+
+    #[tokio::test]
+    async fn test_inbound_limit() {
+        // max_total=4 → max_inbound = 2
+        let config = ConnectionPoolConfig::new(4);
+        let limits = ConnectionPoolLimits::new(config);
+
+        let addr1 = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)), 8080);
+        let addr2 = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)), 8080);
+        let addr3 = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 3)), 8080);
+
+        limits.add_connection(addr1, false).await;
+        limits.add_connection(addr2, false).await;
+
+        let result = limits.can_connect(&addr3, false).await;
+        assert!(matches!(result, PoolAllowResult::InboundLimit));
+    }
+
+    #[tokio::test]
+    async fn test_ipv6_subnet_handling() {
+        use std::net::{Ipv6Addr, SocketAddrV6};
+        let config = ConnectionPoolConfig::new(1000);
+        let limits = ConnectionPoolLimits::new(config);
+
+        let addr = SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 8080);
+        // IPv6 不应 panic（get_subnet 返回 "ipv6_global" 之类）
+        limits.add_connection(addr, true).await;
+        assert_eq!(limits.total_connections().await, 1);
+        let result = limits.can_connect(&addr, true).await;
+        // per_ip 限制（默认10）内应 Allowed
+        assert!(matches!(result, PoolAllowResult::Allowed));
+    }
+
+    #[tokio::test]
+    async fn test_cleanup_idle_empty() {
+        let config = ConnectionPoolConfig::new(100).with_idle_timeout(1);
+        let limits = ConnectionPoolLimits::new(config);
+        // 没有连接时 cleanup 返回空
+        let removed = limits.cleanup_idle().await;
+        assert!(removed.is_empty());
+    }
 }

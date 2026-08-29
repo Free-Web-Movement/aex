@@ -410,10 +410,7 @@ impl Server {
         let socket = Arc::new(UdpSocket::bind(self.addr).await?);
         tracing::info!("UDP listener started on {}", self.addr);
 
-        let rt = self
-            .globals
-            .routers
-            .get_value::<Arc<UdpRouter<F, C>>>()
+        let rt = crate::connection::context::get_udp_router::<F, C>(&self.globals.routers)
             .ok_or_else(|| anyhow::anyhow!("UDP router not found"))?;
 
         rt.handle(self.globals.clone(), socket).await
