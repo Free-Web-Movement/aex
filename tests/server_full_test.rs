@@ -174,3 +174,48 @@ async fn server_start_udp_dispatches_to_router() {
     assert_eq!(counter.load(Ordering::SeqCst), 1);
     handle.abort();
 }
+
+#[tokio::test]
+async fn server_start_multi_protocol_with_tcp_and_udp() {
+    use aex::connection::context::get_udp_router;
+    let a = free_addr().await;
+    let counter = Arc::new(AtomicUsize::new(0));
+    let c = counter.clone();
+
+    let mut udp = UdpRouter::<RawCodec, RawCodec>::new()
+        .extractor(|c: &RawCodec| u32::from_le_bytes(c.0[..4].try_into().unwrap()));
+    udp.on(99, move |_g, _f, _c, _a, _s| {
+        let c = c.clone();
+        async move {
+            c.fetch_add(1, Ordering::SeqCst);
+            Ok::<bool, anyhow::Error>(true)
+        }
+    });
+
+    // tcp + udp 同时配置，start() 走 start_multi_protocol
+    let server = Server::new(a, None)
+        .tcp(TcpRouter::<RawCodec, RawCodec>::new())
+        .udp(udp);
+    assert!(get_udp_router::<RawCodec, RawCodec>(&server.globals.routers).is_some());
+
+    let handle = tokio::spawn(async move {
+        let _ = server.start().await;
+    });
+
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    // UDP 应可收到数据
+    let client = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    let data = RawCodec(99u32.to_le_bytes().to_vec()).encode().unwrap();
+    client.send_to(&data, a).await.unwrap();
+
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while counter.load(Ordering::SeqCst) == 0 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("udp handler never ran via start()");
+    assert_eq!(counter.load(Ordering::SeqCst), 1);
+    handle.abort();
+}

@@ -26,9 +26,83 @@ use h2::server;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::os::fd::AsRawFd;
+use std::pin::Pin;
 use std::sync::Arc;
-use tokio::io::AsyncReadExt;
+use std::task::{Context as TaskContext, Poll};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, ReadBuf};
 use tokio::net::{TcpListener, TcpStream, UdpSocket};
+
+/// h2 握手输入：直接使用 socket，或合并 peek 阶段已读走的 initial_data。
+enum H2Io {
+    Owned(TcpStream),
+    Combined {
+        reader: Option<
+            tokio::io::BufReader<
+                tokio::io::Chain<std::io::Cursor<Vec<u8>>, tokio::net::tcp::OwnedReadHalf>,
+            >,
+        >,
+        writer: Option<tokio::net::tcp::OwnedWriteHalf>,
+    },
+}
+
+impl AsyncRead for H2Io {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut TaskContext<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        match &mut *self {
+            H2Io::Owned(s) => Pin::new(s).poll_read(cx, buf),
+            H2Io::Combined { reader, .. } => {
+                let r = reader.as_mut().expect("reader taken");
+                Pin::new(r).poll_read(cx, buf)
+            }
+        }
+    }
+}
+
+impl AsyncWrite for H2Io {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut TaskContext<'_>,
+        buf: &[u8],
+    ) -> Poll<std::io::Result<usize>> {
+        match &mut *self {
+            H2Io::Owned(s) => Pin::new(s).poll_write(cx, buf),
+            H2Io::Combined { writer, .. } => {
+                let w = writer.as_mut().expect("writer taken");
+                Pin::new(w).poll_write(cx, buf)
+            }
+        }
+    }
+
+    fn poll_flush(
+        mut self: Pin<&mut Self>,
+        cx: &mut TaskContext<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        match &mut *self {
+            H2Io::Owned(s) => Pin::new(s).poll_flush(cx),
+            H2Io::Combined { writer, .. } => {
+                let w = writer.as_mut().expect("writer taken");
+                Pin::new(w).poll_flush(cx)
+            }
+        }
+    }
+
+    fn poll_shutdown(
+        mut self: Pin<&mut Self>,
+        cx: &mut TaskContext<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        match &mut *self {
+            H2Io::Owned(s) => Pin::new(s).poll_shutdown(cx),
+            H2Io::Combined { writer, .. } => {
+                let w = writer.as_mut().expect("writer taken");
+                Pin::new(w).poll_shutdown(cx)
+            }
+        }
+    }
+}
+
 
 pub mod detect;
 pub use detect::{
@@ -316,7 +390,7 @@ impl UnifiedServer {
                 self.handle_http11(socket, peer_addr, initial_data).await;
             }
             Some(("http2", DetectorMode::Standard)) if self.enable_http2 => {
-                self.handle_http2(socket, peer_addr).await;
+                self.handle_http2(socket, peer_addr, initial_data).await;
             }
             Some((protocol, mode)) => {
                 let handler = self.custom_handlers.get(protocol).cloned().or_else(|| {
@@ -433,8 +507,21 @@ impl UnifiedServer {
         }
     }
 
-    async fn handle_http2(&self, socket: TcpStream, peer_addr: SocketAddr) {
-        let mut conn = match server::handshake(socket).await {
+    async fn handle_http2(&self, socket: TcpStream, peer_addr: SocketAddr, initial_data: Vec<u8>) {
+        let conn_stream = if initial_data.is_empty() {
+            // 无 peek 数据，直接用原始 socket
+            H2Io::Owned(socket)
+        } else {
+            // Peek 阶段已读走 preface，需与 socket 拼回才能完成 h2 handshake
+            let (reader, writer) = socket.into_split();
+            H2Io::Combined {
+                reader: Some(tokio::io::BufReader::new(
+                    std::io::Cursor::new(initial_data).chain(reader),
+                )),
+                writer: Some(writer),
+            }
+        };
+        let mut conn = match server::handshake(conn_stream).await {
             Ok(c) => c,
             Err(e) => {
                 tracing::warn!("[H2] handshake failed: {}", e);

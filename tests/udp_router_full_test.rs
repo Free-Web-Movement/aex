@@ -209,3 +209,39 @@ async fn udp_router_handle_discards_garbage() {
     tokio::time::sleep(Duration::from_millis(100)).await;
     task.abort();
 }
+
+#[tokio::test]
+async fn udp_router_handle_flat_downcast_failure_no_dispatch() {
+    // F = RawCodec (flat), C = TestCommand：downcast::<TestCommand> 必然失败 → 不分发
+    let global = Arc::new(GlobalContext::new(
+        "127.0.0.1:0".parse().unwrap(),
+        None,
+    ));
+    let socket = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
+    let target = socket.local_addr().unwrap();
+
+    let counter = Arc::new(AtomicUsize::new(0));
+    let c = counter.clone();
+    let mut router = Router::<RawCodec, TestCommand>::new().extractor(|c: &TestCommand| c.key);
+    router.on(42, move |_g, _f, _c, _a, _s| {
+        let c = c.clone();
+        async move {
+            c.fetch_add(1, Ordering::SeqCst);
+            Ok::<bool, anyhow::Error>(true)
+        }
+    });
+
+    let task = tokio::spawn({
+        let router = Arc::new(router);
+        let global = global.clone();
+        let socket = socket.clone();
+        async move { router.handle(global, socket).await }
+    });
+
+    let client = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    let encoded = RawCodec(42u32.to_le_bytes().to_vec()).encode().unwrap();
+    client.send_to(&encoded, target).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(counter.load(Ordering::SeqCst), 0);
+    task.abort();
+}

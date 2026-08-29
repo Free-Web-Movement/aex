@@ -72,6 +72,7 @@ impl FrameHeader {
         bytes[0..4].copy_from_slice(&self.command_id.to_le_bytes());
         bytes[4] = self.flags;
         bytes[5..8].copy_from_slice(&self.sequence.to_le_bytes()[..3]);
+        bytes[8..12].copy_from_slice(&self.payload_length.to_le_bytes());
         bytes
     }
 
@@ -82,7 +83,7 @@ impl FrameHeader {
         let command_id = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
         let flags = data[4];
         let sequence = u32::from_le_bytes([data[5], data[6], data[7], 0]);
-        let payload_length = 0;
+        let payload_length = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
         Ok(Self {
             command_id,
             flags,
@@ -129,7 +130,7 @@ impl ProtocolFrame {
 
     pub fn encode_with_length(&self) -> Vec<u8> {
         let frame = self.encode();
-        let mut result = vec![0u8; 4];
+        let mut result = Vec::with_capacity(4 + frame.len());
         result.extend_from_slice(&(frame.len() as u32).to_le_bytes());
         result.extend_from_slice(&frame);
         result
