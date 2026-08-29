@@ -5,6 +5,8 @@ edition = "2024"
 description = "A server beyond web for rust."
 license = "GPL-3.0-or-later"
 repository = "https://github.com/Free-Web-Movement/aex"
+homepage = "https://github.com/Free-Web-Movement/aex"
+documentation = "https://docs.rs/aex"
 keywords = [
     "rust",
     "web",
@@ -97,6 +99,11 @@ path = "examples/simple_test.rs"
 [[example]]
 name = "minimal_test"
 path = "examples/minimal_test.rs"
+
+[[example]]
+name = "proxy_demo"
+path = "examples/proxy_demo/main.rs"
+required-features = ["proxy"]
 
 [dev-dependencies]
 reqwest = { version = "0.13.2", features = ["json", "blocking"] }
