@@ -24,7 +24,7 @@ http-timeout = []
 proxy = []
 
 [dependencies]
-aex-macros = { path = "src/aex-macros", version = "0.1.1" }
+aex-macros = "0.1.1"
 smol = "2.0"
 thiserror = "2.0"
 tokio = { version = "1.40", features = ["full"] }
@@ -131,5 +131,6 @@ harness = false
 name = "connection_performance"
 harness = false
 
-[workspace]
-members = [".", "src/aex-macros"]
+# 注：aex-macros 已发布到 crates.io（独立 cargo 模块），aex 不再声明独立 workspace。
+# aex 作为 zz-rust-mod-crypto-currency 的子模块时，自动并入父仓库的 workspace；
+# 独立开发 aex 时使用 `cargo build --manifest-path`（上游父 workspace 为空）。
