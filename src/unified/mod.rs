@@ -379,6 +379,7 @@ impl UnifiedServer {
         peer_addr: SocketAddr,
         initial_bytes: Vec<u8>,
     ) {
+        let local_addr = socket.local_addr().ok();
         let (reader, writer) = socket.into_split();
         let cursor = std::io::Cursor::new(initial_bytes);
         let reader_with_buf = tokio::io::BufReader::new(cursor.chain(reader));
@@ -391,6 +392,7 @@ impl UnifiedServer {
             self.globals.clone(),
             peer_addr,
         );
+        ctx.local_addr = local_addr;
 
         if ctx.req().parse_to_local().await.is_err() {
             let _ = ctx.res().send_failure().await;
@@ -521,6 +523,7 @@ impl UnifiedServer {
         detection: Option<DetectionState>,
     ) {
         let fd = socket.as_raw_fd();
+        let local_addr = socket.local_addr().ok();
         let (reader, writer) = socket.into_split();
         let cursor = std::io::Cursor::new(initial_data);
         let reader_with_buf = tokio::io::BufReader::new(cursor.chain(reader));
@@ -533,6 +536,7 @@ impl UnifiedServer {
             self.globals.clone(),
             peer_addr,
         );
+        ctx.local_addr = local_addr;
         ctx.local.set_value(ConnectionFd(fd));
         if let Some(state) = detection {
             ctx.local.set_value(state);
@@ -622,6 +626,7 @@ impl UnifiedServer {
                     let globals = globals.clone();
                     tokio::spawn(async move {
                         let fd = socket.as_raw_fd();
+                        let local_addr = socket.local_addr().ok();
                         let (reader, writer) = socket.into_split();
                         let reader = tokio::io::BufReader::new(reader);
                         let boxed_reader: BoxReader = Box::new(reader);
@@ -629,6 +634,7 @@ impl UnifiedServer {
 
                         let mut ctx =
                             Context::new(Some(boxed_reader), Some(writer), globals, peer_addr);
+                        ctx.local_addr = local_addr;
                         ctx.local.set_value(ConnectionFd(fd));
                         if let Some(h) = handler {
                             h(ctx);

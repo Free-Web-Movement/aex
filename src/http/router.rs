@@ -568,6 +568,8 @@ impl Router {
             }
         };
 
+        crate::connection::metrics::record_global_api_request();
+
         let pure_path = meta
             .path
             .split_once('?')

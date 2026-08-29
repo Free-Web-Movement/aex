@@ -122,6 +122,7 @@ pub struct ConnectionFd(pub std::os::fd::RawFd);
 /// Per-request context containing connection info, I/O, and data storage.
 pub struct Context {
     pub addr: SocketAddr,
+    pub local_addr: Option<SocketAddr>,
     pub accepted: DateTime<Utc>,
     pub reader: Option<BoxReader>,
     pub writer: Option<BoxWriter>,
@@ -143,6 +144,7 @@ impl Context {
             global,
             local: LocalTypeMap::new(),
             addr,
+            local_addr: None,
         }
     }
 

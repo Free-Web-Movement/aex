@@ -103,6 +103,7 @@ impl<'a> Response<'a> {
         buf.extend_from_slice(b"\r\n");
         buf.extend_from_slice(body);
 
+        crate::connection::metrics::record_global_sent(buf.len() as u64);
         w.write_all(&buf).await?;
         w.flush().await?;
 

@@ -253,6 +253,7 @@ impl Server {
                             use tokio::io::{BufReader, BufWriter};
                             use tokio::sync::Mutex;
 
+                            let local_addr = socket.local_addr().ok();
                             let (reader, writer) = socket.into_split();
                             let reader = Box::new(BufReader::new(reader))
                                 as Box<dyn tokio::io::AsyncBufRead + Send + Sync + Unpin>;
@@ -266,6 +267,9 @@ impl Server {
                                     globals,
                                     peer_addr,
                                 )));
+                            if let Ok(mut guard) = ctx.try_lock() {
+                                guard.local_addr = local_addr;
+                            }
 
                             let _ = router.clone().handle(ctx).await;
                         });
