@@ -272,3 +272,104 @@ async fn socks4_and_v4a_domain() {
     let resp = read_all(&mut s).await;
     assert!(resp.contains("SOCKS4") && resp.contains("path=/v4a"), "got: {resp}");
 }
+
+// ---------------------------------------------------------------------------
+// SOCKS error branches
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn socks5_no_acceptable_auth_rejected() {
+    let addr = free_addr();
+    spawn_server(addr, |s| {
+        s.enable_socks_proxy()
+            .proxy_authenticator(Arc::new(|u, p| u == "alice" && p == "wonderland"))
+    });
+    wait_listening(addr).await;
+
+    // Client only offers no-auth (0x00); server requires user/pass.
+    let mut s = TcpStream::connect(addr).await.unwrap();
+    s.write_all(&[0x05, 0x01, 0x00]).await.unwrap();
+    let mut reply = [0u8; 2];
+    s.read_exact(&mut reply).await.unwrap();
+    assert_eq!(reply, [0x05, 0xFF], "server must reject when no acceptable method");
+}
+
+#[tokio::test]
+async fn socks5_unsupported_command_rejected() {
+    let addr = free_addr();
+    spawn_server(addr, |s| s.enable_socks_proxy());
+    wait_listening(addr).await;
+
+    let mut s = TcpStream::connect(addr).await.unwrap();
+    s.write_all(&[0x05, 0x01, 0x00]).await.unwrap();
+    let mut reply = [0u8; 2];
+    s.read_exact(&mut reply).await.unwrap();
+    assert_eq!(reply, [0x05, 0x00]);
+
+    // CMD = 0x02 (BIND), which is not supported.
+    let mut req = vec![0x05, 0x02, 0x00, 0x01, 127, 0, 0, 1, 0x00, 0x50];
+    s.write_all(&req).await.unwrap();
+    let mut rep = [0u8; 10];
+    s.read_exact(&mut rep).await.unwrap();
+    assert_eq!(rep[1], 0x07, "command not supported REP=0x07");
+}
+
+#[tokio::test]
+async fn socks5_unsupported_atyp_rejected() {
+    let addr = free_addr();
+    spawn_server(addr, |s| s.enable_socks_proxy());
+    wait_listening(addr).await;
+
+    let mut s = TcpStream::connect(addr).await.unwrap();
+    s.write_all(&[0x05, 0x01, 0x00]).await.unwrap();
+    let mut reply = [0u8; 2];
+    s.read_exact(&mut reply).await.unwrap();
+    assert_eq!(reply, [0x05, 0x00]);
+
+    // ATYP = 0x09 (unsupported).
+    let mut req = vec![0x05, 0x01, 0x00, 0x09, 1, 2, 3, 4, 0x00, 0x50];
+    s.write_all(&req).await.unwrap();
+    let mut rep = [0u8; 10];
+    s.read_exact(&mut rep).await.unwrap();
+    assert_eq!(rep[1], 0x08, "ATYP not supported REP=0x08");
+}
+
+#[tokio::test]
+async fn socks4_non_connect_rejected() {
+    let addr = free_addr();
+    spawn_server(addr, |s| s.enable_socks_proxy());
+    wait_listening(addr).await;
+
+    // VER=4, CMD=0x02 (BIND), unsupported.
+    let mut s = TcpStream::connect(addr).await.unwrap();
+    let mut req = vec![0x04, 0x02, 0x00, 0x50, 127, 0, 0, 1];
+    req.extend_from_slice(b"user\0");
+    s.write_all(&req).await.unwrap();
+    let mut rep = [0u8; 8];
+    s.read_exact(&mut rep).await.unwrap();
+    assert_eq!(rep[1], 0x5B, "v4 non-CONNECT rejected with 0x5B");
+}
+
+#[tokio::test]
+async fn socks5_connect_to_unreachable_reports_failure() {
+    let addr = free_addr();
+    spawn_server(addr, |s| s.enable_socks_proxy());
+    wait_listening(addr).await;
+
+    // Reserve a port then drop the listener so connect gets RST (deterministic).
+    let dead = free_addr();
+
+    let mut s = TcpStream::connect(addr).await.unwrap();
+    s.write_all(&[0x05, 0x01, 0x00]).await.unwrap();
+    let mut reply = [0u8; 2];
+    s.read_exact(&mut reply).await.unwrap();
+    assert_eq!(reply, [0x05, 0x00]);
+
+    // ATYP=1, 127.0.0.1:<dead-port> → connection refused → failure frame.
+    let mut req = vec![0x05, 0x01, 0x00, 0x01, 127, 0, 0, 1];
+    req.extend_from_slice(&dead.port().to_be_bytes());
+    s.write_all(&req).await.unwrap();
+    let mut rep = [0u8; 10];
+    s.read_exact(&mut rep).await.unwrap();
+    assert_ne!(rep[1], 0x00, "unreachable target must not report success");
+}
