@@ -45,8 +45,9 @@ jobs:
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v4
       with:
-        # Public repo: uploads anonymously without a token. A CODECOV_TOKEN
-        # secret may be added later if the Codecov project requires it.
+        # Use the CODECOV_TOKEN secret when configured; otherwise fall back to
+        # anonymous upload (works for public repos when the project allows it).
+        token: ${{ secrets.CODECOV_TOKEN }}
         files: lcov.info
         fail_ci_if_error: false
 
