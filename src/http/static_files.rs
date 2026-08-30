@@ -461,3 +461,42 @@ fn file_icon(name: &str, is_dir: bool) -> &'static str {
         _ => "📄",
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn html_escape_handles_all_special_chars() {
+        assert_eq!(html_escape("<a href=\"x\">&'"), "&lt;a href=&quot;x&quot;&gt;&amp;&#39;");
+        assert_eq!(html_escape("plain text"), "plain text");
+        assert_eq!(html_escape(""), "");
+    }
+
+    #[test]
+    fn url_encode_path_encodes_special_chars() {
+        assert_eq!(url_encode_path("a b/c"), "a%20b%2Fc");
+        assert_eq!(url_encode_path("a-b_c.d~e"), "a-b_c.d~e");
+        assert_eq!(url_encode_path("中文"), "%E4%B8%AD%E6%96%87");
+    }
+
+    #[test]
+    fn human_size_various_units() {
+        assert_eq!(human_size(0), "0 B");
+        assert_eq!(human_size(500), "500 B");
+        assert_eq!(human_size(1024), "1.0 KB");
+        assert_eq!(human_size(5 * 1024 * 1024), "5.0 MB");
+        assert_eq!(human_size(3 * 1024 * 1024 * 1024u64), "3.0 GB");
+    }
+
+    #[test]
+    fn file_icon_categories() {
+        assert_eq!(file_icon("anything", true), "📁");
+        assert_eq!(file_icon("a.html", false), "🌐");
+        assert_eq!(file_icon("a.js", false), "🟨");
+        assert_eq!(file_icon("a.png", false), "🖼️");
+        assert_eq!(file_icon("a.txt", false), "📄");
+        assert_eq!(file_icon("noext", false), "📄");
+        assert_eq!(file_icon("a.RS", false), "🦀"); // 大小写不敏感
+    }
+}

@@ -364,3 +364,26 @@ async fn test_static_files_traversal_blocked() {
     let head = String::from_utf8_lossy(&buf[..n]);
     assert!(head.starts_with("HTTP/1.1 404"), "got: {}", head);
 }
+
+#[tokio::test]
+async fn test_static_files_custom_index() {
+    let dir = unique_tmp_dir();
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("home.html"), "custom-home").unwrap();
+    std::fs::write(dir.join("index.html"), "default-index").unwrap();
+
+    let mut router = Router::default();
+    router.static_files_with(
+        "/custom",
+        StaticFiles::new(&dir).index("home.html"),
+    );
+    let s = start_router(router).await;
+
+    let r = get(s.addr, "/custom/").await.expect("server unreachable");
+    assert_eq!(r.0, 200, "custom index should serve");
+    assert_eq!(String::from_utf8_lossy(&r.1), "custom-home");
+
+    // 直接访问自定义入口文件名也应 200
+    let r = get(s.addr, "/custom/home.html").await.expect("server unreachable");
+    assert_eq!(r.0, 200);
+}

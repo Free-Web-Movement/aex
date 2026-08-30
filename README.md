@@ -2,10 +2,11 @@
 
 > 一个轻量、可控、忠于 HTTP 本质的 Rust 多协议框架
 
-[![Rust](https://img.shields.io/badge/rust-1.75%2B-blue.svg)](https://www.rust-lang.org)
-[![License](https://img.shields.io/badge/license-GPL--3.0-green.svg)](LICENSE)
+[![Rust](https://img.shields.io/badge/rust-1.88%2B-blue.svg)](https://www.rust-lang.org)
+[![License](https://img.shields.io/badge/license-GPL--3.0--or--later-green.svg)](LICENSE)
 [![ crates.io version](https://img.shields.io/crates/v/aex.svg)](https://crates.io/crates/aex)
-[![crates.io downloads](https://img.shields.io/crates/d/aex.svg)](https://crates.io/crates/d/aex)
+[![crates.io downloads](https://img.shields.io/crates/d/aex.svg)](https://crates.io/crates/aex)
+[![codecov](https://codecov.io/gh/Free-Web-Movement/aex/branch/main/graph/badge.svg)](https://codecov.io/gh/Free-Web-Movement/aex)
 
 ## Get Started (快速开始)
 
@@ -215,7 +216,7 @@ fn no_prefix(ctx: &mut Context) -> bool { /* 鉴权逻辑 */ }
 
 ## 核心特性
 
-- **统一端口多协议** - HTTP/1.1、HTTP/2、WebSocket、TCP、UDP 共用同一端口，自动协议检测
+- **统一端口多协议** - HTTP/1.1、HTTP/2、WebSocket、TCP、UDP 共用同一端口，可插拔协议检测器体系
 - **直觉的 HTTP 路由** - Trie 树路由，支持静态路径、参数路径、通配符
 - **同步 / 异步 handler 双写法** - 同步闭包与 `_async!` 异步闭包统一由 `IntoExecutor` 接受，可混用
 - **显式中间件链** - 线性执行顺序，可预测的控制流（非洋葱模型）
@@ -239,15 +240,50 @@ Aex 是目前 Rust 生态中**协议支持最全面**的 web 框架之一，可�
 ┌─────────────────────────────────────────────────────────────┐
 │                    Aex 统一协议支持                           │
 ├─────────────────────────────────────────────────────────────┤
-│  协议类型       │  检测方式              │  说明               │
+│  协议类型       │  检测器               │  说明               │
 ├─────────────────────────────────────────────────────────────┤
-│  HTTP/1.1     │ 以 HTTP 方法开头        │ 标准 HTTP 请求       │
-│  HTTP/2       │ PRI * HTTP/2.0 前缀    │ HTTP/2 协议 preface │
-│  WebSocket    │ Upgrade: websocket 头  │ HTTP 升级请求       │
-│  TCP          │ 其他所有流量             │ 自定义TCP协议       │
+│  HTTP/1.1     │ Http11Detector        │ 标准 HTTP 请求       │
+│  HTTP/2       │ Http2Detector         │ HTTP/2 协议 preface │
+│  WebSocket    │ HTTP 升级请求内识别     │ Upgrade 头          │
+│  HTTP 代理     │ Http11Detector 内分流  │ absolute-form / CONNECT（feature=proxy）│
+│  SOCKS4/4a/5  │ SocksDetector（内置）  │ CONNECT 隧道（feature=proxy）│
+│  自定义协议     │ 自定义 ProtocolDetector │ trojan/NAT/私有协议 │
+│  TCP          │ 兜底 handler           │ 其他所有流量         │
 │  UDP          │ 独立 UDP Socket        │ 数据报通信           │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+#### 内置 HTTP / SOCKS 代理（`feature = "proxy"`）
+
+单端口同时承载多个服务，**由客户端首字节决定走哪条服务线**，无服务器端模式切换：
+
+| 客户端行为 | 服务线 |
+|---|---|
+| `GET /path HTTP/1.1`（origin-form） | 网站路由 / handler |
+| `GET http://host/path HTTP/1.1`（absolute-form） | HTTP 正向代理 → 上游 |
+| `CONNECT host:port HTTP/1.1` | HTTP 隧道 → 上游 |
+| `\x05\x01\x00...`（SOCKS 问候） | SOCKS4/4a/5 CONNECT |
+| TLS ClientHello | 检测器认领 → 自定义 handler |
+
+```bash
+# Cargo.toml
+aex = { version = "0.1", features = ["proxy"] }
+```
+
+```rust
+let server = UnifiedServer::new(addr, globals)
+    .enable_http_proxy()   // 自动挂载 Http11Detector，origin-form 仍走网站
+    .enable_socks_proxy()  // 自动注册 SocksDetector 与内部 handler
+    .proxy_authenticator(Arc::new(|u, p| u == "alice" && p == "secret"))
+    // .enable_proxies()    // 或一次性开启两个
+    .http_handler(/* 网站业务 */);
+server.start().await?;
+```
+
+- HTTP 代理：absolute-form 请求改写为 origin-form 后中继（剥离 hop-by-hop 头、注入 `Via`）；CONNECT 建隧道后原始字节双向转发。
+- SOCKS 代理：仅 CONNECT（BIND / UDP ASSOCIATE 回“不支持”）；认证支持无认证与 RFC 1929 用户名/密码（`proxy_authenticator` 统一控制 HTTP 与 SOCKS 两端）。
+- 默认不编译任何代理逻辑（开放代理是风险资产）；示例见 `examples/proxy_demo`。
+- 测试：`cargo test --features proxy`（`tests/proxy_builtin_test.rs`：单端口网站+代理混跑、CONNECT 隧道、SOCKS4/4a/5、认证成败）。
 
 ### 统一服务器 (UnifiedServer)
 
@@ -285,31 +321,91 @@ async fn main() -> anyhow::Result<()> {
 }
 ```
 
-### 协议检测逻辑
+### 协议检测器体系（DetectorRegistry）
+
+协议识别不再是写死在服务器里的逻辑，而是一个**有序、可插拔、运行时可变**的检测器队列。
+目录默认为空——HTTP/1.1、HTTP/2、WebSocket、trojan、NAT……所有协议检测器都由使用者
+按需手动添加，顺序即优先级：
 
 ```rust
-pub fn detect(bytes: &[u8], is_udp: bool) -> Protocol {
-    // UDP 流量
-    if is_udp {
-        return Protocol::UDP;
-    }
-    
-    // HTTP/2: PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n
-    if bytes.starts_with(b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n") {
-        return Protocol::Http2;
-    }
-    
-    // HTTP/1.1: GET/POST/PUT/DELETE/PATCH/HEAD/OPTIONS + space
-    for method in [b"GET ", b"POST ", b"PUT ", b"DELETE ", b"PATCH ", b"HEAD ", b"OPTIONS ", b"CONNECT ", b"TRACE "] {
-        if bytes.starts_with(method) {
-            return Protocol::Http11;
+use aex::unified::{
+    DetectorMode, DetectorRegistry, Http11Detector, Http2Detector, Position,
+    ProtocolDetector, DetectionState, Verdict,
+};
+
+// 自定义检测器：实现 ProtocolDetector trait
+struct TrojanDetector;
+
+impl ProtocolDetector for TrojanDetector {
+    fn name(&self) -> &str { "trojan" }
+    fn protocol(&self) -> &str { "trojan" }
+
+    fn detect(&self, buf: &[u8], _state: &mut DetectionState) -> Verdict {
+        if buf.starts_with(b"\x16\x03\x01") {
+            Verdict::Match                       // 认领连接
+        } else if !buf.is_empty() {
+            Verdict::Pass                        // 不匹配，交给下一个
+        } else {
+            Verdict::NeedMore(3)                 // 字节不够，再读一点
         }
     }
-    
-    // 其他所有流量 -> TCP
-    Protocol::TCP
 }
+
+let server = UnifiedServer::new(addr, globals)
+    .detector(Arc::new(TrojanDetector))          // 排在队首，先于 HTTP 判定
+    .detector(Arc::new(Http2Detector))           // 内置组件同样手动挂载
+    .detector_at(Position::Front, Arc::new(Http11Detector))  // 指定插入位置
+    .custom_handler("trojan", Arc::new(|ctx| tokio::spawn(async move { /* ... */ })));
 ```
+
+核心语义：
+
+| 机制 | 说明 |
+|------|------|
+| **手动注册** | `detector()` 追加到队尾；`detector_at(Front / Back / Before(n) / After(n))` 自由排序 |
+| **运行时增删** | `registry.register() / unregister() / replace()` 可在服务运行中调用；每条连接取快照检测，互不撕裂 |
+| **冲突防护（双重）** | 注册时拒绝重名与 `conflicts_with` 声明冲突（双向检查）；运行期"首个 Match 获胜"短路后续检测器 |
+| **状态标记 DetectorMode** | `Standard` 正常分发到对应 handler；`Forward` 标记有状态的 NAT 直转型检测器——命中即终止全部检测，连接直接转发 |
+| **链路状态 DetectionState** | 已缓冲字节数、认领结果+模式、逐检测器判定轨迹（history）、每检测器私有 scratch；分发后作为 ctx 属性随整条链路传递 |
+
+`Verdict` 三态：`Match`（认领）/ `Pass`（不匹配）/ `NeedMore(n)`（数据不足，最多缓冲 16 KiB）。
+
+#### 代理协议检测示例（examples/detectors_*）
+
+核心只保留主流 Web 协议（HTTP/1.1、HTTP/2；HTTP/3/QUIC 后续加入）。TLS、SOCKS、
+trojan、VLESS 等代理协议的检测器与验证中间件作为**开发示例**放在 examples 目录，
+全部基于公开框架 API 组合，可直接运行、可作模板：
+
+| 示例 | 内容 |
+|------|------|
+| `examples/detectors_common/mod.rs` | 共享实现：`TlsDetector`（ClientHello 被动解析，提取 SNI/ALPN）、`SocksDetector`（SOCKS4/5 问候识别）、`TlsLoader` + `TlsMiddleware::accept`（证书加载 + rustls TLS 终结）、`TrojanMiddleware::validate`、`VlessMiddleware::validate` |
+| `examples/detector_tls/` | SNI/ALPN 路由：检测层认领 "tls"，按 ClientHello 名字分发 |
+| `examples/detector_socks5/` | SOCKS5/SOCKS4 混合监听 |
+| `examples/detector_trojan/` | 单端口 trojan-over-TLS 全链路：嗅探 → TLS 终结 → 头部校验剥离 |
+| `examples/detector_vless/` | VLESS 结构校验（UUID 鉴权留待业务层） |
+
+```bash
+cargo test --test proxy_detectors_test   # 解析器单测 + 真实 socket 端到端
+cargo run --example detector_trojan cert.pem key.pem
+```
+
+分层语义：
+
+```text
+原始字节 ──► 嗅探检测器（TlsDetector / SocksDetector / Http*）
+                 │ 首个 Match 获胜
+                 ▼
+         custom_handler(protocol) 分发
+                 ▼
+ TlsMiddleware::accept(cert,key) ──► ctx 流变为解密后的明文
+                 ▼
+ Trojan/VLESS validate ──► 业务 handler / fallback
+```
+
+**边界说明**：VMess 与 Shadowsocks 的请求头在 UUID/PSK 派生密钥加密之下，被动字节
+层面无法与随机流量区分，因此不存在"被动检测器"——支持它们需要持有用户库并做试解密
+的完整协议中间件（应用层职责）。Clash 是客户端而非线上协议，无独立检测可言。
+所有 validator 内置 10 秒读超时（`VALIDATION_TIMEOUT`），半包挂起的对端会被切断。
 
 ### Handler 类型签名
 
@@ -800,7 +896,14 @@ router.get_with("/x", [_sync!(|_| true), rate_limiter], |_ctx: &mut Context| tru
 | `.http2_handler(handler)` | 设置 HTTP/2 处理器 |
 | `.tcp_handler(handler)` | 设置 TCP 处理器 |
 | `.udp_handler(handler)` | 设置 UDP 处理器 |
+| `.detector(d)` / `.detector_at(pos, d)` | 注册协议检测器（队尾 / 指定位置） |
+| `.custom_handler(protocol, handler)` | 为自定义协议注册专属处理器 |
+| `.with_registry(registry)` | 共享外部管理的检测器目录（运行时增删） |
+| `.detection(bool)` | 开关检测阶段；关闭后连接直接进 TCP handler，不嗅探 |
 | `.start()` | 启动统一服务器 |
+
+> 连接属性：统一服务器在分发前把 `ConnectionFd`（原始文件描述符）写入 ctx，
+> split 后的读写半部仍可做 fd 级操作（如 NAT 场景的 `SO_ORIGINAL_DST` 原目的地址查询）。
 
 ### 适用场景
 
@@ -1175,7 +1278,8 @@ aex/
 │   └── types.rs       # UDP 类型
 │
 ├── unified/           # 统一协议服务器 ⭐
-│   └── mod.rs        # 协议检测 + 统一处理
+│   ├── mod.rs        # 统一监听 + 分发
+│   └── detect.rs     # 可插拔协议检测器体系（注册/排序/冲突防护/链路状态）
 │
 ├── connection/         # 连接管理
 │   ├── context.rs     # Per-request Context
@@ -1198,19 +1302,17 @@ aex/
 
 ## 测试
 
-运行统一服务器测试：
-
 ```bash
-cargo test -p aex unified
+cargo test --all          # 全部单元 + 集成测试
+cargo test --lib unified  # 检测器体系单元测试
 ```
 
-测试用例包括：
-- `test_unified_protocol_detection` - 协议自动检测
-- `test_http1_on_unified_server` - HTTP/1.1
-- `test_p2p_tcp_on_unified_server` - TCP P2P
-- `test_websocket_detection` - WebSocket 检测
-- `test_http2_detection` - HTTP/2 检测
-- `test_unified_all_protocols` - 所有协议同时运行
+统一服务器与检测器体系相关的测试文件：
+
+- `tests/unified_server_test.rs` - 统一服务器上的 HTTP/1.1、WebSocket、HTTP/2、TCP 共存
+- `tests/unified_listener_all_protocols_test.rs` - 同一监听端口的多协议检测（显式注册检测器）
+- `tests/unified_detect_pipeline_test.rs` - 检测管线端到端：自定义协议分发、Forward 模式直转、空目录纯 TCP 直通、运行时注销检测器
+- `src/unified/detect.rs` 内置单元测试 - 注册排序/增删/替换、冲突拒绝（双向）、首个 Match 短路、NeedMore 多轮判定、16 KiB 上限放弃、Forward 终止语义
 
 ---
 

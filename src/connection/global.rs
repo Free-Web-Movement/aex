@@ -209,6 +209,12 @@ impl GlobalContext {
             for entry_ref in bucket_ref.clients.iter() {
                 let addr = *entry_ref.key();
                 let entry = entry_ref.value();
+                let local_addr = entry
+                    .context
+                    .as_ref()
+                    .and_then(|ctx| ctx.try_lock().ok())
+                    .and_then(|guard| guard.local_addr)
+                    .map(|sa| sa.to_string());
                 let guard = entry.node.read().await;
                 let (node_id, intranet_ips, wan_ips) = if let Some(ref n) = *guard {
                     let mut intranet = Vec::new();
@@ -230,6 +236,7 @@ impl GlobalContext {
                 drop(guard);
                 inbound.push(PeerInfo {
                     addr: addr.to_string(),
+                    local_addr,
                     direction: "inbound".to_string(),
                     scope: format!("{:?}", scope),
                     uptime_secs: entry.uptime_secs(),
@@ -243,6 +250,12 @@ impl GlobalContext {
             for entry_ref in bucket_ref.servers.iter() {
                 let addr = *entry_ref.key();
                 let entry = entry_ref.value();
+                let local_addr = entry
+                    .context
+                    .as_ref()
+                    .and_then(|ctx| ctx.try_lock().ok())
+                    .and_then(|guard| guard.local_addr)
+                    .map(|sa| sa.to_string());
                 let guard = entry.node.read().await;
                 let (node_id, intranet_ips, wan_ips) = if let Some(ref n) = *guard {
                     let mut intranet = Vec::new();
@@ -264,6 +277,7 @@ impl GlobalContext {
                 drop(guard);
                 outbound.push(PeerInfo {
                     addr: addr.to_string(),
+                    local_addr,
                     direction: "outbound".to_string(),
                     scope: format!("{:?}", scope),
                     uptime_secs: entry.uptime_secs(),
@@ -304,6 +318,7 @@ pub struct ConnectionInfo {
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct PeerInfo {
     pub addr: String,
+    pub local_addr: Option<String>,
     pub direction: String,
     pub scope: String,
     pub uptime_secs: u64,

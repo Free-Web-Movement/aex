@@ -835,4 +835,105 @@ mod tests {
             Some("http")
         );
     }
+
+    #[test]
+    fn registry_snapshot_len_and_empty() {
+        let reg = DetectorRegistry::new();
+        assert!(reg.is_empty());
+        assert_eq!(reg.len(), 0);
+        assert!(reg.snapshot().is_empty());
+
+        reg.register(Arc::new(Http11Detector)).unwrap();
+        assert!(!reg.is_empty());
+        assert_eq!(reg.len(), 1);
+        assert_eq!(reg.snapshot().len(), 1);
+        assert_eq!(reg.list(), vec!["http11"]);
+
+        reg.unregister("http11");
+        assert!(reg.is_empty());
+        assert!(reg.list().is_empty());
+    }
+
+    #[test]
+    fn registry_with_builtins_order() {
+        let reg = DetectorRegistry::with_builtins();
+        assert_eq!(reg.len(), 2);
+        // http2 在前，http11 在后
+        assert_eq!(reg.list(), vec!["http2", "http11"]);
+    }
+
+    #[test]
+    fn replace_missing_target_is_anchor_not_found() {
+        let reg = DetectorRegistry::new();
+        reg.register(Arc::new(Http11Detector)).unwrap();
+        // 替换一个不存在的名字（Http2Detector 名字为 http2，未注册）
+        let result = reg.replace(Arc::new(Http2Detector));
+        assert!(matches!(result, Err(RegisterError::AnchorNotFound(_))));
+        // 原 http11 检测器仍在
+        assert_eq!(reg.list(), vec!["http11"]);
+    }
+
+    #[test]
+    fn register_at_after_missing_anchor() {
+        let reg = DetectorRegistry::new();
+        let result = reg.register_at(Position::After("nope".to_string()), Arc::new(Http11Detector));
+        assert!(matches!(result, Err(RegisterError::AnchorNotFound(_))));
+    }
+
+    #[test]
+    fn run_pipeline_early_returns_when_finished() {
+        let mut state = DetectionState::new();
+        state.finish();
+        let detectors: Vec<Arc<dyn ProtocolDetector>> = vec![Arc::new(Http11Detector)];
+        run_pipeline(&detectors, b"GET / HTTP/1.1\r\n", &mut state);
+        // finished 状态不追加 history
+        assert!(state.history().is_empty());
+    }
+
+    #[test]
+    fn scratch_set_get_and_mut() {
+        let mut state = DetectionState::new();
+        assert!(state.get_scratch::<u64>().is_none());
+        state.set_scratch(42u64);
+        assert_eq!(state.get_scratch::<u64>(), Some(42));
+        if let Some(v) = state.get_scratch_mut::<u64>() {
+            *v += 1;
+        }
+        assert_eq!(state.get_scratch::<u64>(), Some(43));
+    }
+
+    #[test]
+    fn verdict_name_branches() {
+        assert_eq!(Verdict::Match.name(), "match");
+        assert_eq!(Verdict::Pass.name(), "pass");
+        assert_eq!(Verdict::NeedMore(3).name(), "need-more");
+        let mut state = DetectionState::new();
+        let _ = Verdict::NeedMore(3);
+        assert!(state.needs_more() == false);
+        // NeedMore 驱动 needs_more
+        let mut st = DetectionState::new();
+        let det = Arc::new(Http11Detector);
+        run_pipeline(&[det], b"", &mut st);
+        assert_eq!(st.buffered, 0);
+    }
+
+    #[test]
+    fn detector_trait_defaults() {
+        struct Minimal;
+        impl ProtocolDetector for Minimal {
+            fn name(&self) -> &str {
+                "minimal"
+            }
+            fn protocol(&self) -> &str {
+                "minimal"
+            }
+            fn detect(&self, _buf: &[u8], _state: &mut DetectionState) -> Verdict {
+                Verdict::Pass
+            }
+        }
+        let d = Minimal;
+        assert!(d.conflicts_with().is_empty());
+        assert_eq!(d.max_need(), None);
+        assert_eq!(d.mode(), DetectorMode::Standard);
+    }
 }

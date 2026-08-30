@@ -1,7 +1,7 @@
 use aex::connection::context::Context;
 use aex::connection::global::GlobalContext;
 use aex::http::router::Router as HttpRouter;
-use aex::unified::UnifiedServer;
+use aex::unified::{Http11Detector, Http2Detector, UnifiedServer};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -27,8 +27,12 @@ fn setup_unified_server(addr: SocketAddr, enable_http2: bool) -> (UnifiedServer,
     let mut unified = UnifiedServer::new(addr, globals);
 
     let counter_for_handler = tcp_counter.clone();
+    // Detection is opt-in since the pluggable pipeline: HTTP/2 first (exact
+    // preface), then HTTP/1.x method prefixes.
     unified = unified
         .http_router(make_http_router())
+        .detector(Arc::new(Http2Detector))
+        .detector(Arc::new(Http11Detector))
         .tcp_handler(Arc::new(move |mut ctx| {
             println!("[Test] TCP handler called");
             let counter = counter_for_handler.clone();

@@ -1,5 +1,61 @@
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::OnceLock;
 use std::time::Instant;
+
+/// 全局网络流量计数：跨所有连接累计的收发字节，供 Proof of Resource
+/// 的"实际带宽使用量"测量使用。由 tcp router / http 层在收发时累加。
+static GLOBAL_SENT_BYTES: OnceLock<AtomicU64> = OnceLock::new();
+static GLOBAL_RECEIVED_BYTES: OnceLock<AtomicU64> = OnceLock::new();
+/// 全局 HTTP API 请求计数：本节点作为服务方实际处理过的请求次数。
+static GLOBAL_API_REQUESTS: OnceLock<AtomicU64> = OnceLock::new();
+
+pub(crate) fn global_sent() -> &'static AtomicU64 {
+    GLOBAL_SENT_BYTES.get_or_init(|| AtomicU64::new(0))
+}
+
+pub(crate) fn global_received() -> &'static AtomicU64 {
+    GLOBAL_RECEIVED_BYTES.get_or_init(|| AtomicU64::new(0))
+}
+
+/// 记录本进程累计发送的字节数（所有连接 / 协议汇总）。
+pub fn record_global_sent(bytes: u64) {
+    global_sent().fetch_add(bytes, Ordering::SeqCst);
+}
+
+/// 记录本进程累计接收的字节数（所有连接 / 协议汇总）。
+pub fn record_global_received(bytes: u64) {
+    global_received().fetch_add(bytes, Ordering::SeqCst);
+}
+
+/// 记录一个 HTTP API 请求。
+pub fn record_global_api_request() {
+    let _ = GLOBAL_API_REQUESTS
+        .get_or_init(|| AtomicU64::new(0))
+        .fetch_add(1, Ordering::SeqCst);
+}
+
+/// 本进程累计发送字节数。
+pub fn total_sent_bytes() -> u64 {
+    global_sent().load(Ordering::SeqCst)
+}
+
+/// 本进程累计接收字节数。
+pub fn total_received_bytes() -> u64 {
+    global_received().load(Ordering::SeqCst)
+}
+
+/// 本进程累计发送+接收字节数（实际使用的带宽总量）。
+pub fn total_bandwidth_bytes() -> u64 {
+    total_sent_bytes().saturating_add(total_received_bytes())
+}
+
+/// 本进程累计处理的 HTTP API 请求次数。
+pub fn total_api_requests() -> u64 {
+    GLOBAL_API_REQUESTS
+        .get()
+        .map(|a| a.load(Ordering::SeqCst))
+        .unwrap_or(0)
+}
 
 pub struct ConnectionMetrics {
     pub bytes_sent: AtomicU64,

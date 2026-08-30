@@ -40,7 +40,7 @@ pub mod tcp {
 
     pub const MAX_FRAME_SIZE: usize = 65536;
     pub const MAX_HANDSHAKE_SIZE: usize = 4096;
-    pub const PROTOCOL_HEADER_SIZE: usize = 8;
+    pub const PROTOCOL_HEADER_SIZE: usize = 12;
 
     pub const HANDSHAKE_VERSION: u8 = 1;
     pub const DEFAULT_PING_INTERVAL_SEC: u64 = 30;

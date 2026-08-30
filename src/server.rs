@@ -253,6 +253,7 @@ impl Server {
                             use tokio::io::{BufReader, BufWriter};
                             use tokio::sync::Mutex;
 
+                            let local_addr = socket.local_addr().ok();
                             let (reader, writer) = socket.into_split();
                             let reader = Box::new(BufReader::new(reader))
                                 as Box<dyn tokio::io::AsyncBufRead + Send + Sync + Unpin>;
@@ -266,6 +267,9 @@ impl Server {
                                     globals,
                                     peer_addr,
                                 )));
+                            if let Ok(mut guard) = ctx.try_lock() {
+                                guard.local_addr = local_addr;
+                            }
 
                             let _ = router.clone().handle(ctx).await;
                         });
@@ -406,10 +410,7 @@ impl Server {
         let socket = Arc::new(UdpSocket::bind(self.addr).await?);
         tracing::info!("UDP listener started on {}", self.addr);
 
-        let rt = self
-            .globals
-            .routers
-            .get_value::<Arc<UdpRouter<F, C>>>()
+        let rt = crate::connection::context::get_udp_router::<F, C>(&self.globals.routers)
             .ok_or_else(|| anyhow::anyhow!("UDP router not found"))?;
 
         rt.handle(self.globals.clone(), socket).await

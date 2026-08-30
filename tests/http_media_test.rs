@@ -457,4 +457,73 @@ mod tests {
         assert!(MediaType::Multipart.is_multipart());
         assert!(!MediaType::Image.is_multipart());
     }
+
+    #[test]
+    fn test_sub_media_type_full_str() {
+        use aex::http::protocol::media_type::SubMediaType;
+        let cases = [
+            (SubMediaType::Json, "application/json"),
+            (SubMediaType::UrlEncoded, "application/x-www-form-urlencoded"),
+            (SubMediaType::OctetStream, "application/octet-stream"),
+            (SubMediaType::Xml, "application/xml"),
+            (SubMediaType::Pdf, "application/pdf"),
+            (SubMediaType::Zip, "application/zip"),
+            (SubMediaType::Javascript, "application/javascript"),
+            (SubMediaType::FormData, "multipart/form-data"),
+            (SubMediaType::Mixed, "multipart/mixed"),
+            (SubMediaType::Plain, "text/plain; charset=utf-8"),
+            (SubMediaType::Html, "text/html; charset=utf-8"),
+            (SubMediaType::Css, "text/css; charset=utf-8"),
+            (SubMediaType::Csv, "text/csv; charset=utf-8"),
+            (SubMediaType::Png, "image/png"),
+            (SubMediaType::Jpeg, "image/jpeg"),
+            (SubMediaType::Gif, "image/gif"),
+            (SubMediaType::Webp, "image/webp"),
+            (SubMediaType::Svg, "image/svg+xml"),
+            (SubMediaType::Icon, "image/x-icon"),
+            (SubMediaType::Wasm, "application/wasm"),
+            (SubMediaType::Unknown, "application/octet-stream"),
+        ];
+        for (sub, expected) in cases.iter() {
+            assert_eq!(sub.full_str(), *expected, "full_str failed for {:?}", sub);
+        }
+    }
+
+    #[test]
+    fn test_sub_media_type_guess_all_extensions() {
+        use aex::http::protocol::media_type::SubMediaType;
+        let cases = [
+            ("index.html", SubMediaType::Html),
+            ("page.htm", SubMediaType::Html),
+            ("main.css", SubMediaType::Css),
+            ("app.js", SubMediaType::Javascript),
+            ("mod.mjs", SubMediaType::Javascript),
+            ("data.json", SubMediaType::Json),
+            ("readme.txt", SubMediaType::Plain),
+            ("doc.md", SubMediaType::Plain),
+            ("table.csv", SubMediaType::Csv),
+            ("data.xml", SubMediaType::Xml),
+            ("file.pdf", SubMediaType::Pdf),
+            ("archive.zip", SubMediaType::Zip),
+            ("app.wasm", SubMediaType::Wasm),
+            ("logo.png", SubMediaType::Png),
+            ("photo.jpg", SubMediaType::Jpeg),
+            ("photo.jpeg", SubMediaType::Jpeg),
+            ("anim.gif", SubMediaType::Gif),
+            ("img.webp", SubMediaType::Webp),
+            ("icon.svg", SubMediaType::Svg),
+            ("favicon.ico", SubMediaType::Icon),
+            ("file.unknown", SubMediaType::OctetStream),
+            ("noext", SubMediaType::OctetStream),
+        ];
+        for (filename, expected) in cases.iter() {
+            let path = Path::new(filename);
+            assert_eq!(
+                SubMediaType::guess(path),
+                *expected,
+                "SubMediaType::guess failed for {}",
+                filename
+            );
+        }
+    }
 }

@@ -2,21 +2,79 @@ name: Rust
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "dev" ]
   pull_request:
-    branches: [ "main" ]
+    branches: [ "main", "dev" ]
+  release:
+    types: [ published ]
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
-
+  test:
+    name: Test + Coverage
     runs-on: ubuntu-latest
-
     steps:
     - uses: actions/checkout@v4
-    - name: Build
-      run: cargo build --verbose
-    - name: Run tests
-      run: cargo test --verbose
+
+    - name: Install Rust (stable)
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: llvm-tools-preview
+
+    - name: Cache cargo registry
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+    - name: Install cargo-llvm-cov
+      uses: taiki-e/install-action@cargo-llvm-cov
+
+    - name: Run tests (all features)
+      run: cargo test --all-features
+
+    - name: Generate coverage (lcov)
+      run: |
+        cargo llvm-cov --all-features --lcov --output-path lcov.info -- --test-threads=1
+
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v4
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        files: lcov.info
+        fail_ci_if_error: false
+
+  # 发布（release/tag）时额外强制覆盖率 >= 90% 门槛。
+  # 平时提交不触发此门槛（仅上传覆盖率供 codecov 对比）。
+  release-coverage-gate:
+    name: Release Coverage Gate (>= 90%)
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install Rust (stable)
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: llvm-tools-preview
+
+    - name: Install cargo-llvm-cov
+      uses: taiki-e/install-action@cargo-llvm-cov
+
+    - name: Run coverage gate
+      run: |
+        set -euo pipefail
+        pct=$(cargo llvm-cov --all-features --summary-only -- --test-threads=1 | awk '/TOTAL/ {gsub(/%/,"",$(NF-4)); print $(NF-4)}')
+        echo "Coverage: ${pct}%"
+        # 使用整数比较（90.00 表示 >= 90%）
+        pct_int=$(awk -v p="$pct" 'BEGIN {printf "%d", p + 0.5}')
+        if [ "$pct_int" -lt 90 ]; then
+          echo "::error::Coverage ${pct}% is below the required 90% gate"
+          exit 1
+        fi
+        echo "✅ Coverage ${pct}% meets the 90% gate"

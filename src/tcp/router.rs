@@ -138,6 +138,7 @@ impl<F, C> Router<F, C> {
             if n == 0 {
                 break;
             }
+            crate::connection::metrics::record_global_received(n as u64);
             session_buf.extend_from_slice(&buf[..n]);
 
             // 正确处理粘包与半包

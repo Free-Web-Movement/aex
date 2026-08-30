@@ -26,9 +26,83 @@ use h2::server;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::os::fd::AsRawFd;
+use std::pin::Pin;
 use std::sync::Arc;
-use tokio::io::AsyncReadExt;
+use std::task::{Context as TaskContext, Poll};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, ReadBuf};
 use tokio::net::{TcpListener, TcpStream, UdpSocket};
+
+/// h2 握手输入：直接使用 socket，或合并 peek 阶段已读走的 initial_data。
+enum H2Io {
+    Owned(TcpStream),
+    Combined {
+        reader: Option<
+            tokio::io::BufReader<
+                tokio::io::Chain<std::io::Cursor<Vec<u8>>, tokio::net::tcp::OwnedReadHalf>,
+            >,
+        >,
+        writer: Option<tokio::net::tcp::OwnedWriteHalf>,
+    },
+}
+
+impl AsyncRead for H2Io {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut TaskContext<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        match &mut *self {
+            H2Io::Owned(s) => Pin::new(s).poll_read(cx, buf),
+            H2Io::Combined { reader, .. } => {
+                let r = reader.as_mut().expect("reader taken");
+                Pin::new(r).poll_read(cx, buf)
+            }
+        }
+    }
+}
+
+impl AsyncWrite for H2Io {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut TaskContext<'_>,
+        buf: &[u8],
+    ) -> Poll<std::io::Result<usize>> {
+        match &mut *self {
+            H2Io::Owned(s) => Pin::new(s).poll_write(cx, buf),
+            H2Io::Combined { writer, .. } => {
+                let w = writer.as_mut().expect("writer taken");
+                Pin::new(w).poll_write(cx, buf)
+            }
+        }
+    }
+
+    fn poll_flush(
+        mut self: Pin<&mut Self>,
+        cx: &mut TaskContext<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        match &mut *self {
+            H2Io::Owned(s) => Pin::new(s).poll_flush(cx),
+            H2Io::Combined { writer, .. } => {
+                let w = writer.as_mut().expect("writer taken");
+                Pin::new(w).poll_flush(cx)
+            }
+        }
+    }
+
+    fn poll_shutdown(
+        mut self: Pin<&mut Self>,
+        cx: &mut TaskContext<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        match &mut *self {
+            H2Io::Owned(s) => Pin::new(s).poll_shutdown(cx),
+            H2Io::Combined { writer, .. } => {
+                let w = writer.as_mut().expect("writer taken");
+                Pin::new(w).poll_shutdown(cx)
+            }
+        }
+    }
+}
+
 
 pub mod detect;
 pub use detect::{
@@ -119,6 +193,16 @@ pub struct UnifiedServer {
     /// Master switch for the detection phase; when off, connections go
     /// straight to the TCP handler without any peeking.
     pub detect_enabled: bool,
+    #[cfg(feature = "proxy")]
+    /// Serve absolute-form requests and CONNECT tunnels as an HTTP forward
+    /// proxy on the same port as website traffic.
+    pub http_proxy_enabled: bool,
+    #[cfg(feature = "proxy")]
+    /// Claim "socks" greetings internally and serve SOCKS4/4a/5 CONNECT.
+    pub socks_proxy_enabled: bool,
+    #[cfg(feature = "proxy")]
+    /// Shared credential checker for both proxy services.
+    pub proxy_authorizer: Option<crate::proxy::ProxyAuthorizer>,
     #[doc(hidden)]
     pub _udp_socket: Option<UdpSocket>,
 }
@@ -137,6 +221,12 @@ impl UnifiedServer {
             registry: Arc::new(DetectorRegistry::new()),
             custom_handlers: HashMap::new(),
             detect_enabled: true,
+            #[cfg(feature = "proxy")]
+            http_proxy_enabled: false,
+            #[cfg(feature = "proxy")]
+            socks_proxy_enabled: false,
+            #[cfg(feature = "proxy")]
+            proxy_authorizer: None,
             _udp_socket: None,
         }
     }
@@ -205,6 +295,66 @@ impl UnifiedServer {
         self
     }
 
+    #[cfg(feature = "proxy")]
+    /// Serve HTTP forward-proxy traffic (absolute-form requests and CONNECT
+    /// tunnels) on this server. Website traffic is unaffected — the client's
+    /// request line decides which service handles each connection.
+    pub fn enable_http_proxy(mut self) -> Self {
+        // Proxy traffic arrives as ordinary HTTP/1.x — without this detector
+        // nothing claims the connection and the proxy hook never runs.
+        if let Err(e) = self
+            .registry
+            .register_at(Position::Back, Arc::new(Http11Detector))
+        {
+            tracing::warn!("[Unified] http11 detector registration failed: {}", e);
+        }
+        self.http_proxy_enabled = true;
+        self
+    }
+
+    #[cfg(feature = "proxy")]
+    /// Serve SOCKS4/4a/5 CONNECT on this server. Registers the internal
+    /// SOCKS greeting detector; claimed connections are handled before any
+    /// user `custom_handler("socks")`.
+    pub fn enable_socks_proxy(mut self) -> Self {
+        use crate::proxy::{SocksDetector, socks_tcp_handler};
+        if let Err(e) = self.registry.register(Arc::new(SocksDetector)) {
+            tracing::warn!("[Unified] socks detector registration failed: {}", e);
+        }
+        self.socks_proxy_enabled = true;
+        // Pre-seed the internal handler; users may still override it via
+        // custom_handler("socks", ...) for full control.
+        self.custom_handlers
+            .entry("socks".to_string())
+            .or_insert_with(|| {
+                socks_tcp_handler(self.proxy_authorizer.clone())
+            });
+        self
+    }
+
+    #[cfg(feature = "proxy")]
+    /// Credential gate shared by the HTTP and SOCKS proxy services.
+    pub fn proxy_authenticator(
+        mut self,
+        f: Arc<dyn Fn(&str, &str) -> bool + Send + Sync>,
+    ) -> Self {
+        self.proxy_authorizer = Some(f);
+        // Refresh a pre-existing socks handler so it sees the authenticator.
+        if self.socks_proxy_enabled {
+            self.custom_handlers.insert(
+                "socks".to_string(),
+                crate::proxy::socks_tcp_handler(self.proxy_authorizer.clone()),
+            );
+        }
+        self
+    }
+
+    #[cfg(feature = "proxy")]
+    /// Convenience: enable both proxy services.
+    pub fn enable_proxies(self) -> Self {
+        self.enable_http_proxy().enable_socks_proxy()
+    }
+
     pub async fn handle_tcp_connection(&self, mut socket: TcpStream, peer_addr: SocketAddr) {
         // Detection phase: buffer bytes and run the detector pipeline until
         // some detector claims the connection, every pending detector has
@@ -240,7 +390,7 @@ impl UnifiedServer {
                 self.handle_http11(socket, peer_addr, initial_data).await;
             }
             Some(("http2", DetectorMode::Standard)) if self.enable_http2 => {
-                self.handle_http2(socket, peer_addr).await;
+                self.handle_http2(socket, peer_addr, initial_data).await;
             }
             Some((protocol, mode)) => {
                 let handler = self.custom_handlers.get(protocol).cloned().or_else(|| {
@@ -303,6 +453,7 @@ impl UnifiedServer {
         peer_addr: SocketAddr,
         initial_bytes: Vec<u8>,
     ) {
+        let local_addr = socket.local_addr().ok();
         let (reader, writer) = socket.into_split();
         let cursor = std::io::Cursor::new(initial_bytes);
         let reader_with_buf = tokio::io::BufReader::new(cursor.chain(reader));
@@ -315,10 +466,19 @@ impl UnifiedServer {
             self.globals.clone(),
             peer_addr,
         );
+        ctx.local_addr = local_addr;
 
         if ctx.req().parse_to_local().await.is_err() {
             let _ = ctx.res().send_failure().await;
             return;
+        }
+
+        #[cfg(feature = "proxy")]
+        if self.http_proxy_enabled
+            && crate::proxy::maybe_handle_http_proxy(&mut ctx, self.proxy_authorizer.as_ref())
+                .await
+        {
+            return; // connection fully served as proxy traffic
         }
 
         let is_ws = {
@@ -347,8 +507,21 @@ impl UnifiedServer {
         }
     }
 
-    async fn handle_http2(&self, socket: TcpStream, peer_addr: SocketAddr) {
-        let mut conn = match server::handshake(socket).await {
+    async fn handle_http2(&self, socket: TcpStream, peer_addr: SocketAddr, initial_data: Vec<u8>) {
+        let conn_stream = if initial_data.is_empty() {
+            // 无 peek 数据，直接用原始 socket
+            H2Io::Owned(socket)
+        } else {
+            // Peek 阶段已读走 preface，需与 socket 拼回才能完成 h2 handshake
+            let (reader, writer) = socket.into_split();
+            H2Io::Combined {
+                reader: Some(tokio::io::BufReader::new(
+                    std::io::Cursor::new(initial_data).chain(reader),
+                )),
+                writer: Some(writer),
+            }
+        };
+        let mut conn = match server::handshake(conn_stream).await {
             Ok(c) => c,
             Err(e) => {
                 tracing::warn!("[H2] handshake failed: {}", e);
@@ -437,6 +610,7 @@ impl UnifiedServer {
         detection: Option<DetectionState>,
     ) {
         let fd = socket.as_raw_fd();
+        let local_addr = socket.local_addr().ok();
         let (reader, writer) = socket.into_split();
         let cursor = std::io::Cursor::new(initial_data);
         let reader_with_buf = tokio::io::BufReader::new(cursor.chain(reader));
@@ -449,6 +623,7 @@ impl UnifiedServer {
             self.globals.clone(),
             peer_addr,
         );
+        ctx.local_addr = local_addr;
         ctx.local.set_value(ConnectionFd(fd));
         if let Some(state) = detection {
             ctx.local.set_value(state);
@@ -538,6 +713,7 @@ impl UnifiedServer {
                     let globals = globals.clone();
                     tokio::spawn(async move {
                         let fd = socket.as_raw_fd();
+                        let local_addr = socket.local_addr().ok();
                         let (reader, writer) = socket.into_split();
                         let reader = tokio::io::BufReader::new(reader);
                         let boxed_reader: BoxReader = Box::new(reader);
@@ -545,6 +721,7 @@ impl UnifiedServer {
 
                         let mut ctx =
                             Context::new(Some(boxed_reader), Some(writer), globals, peer_addr);
+                        ctx.local_addr = local_addr;
                         ctx.local.set_value(ConnectionFd(fd));
                         if let Some(h) = handler {
                             h(ctx);
@@ -606,6 +783,12 @@ impl Clone for UnifiedServer {
             registry: self.registry.clone(),
             custom_handlers: self.custom_handlers.clone(),
             detect_enabled: self.detect_enabled,
+            #[cfg(feature = "proxy")]
+            http_proxy_enabled: self.http_proxy_enabled,
+            #[cfg(feature = "proxy")]
+            socks_proxy_enabled: self.socks_proxy_enabled,
+            #[cfg(feature = "proxy")]
+            proxy_authorizer: self.proxy_authorizer.clone(),
             _udp_socket: None,
         }
     }

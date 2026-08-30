@@ -101,7 +101,7 @@ impl HandshakeHandler {
         ctx: Arc<Mutex<Context>>,
         peer_addr: SocketAddr,
     ) -> Result<Option<Node>> {
-        {
+        let (len, data) = {
             let mut guard = ctx.lock().await;
             let reader = guard
                 .reader
@@ -115,44 +115,45 @@ impl HandshakeHandler {
             }
             let mut data = vec![0u8; len];
             reader.read_exact(&mut data).await?;
+            (len, data)
+        };
+        // 读取结束即释放锁；后续 send_frame 需重新加锁（tokio Mutex 不可重入）
 
-            let id = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+        let id = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
 
-            match CommandId::from_u32(id) {
-                Some(CommandId::Hello) => {
-                    let hello = HelloCommand::decode(&data).map_err(|e| anyhow::anyhow!(e))?;
-                    if !hello.is_valid() {
-                        let reject = self.create_reject("version mismatch");
-                        self.send_frame(ctx.clone(), reject.encode()).await?;
-                        return Err(anyhow::anyhow!("version mismatch"));
-                    }
-
-                    if let Some(callback) = &self.on_established {
-                        callback(hello.node.clone(), peer_addr);
-                    }
-
-                    let ephemeral_public =
-                        if hello.request_encryption && self.session_keys.is_some() {
-                            Some(vec![0u8; 32])
-                        } else {
-                            None
-                        };
-
-                    let welcome = self.create_welcome(true, ephemeral_public);
-                    self.send_frame(ctx.clone(), welcome.encode()).await?;
-
-                    return Ok(Some(hello.node));
+        match CommandId::from_u32(id) {
+            Some(CommandId::Hello) => {
+                let hello = HelloCommand::decode(&data).map_err(|e| anyhow::anyhow!(e))?;
+                if !hello.is_valid() {
+                    let reject = self.create_reject("version mismatch");
+                    self.send_frame(ctx.clone(), reject.encode()).await?;
+                    return Err(anyhow::anyhow!("version mismatch"));
                 }
-                Some(CommandId::Reject) => {
-                    let reject = RejectCommand::decode(&data).map_err(|e| anyhow::anyhow!(e))?;
-                    if let Some(callback) = &self.on_rejected {
-                        callback(reject.reason.clone(), peer_addr);
-                    }
-                    return Err(anyhow::anyhow!("rejected: {}", reject.reason));
+
+                if let Some(callback) = &self.on_established {
+                    callback(hello.node.clone(), peer_addr);
                 }
-                _ => {
-                    return Err(anyhow::anyhow!("expected Hello"));
+
+                let ephemeral_public = if hello.request_encryption && self.session_keys.is_some() {
+                    Some(vec![0u8; 32])
+                } else {
+                    None
+                };
+
+                let welcome = self.create_welcome(true, ephemeral_public);
+                self.send_frame(ctx.clone(), welcome.encode()).await?;
+
+                return Ok(Some(hello.node));
+            }
+            Some(CommandId::Reject) => {
+                let reject = RejectCommand::decode(&data).map_err(|e| anyhow::anyhow!(e))?;
+                if let Some(callback) = &self.on_rejected {
+                    callback(reject.reason.clone(), peer_addr);
                 }
+                return Err(anyhow::anyhow!("rejected: {}", reject.reason));
+            }
+            _ => {
+                return Err(anyhow::anyhow!("expected Hello"));
             }
         }
     }

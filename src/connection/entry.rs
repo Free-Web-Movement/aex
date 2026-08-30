@@ -118,12 +118,14 @@ impl ConnectionEntry {
         let child_token = parent_token.child_token();
         let task_token = child_token.clone();
 
+        let local_addr = socket.local_addr().ok();
         let (reader, writer) = socket.into_split();
 
         let r_opt: Option<BoxReader> = Some(Box::new(BufReader::new(reader)));
         let w_opt: Option<BoxWriter> = Some(Box::new(BufWriter::new(writer)));
 
         let mut raw_ctx = Context::new(r_opt, w_opt, global, addr);
+        raw_ctx.local_addr = local_addr;
         raw_ctx.set(task_token.clone());
         let ctx = Arc::new(Mutex::new(raw_ctx));
 

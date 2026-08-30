@@ -4,7 +4,7 @@ use aex::http::middlewares::websocket::WebSocket;
 use aex::http::router::Router as HttpRouter;
 use aex::http::types::Executor;
 use aex::tcp::types::{Codec, Command, Frame};
-use aex::unified::UnifiedServer;
+use aex::unified::{Http11Detector, Http2Detector, UnifiedServer};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -114,6 +114,10 @@ s.close()
     unified = unified
         .http_router(router)
         .enable_http2()
+        // Detection is opt-in: explicitly register the HTTP detectors so
+        // HTTP/1.1 and HTTP/2 traffic is routed to the HTTP paths.
+        .detector(Arc::new(Http2Detector))
+        .detector(Arc::new(Http11Detector))
         .tcp_handler(Arc::new(move |mut ctx| {
             tokio::spawn(async move {
                 let mut buf = [0u8; 4096];

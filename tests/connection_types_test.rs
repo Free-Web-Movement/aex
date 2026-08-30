@@ -7,6 +7,7 @@ mod tests {
     use std::{
         net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
         sync::atomic::Ordering,
+        sync::Arc,
     };
     use tokio_util::sync::CancellationToken;
 
@@ -163,5 +164,38 @@ mod tests {
         assert!(join_result.is_err());
         assert!(join_result.unwrap_err().is_cancelled());
         assert!(rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn test_start_heartbeat_no_context_returns_early() {
+        use aex::connection::heartbeat::HeartbeatConfig;
+        let addr: SocketAddr = "127.0.0.1:8080".parse().unwrap();
+        // context = None → start_heartbeat 直接 return，不 panic
+        let entry = ConnectionEntry::new_empty_node(
+            addr,
+            None,
+            tokio::spawn(async {}).abort_handle(),
+            CancellationToken::new(),
+        );
+        let node = Node::from_addr(addr, Some(1), Some(vec![1; 32]));
+        entry.start_heartbeat(node, HeartbeatConfig::new());
+    }
+
+    #[tokio::test]
+    async fn test_start_heartbeat_with_global() {
+        use aex::connection::global::GlobalContext;
+        use aex::connection::heartbeat::HeartbeatConfig;
+        let addr: SocketAddr = "127.0.0.1:8080".parse().unwrap();
+        // 无 context → 内部 start_heartbeat 早退，不 panic
+        let entry = ConnectionEntry::new_empty_node(
+            addr,
+            None,
+            tokio::spawn(async {}).abort_handle(),
+            CancellationToken::new(),
+        );
+        let mut global = GlobalContext::new(addr, None);
+        global.heartbeat_config = HeartbeatConfig::new();
+        let global = Arc::new(global);
+        entry.start_heartbeat_with_global(&global).await;
     }
 }

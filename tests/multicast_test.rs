@@ -119,4 +119,30 @@ fn test_multicast_scope_address_range() {
     let (start, end) = MulticastScope::Local.address_range();
     assert_eq!(start, Ipv4Addr::new(224, 0, 0, 0));
     assert_eq!(end, Ipv4Addr::new(224, 0, 0, 255));
+
+    let (start, end) = MulticastScope::Admin.address_range();
+    assert_eq!(start, Ipv4Addr::new(224, 0, 2, 0));
+    assert_eq!(end, Ipv4Addr::new(224, 0, 255, 255));
+
+    let (start, end) = MulticastScope::SiteLocal.address_range();
+    assert_eq!(start, Ipv4Addr::new(239, 255, 0, 0));
+    assert_eq!(end, Ipv4Addr::new(239, 255, 255, 255));
+
+    let (start, end) = MulticastScope::Organization.address_range();
+    assert_eq!(start, Ipv4Addr::new(239, 192, 0, 0));
+    assert_eq!(end, Ipv4Addr::new(239, 192, 255, 255));
+
+    let (start, end) = MulticastScope::Global.address_range();
+    assert_eq!(start, Ipv4Addr::new(224, 0, 1, 0));
+    assert_eq!(end, Ipv4Addr::new(238, 255, 255, 255));
+}
+
+#[test]
+fn test_multicast_scope_from_addr_none_for_non_multicast() {
+    // 非组播地址 → None
+    assert_eq!(MulticastScope::from_addr(&Ipv4Addr::new(192, 168, 1, 1)), None);
+    assert_eq!(MulticastScope::from_addr(&Ipv4Addr::new(10, 0, 0, 1)), None);
+    assert_eq!(MulticastScope::from_addr(&Ipv4Addr::new(230, 0, 0, 1)), None);
+    // 239 但第二段不是 0/192/255 → None
+    assert_eq!(MulticastScope::from_addr(&Ipv4Addr::new(239, 100, 0, 1)), None);
 }

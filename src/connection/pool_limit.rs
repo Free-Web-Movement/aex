@@ -159,28 +159,34 @@ impl ConnectionPoolLimits {
             return;
         }
 
-        if let Some(count) = self.connection_counts.write().await.get_mut(addr) {
-            *count = count.saturating_sub(1);
-            if *count == 0 {
-                self.connection_counts.write().await.remove(addr);
+        {
+            let mut counts = self.connection_counts.write().await;
+            if let Some(count) = counts.get_mut(addr) {
+                *count = count.saturating_sub(1);
+                if *count == 0 {
+                    counts.remove(addr);
+                }
             }
         }
 
         let subnet = Self::get_subnet(addr);
-        if let Some(count) = self.subnet_counts.write().await.get_mut(&subnet) {
-            *count = count.saturating_sub(1);
-            if *count == 0 {
-                self.subnet_counts.write().await.remove(&subnet);
+        {
+            let mut counts = self.subnet_counts.write().await;
+            if let Some(count) = counts.get_mut(&subnet) {
+                *count = count.saturating_sub(1);
+                if *count == 0 {
+                    counts.remove(&subnet);
+                }
             }
         }
 
         if let Some(info) = removed {
             if info.is_outbound {
-                *self.outbound_count.write().await =
-                    self.outbound_count.read().await.saturating_sub(1);
+                let mut c = self.outbound_count.write().await;
+                *c = c.saturating_sub(1);
             } else {
-                *self.inbound_count.write().await =
-                    self.inbound_count.read().await.saturating_sub(1);
+                let mut c = self.inbound_count.write().await;
+                *c = c.saturating_sub(1);
             }
         }
     }

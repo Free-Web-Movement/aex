@@ -790,3 +790,56 @@ async fn test_validator_params_none_fallback() {
     assert!(resp_str.contains("200 OK"));
     assert!(resp_str.contains("params_initialized"));
 }
+
+#[tokio::test]
+async fn test_validator_range_validation_failure_400() {
+    use ahash::AHashMap;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpStream;
+
+    let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
+    let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+    let actual_addr = listener.local_addr().unwrap();
+    drop(listener);
+
+    // id 必须在 [1,100] 范围内
+    let mut dsl_map = AHashMap::new();
+    dsl_map.insert("params".to_string(), "(id:int[1,100])".to_string());
+
+    let mut hr = Router::default();
+    let validator_mw = to_validator(dsl_map);
+    hr.insert(
+        "/check/:id",
+        Some("POST"),
+        aex::http::types::IntoExecutor::into_executor(
+            |_ctx: &mut aex::connection::context::Context| true,
+        ),
+        Some(vec![validator_mw]),
+    );
+
+    let server = HTTPServer::new(actual_addr, None).http(hr).clone();
+    tokio::spawn(async move {
+        let _ = server.start().await;
+    });
+    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+    // id=105 超出 [1,100] 范围 → 校验失败返回 400
+    let mut stream = TcpStream::connect(actual_addr).await.unwrap();
+    let request =
+        "POST /check/105 HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+    stream.write_all(request.as_bytes()).await.unwrap();
+
+    let mut response = Vec::new();
+    stream.read_to_end(&mut response).await.unwrap();
+    let resp_str = String::from_utf8_lossy(&response);
+
+    println!("--- Range Error Response ---\n{}\n----------------------------", resp_str);
+    assert!(
+        resp_str.contains("400 Bad Request"),
+        "超范围参数应返回 400"
+    );
+    assert!(
+        resp_str.contains("validate error"),
+        "应包含 validate error 前缀"
+    );
+}
