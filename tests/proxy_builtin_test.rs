@@ -376,6 +376,23 @@ async fn socks5_connect_to_unreachable_reports_failure() {
 
 #[tokio::test]
 async fn socks5_ipv6_atyp_connect() {
+    // Start a real upstream bound on IPv6 loopback so CONNECT actually succeeds.
+    let Ok(listener) = TcpListener::bind("[::1]:0").await else {
+        eprintln!("IPv6 loopback unavailable, skipping");
+        return;
+    };
+    let upstream = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        loop {
+            let Ok((mut sock, _)) = listener.accept().await else {
+                return;
+            };
+            tokio::spawn(async move {
+                let _ = sock.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\niv6-ok").await;
+            });
+        }
+    });
+
     let addr = free_addr();
     spawn_server(addr, |s| s.enable_socks_proxy());
     wait_listening(addr).await;
@@ -390,11 +407,16 @@ async fn socks5_ipv6_atyp_connect() {
     let mut req = vec![0x05, 0x01, 0x00, 0x04];
     req.extend_from_slice(&[0u8; 15]);
     req.push(1u8); // ::1
-    req.extend_from_slice(&[0x00, 0x50]);
+    req.extend_from_slice(&upstream.port().to_be_bytes());
     s.write_all(&req).await.unwrap();
     let mut rep = [0u8; 10];
     s.read_exact(&mut rep).await.unwrap();
     assert_eq!(rep[1], 0x00, "IPv6 CONNECT must report success, got REP={}", rep[1]);
+
+    // Tunnel an HTTP request through the IPv6 upstream to confirm relaying works.
+    s.write_all(b"GET /v6 HTTP/1.1\r\nHost: x\r\n\r\n").await.unwrap();
+    let resp = read_all(&mut s).await;
+    assert!(resp.contains("iv6-ok"), "got: {resp}");
 }
 
 #[tokio::test]
