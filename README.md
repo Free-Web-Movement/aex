@@ -210,7 +210,7 @@ fn no_prefix(ctx: &mut Context) -> bool { /* 鉴权逻辑 */ }
 
 ## 版本
 
-当前版本: **0.1.21**
+当前版本: **0.1.22**
 
 - 依赖配置见上方 [Get Started](#get-started-快速开始)。
 
