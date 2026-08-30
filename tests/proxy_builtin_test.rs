@@ -373,3 +373,56 @@ async fn socks5_connect_to_unreachable_reports_failure() {
     s.read_exact(&mut rep).await.unwrap();
     assert_ne!(rep[1], 0x00, "unreachable target must not report success");
 }
+
+#[tokio::test]
+async fn socks5_ipv6_atyp_connect() {
+    let addr = free_addr();
+    spawn_server(addr, |s| s.enable_socks_proxy());
+    wait_listening(addr).await;
+
+    let mut s = TcpStream::connect(addr).await.unwrap();
+    s.write_all(&[0x05, 0x01, 0x00]).await.unwrap();
+    let mut reply = [0u8; 2];
+    s.read_exact(&mut reply).await.unwrap();
+    assert_eq!(reply, [0x05, 0x00]);
+
+    // ATYP=4, ::1:upstream (IPv6 loopback).
+    let mut req = vec![0x05, 0x01, 0x00, 0x04];
+    req.extend_from_slice(&[0u8; 15]);
+    req.push(1u8); // ::1
+    req.extend_from_slice(&[0x00, 0x50]);
+    s.write_all(&req).await.unwrap();
+    let mut rep = [0u8; 10];
+    s.read_exact(&mut rep).await.unwrap();
+    assert_eq!(rep[1], 0x00, "IPv6 CONNECT must report success, got REP={}", rep[1]);
+}
+
+#[tokio::test]
+async fn socks5_domain_atyp_connect() {
+    let upstream = spawn_upstream("SOCKS5-DOMAIN").await;
+    let addr = free_addr();
+    spawn_server(addr, |s| s.enable_socks_proxy());
+    wait_listening(addr).await;
+
+    let mut s = TcpStream::connect(addr).await.unwrap();
+    s.write_all(&[0x05, 0x01, 0x00]).await.unwrap();
+    let mut reply = [0u8; 2];
+    s.read_exact(&mut reply).await.unwrap();
+    assert_eq!(reply, [0x05, 0x00]);
+
+    // ATYP=3 (domain), "localhost":upstream-port.
+    let mut req = vec![0x05, 0x01, 0x00, 0x03];
+    let host = b"localhost";
+    req.push(host.len() as u8);
+    req.extend_from_slice(host);
+    req.extend_from_slice(&upstream.port().to_be_bytes());
+    s.write_all(&req).await.unwrap();
+    let mut rep = [0u8; 10];
+    s.read_exact(&mut rep).await.unwrap();
+    assert_eq!(rep[1], 0x00, "domain CONNECT must succeed, got REP={}", rep[1]);
+
+    // Tunnel through it.
+    s.write_all(b"GET /domain HTTP/1.1\r\nHost: x\r\n\r\n").await.unwrap();
+    let resp = read_all(&mut s).await;
+    assert!(resp.contains("SOCKS5-DOMAIN") && resp.contains("path=/domain"), "got: {resp}");
+}
