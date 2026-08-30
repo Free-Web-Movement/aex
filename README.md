@@ -6,7 +6,7 @@
 [![License](https://img.shields.io/badge/license-GPL--3.0--or--later-green.svg)](LICENSE)
 [![ crates.io version](https://img.shields.io/crates/v/aex.svg)](https://crates.io/crates/aex)
 [![crates.io downloads](https://img.shields.io/crates/d/aex.svg)](https://crates.io/crates/aex)
-[![codecov](https://codecov.io/gh/Free-Web-Movement/aex/branch/main/graph/badge.svg?token=)](https://codecov.io/gh/Free-Web-Movement/aex)
+[![codecov](https://codecov.io/gh/Free-Web-Movement/aex/branch/main/graph/badge.svg)](https://codecov.io/gh/Free-Web-Movement/aex)
 
 ## Get Started (快速开始)
 
