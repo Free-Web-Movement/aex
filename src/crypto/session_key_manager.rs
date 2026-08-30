@@ -72,6 +72,13 @@ impl PairedSessionKey {
             .retain(|_, sk| !SystemTime::is_expired(sk.updated_at, ttl_ms));
     }
 
+    /// 是否已与 `peer`（地址）建立过会话密钥（main 表存在）。
+    /// 用于判断回连应复用已有会话（携带零公钥标记）而非发起新的密钥交换，
+    /// 从而保证每个 peer 对只有一个一致的会话密钥。
+    pub async fn has_session(&self, peer: &Vec<u8>) -> bool {
+        self.main.read().await.contains_key(peer)
+    }
+
     pub async fn with_session<R>(
         &self,
         key: &Vec<u8>,
