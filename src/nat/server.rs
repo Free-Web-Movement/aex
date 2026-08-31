@@ -21,6 +21,7 @@ use crate::connection::context::{BoxReader, BoxWriter};
 
 use super::types::{
     NatError, NatFrame, NatFrameType, NatResult, TunnelPeer, NAT_KEEPALIVE_TIMEOUT,
+    NAT_MAGIC_LEN,
 };
 
 /// 帧长度前缀占位大小（u32 LE）。
@@ -126,16 +127,21 @@ impl NatRelayService {
             last_seen: std::sync::atomic::AtomicU64::new(now_secs()),
         });
 
-        let mut len_buf = [0u8; LEN_PREFIX_BYTES];
+        let mut head_buf = [0u8; NAT_MAGIC_LEN + LEN_PREFIX_BYTES];
         loop {
-            match reader.read_exact(&mut len_buf).await {
+            // 帧头：魔数 + 长度。
+            match reader.read_exact(&mut head_buf).await {
                 Ok(_) => {}
                 Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
                     return Err(NatError::RemoteClosed);
                 }
                 Err(e) => return Err(e.into()),
             }
-            let len = u32::from_le_bytes(len_buf) as usize;
+            let len = u32::from_le_bytes(
+                head_buf[NAT_MAGIC_LEN..NAT_MAGIC_LEN + LEN_PREFIX_BYTES]
+                    .try_into()
+                    .unwrap_or([0u8; 4]),
+            ) as usize;
             let mut frame_buf = vec![0u8; len];
             reader.read_exact(&mut frame_buf).await?;
             let frame = NatFrame::decode(&frame_buf)?;
@@ -295,9 +301,8 @@ async fn write_frame(
     writer: &Arc<tokio::sync::Mutex<BoxWriter>>,
     frame: &NatFrame,
 ) -> NatResult<()> {
-    let bytes = frame.encode()?;
+    let bytes = frame.encode_wire()?;
     let mut w = writer.lock().await;
-    w.write_all(&(bytes.len() as u32).to_le_bytes()).await?;
     w.write_all(&bytes).await?;
     Ok(())
 }

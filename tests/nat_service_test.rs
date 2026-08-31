@@ -46,8 +46,8 @@ fn nat_detector_empty_needs_more() {
 #[test]
 fn nat_frame_roundtrip_with_magic() {
     let frame = NatFrame::data("node_a", "node_b", b"hello".to_vec());
-    let bytes = frame.encode().unwrap();
-    // 编码结果以魔数开头
+    let bytes = frame.encode_wire().unwrap();
+    // 线上帧以魔数开头，随后是长度(4) + body。
     assert_eq!(&bytes[..NAT_MAGIC.len()], NAT_MAGIC);
     let decoded = NatFrame::decode(&bytes).unwrap();
     assert_eq!(decoded.frame_type, NatFrameType::Data);

@@ -168,3 +168,42 @@ async fn relay_to_unknown_peer_fails_but_does_not_crash() {
     assert_eq!(a.state().await, TunnelState::Ready);
     assert_eq!(server.peer_count(), 1);
 }
+
+#[tokio::test]
+async fn peer_public_addr_queryable_after_registration() {
+    let server = start_relay().await;
+    let relay_addr = server.addr;
+
+    let a = start_client("node_a", relay_addr).await;
+    let _b = start_client("node_b", relay_addr).await;
+
+    // 中继能查到已登记对端的公网映射地址。
+    assert!(server.peer_public_addr("node_a").is_some());
+    assert!(server.peer_public_addr("node_b").is_some());
+    // 未登记节点查不到。
+    assert!(server.peer_public_addr("ghost").is_none());
+    let _ = a.state().await;
+}
+
+#[tokio::test]
+async fn shutdown_marks_disconnected() {
+    let server = start_relay().await;
+    let relay_addr = server.addr;
+
+    let a = start_client("node_a", relay_addr).await;
+    assert_eq!(a.state().await, TunnelState::Ready);
+    a.shutdown().await;
+    assert_eq!(a.state().await, TunnelState::Disconnected);
+}
+
+#[tokio::test]
+async fn nat_tcp_handler_builds() {
+    use aex::nat::nat_tcp_handler;
+    let service = aex::nat::NatRelayService::new();
+    let handler = nat_tcp_handler(service.clone());
+    // Arc<dyn Fn> 可克隆；service 可 clone（共享登记表）。
+    let handler2 = handler.clone();
+    assert!(std::ptr::eq(handler.as_ref(), handler2.as_ref()));
+    let service2 = service.clone();
+    assert_eq!(service2.peer_count(), 0);
+}

@@ -15,7 +15,7 @@ use tokio::net::TcpStream;
 use tokio::sync::{Mutex, mpsc};
 
 use super::punch::{PunchCoordinator, PunchTunnel};
-use super::types::{NatError, NatFrame, NatFrameType, NatResult};
+use super::types::{NatError, NatFrame, NatFrameType, NatResult, NAT_MAGIC_LEN};
 
 const LEN_PREFIX_BYTES: usize = 4;
 
@@ -176,12 +176,9 @@ impl NatTunnelClient {
     }
 
     async fn write_frame(&self, frame: &NatFrame) -> NatResult<()> {
-        let bytes = frame.encode()?;
+        let bytes = frame.encode_wire()?;
         let mut guard = self.writer.lock().await;
         let writer = guard.as_mut().ok_or(NatError::RemoteClosed)?;
-        writer
-            .write_all(&(bytes.len() as u32).to_le_bytes())
-            .await?;
         writer.write_all(&bytes).await?;
         Ok(())
     }
@@ -191,9 +188,10 @@ impl NatTunnelClient {
             Some(r) => r,
             None => return Err(NatError::RemoteClosed),
         };
-        let mut len_buf = [0u8; LEN_PREFIX_BYTES];
+        let mut head_buf = [0u8; NAT_MAGIC_LEN + LEN_PREFIX_BYTES];
         loop {
-            match reader.read_exact(&mut len_buf).await {
+            // 帧头：魔数 + 长度。
+            match reader.read_exact(&mut head_buf).await {
                 Ok(_) => {}
                 Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
                     *self.state.lock().await = TunnelState::Disconnected;
@@ -204,7 +202,11 @@ impl NatTunnelClient {
                 }
                 Err(e) => return Err(e.into()),
             }
-            let len = u32::from_le_bytes(len_buf) as usize;
+            let len = u32::from_le_bytes(
+                head_buf[NAT_MAGIC_LEN..NAT_MAGIC_LEN + LEN_PREFIX_BYTES]
+                    .try_into()
+                    .unwrap_or([0u8; 4]),
+            ) as usize;
             let mut frame_buf = vec![0u8; len];
             reader.read_exact(&mut frame_buf).await?;
             let frame = NatFrame::decode(&frame_buf)?;

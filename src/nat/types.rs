@@ -169,19 +169,37 @@ impl NatFrame {
         }
     }
 
+    /// 编码为纯 body（bincode，不含魔数/长度前缀）。
     pub fn encode(&self) -> NatResult<Vec<u8>> {
-        let body = bincode::encode_to_vec(self, bincode::config::standard())
-            .map_err(|e| NatError::Protocol(format!("encode failed: {e}")))?;
-        let mut out = Vec::with_capacity(NAT_MAGIC_LEN + body.len());
+        bincode::encode_to_vec(self, bincode::config::standard())
+            .map_err(|e| NatError::Protocol(format!("encode failed: {e}")))
+    }
+
+    /// 编码为线上帧：`魔数(5) + 长度(4, u32 LE) + body`。
+    /// 魔数置于最前，供 unified server 检测层识别 NAT 服务。
+    pub fn encode_wire(&self) -> NatResult<Vec<u8>> {
+        let body = self.encode()?;
+        let mut out = Vec::with_capacity(NAT_MAGIC_LEN + 4 + body.len());
         out.extend_from_slice(NAT_MAGIC);
+        out.extend_from_slice(&(body.len() as u32).to_le_bytes());
         out.extend_from_slice(&body);
         Ok(out)
     }
 
-    /// 解码（自动识别并剥离魔数前缀）。
+    /// 从完整线上帧解码（自动校验并剥离魔数 + 长度前缀）。
     pub fn decode(bytes: &[u8]) -> NatResult<Self> {
         let body = if bytes.len() >= NAT_MAGIC_LEN && &bytes[..NAT_MAGIC_LEN] == NAT_MAGIC {
-            &bytes[NAT_MAGIC_LEN..]
+            if bytes.len() >= NAT_MAGIC_LEN + 4 {
+                let len = u32::from_le_bytes(
+                    bytes[NAT_MAGIC_LEN..NAT_MAGIC_LEN + 4]
+                        .try_into()
+                        .unwrap_or([0u8; 4]),
+                ) as usize;
+                let end = (NAT_MAGIC_LEN + 4 + len).min(bytes.len());
+                &bytes[NAT_MAGIC_LEN + 4..end]
+            } else {
+                &bytes[NAT_MAGIC_LEN..]
+            }
         } else {
             bytes
         };

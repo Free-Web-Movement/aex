@@ -59,3 +59,18 @@ async fn punch_coordinator_tracks_state() {
     assert_eq!(coord.state().await, PunchState::Connected);
     assert_eq!(t.local_addr.port() != 0, true);
 }
+
+#[tokio::test]
+async fn punch_to_unreachable_peer_fails_with_failed_state() {
+    // 打洞到不可达地址（未监听端口）：应失败并进入 Failed 状态（降级触发）。
+    let coord = PunchCoordinator::new();
+    // 找一个未监听端口。
+    let probe = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = probe.local_addr().unwrap();
+    drop(probe); // 端口立即释放，无监听者。
+
+    let bind: SocketAddr = "0.0.0.0:0".parse().unwrap();
+    let result = coord.punch(addr, bind).await;
+    assert!(result.is_err());
+    assert_eq!(coord.state().await, PunchState::Failed);
+}
