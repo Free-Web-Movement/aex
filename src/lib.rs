@@ -56,6 +56,7 @@ pub mod crypto;
 pub mod http;
 pub mod http2;
 pub mod macros;
+pub mod nat;
 #[cfg(feature = "proxy")]
 pub mod proxy;
 pub mod server;
