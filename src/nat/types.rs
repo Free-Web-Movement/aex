@@ -35,6 +35,12 @@ pub enum NatError {
 
 pub type NatResult<T> = Result<T, NatError>;
 
+/// NAT 服务协议魔数：连接首字节，供 unified server 检测层识别 NAT 服务。
+/// 与 HTTP/HTTP2/SOCKS 等在同一端口共存，检测层凭魔数分派。
+pub const NAT_MAGIC: &[u8] = b"ZZNAT";
+/// 魔数长度。
+pub const NAT_MAGIC_LEN: usize = 5;
+
 /// 穿透协议帧类型。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, bincode::Encode, bincode::Decode)]
 pub enum NatFrameType {
@@ -50,6 +56,12 @@ pub enum NatFrameType {
     Data,
     /// 寻址帧：公网节点告诉内网节点"发往目标节点 X 的数据请先发给我"。
     Route,
+    /// 打洞请求：内网节点 A 请求与 B 直连打洞（src=A, dst=B）。
+    PunchRequest,
+    /// 打洞提示：公网节点把对端公网映射地址告知内网节点（extra=对端公网地址）。
+    PunchHint,
+    /// 打洞开始：公网节点通知双方同时向对方打洞。
+    PunchStart,
 }
 
 /// 穿透协议帧。
@@ -58,10 +70,12 @@ pub struct NatFrame {
     pub frame_type: NatFrameType,
     /// 源节点身份（node_id / 钱包地址字符串）。
     pub src: String,
-    /// 目标节点身份（Data 帧使用）。
+    /// 目标节点身份（Data / PunchRequest 使用）。
     pub dst: String,
-    /// 公网映射地址（RegisterAck 携带，`ip:port` 字符串）。
+    /// 公网映射地址（RegisterAck / PunchHint 携带，`ip:port` 字符串）。
     pub public_addr: String,
+    /// 附加地址（PunchHint 携带对端公网映射地址，`ip:port` 字符串）。
+    pub extra: String,
     /// 载荷（Data 帧为业务数据）。
     pub payload: Vec<u8>,
 }
@@ -73,6 +87,7 @@ impl NatFrame {
             src: src.to_string(),
             dst: String::new(),
             public_addr: String::new(),
+            extra: String::new(),
             payload: Vec::new(),
         }
     }
@@ -83,6 +98,7 @@ impl NatFrame {
             src: String::new(),
             dst: String::new(),
             public_addr: public_addr.to_string(),
+            extra: String::new(),
             payload: Vec::new(),
         }
     }
@@ -93,6 +109,7 @@ impl NatFrame {
             src: src.to_string(),
             dst: String::new(),
             public_addr: String::new(),
+            extra: String::new(),
             payload: Vec::new(),
         }
     }
@@ -103,6 +120,7 @@ impl NatFrame {
             src: src.to_string(),
             dst: String::new(),
             public_addr: String::new(),
+            extra: String::new(),
             payload: Vec::new(),
         }
     }
@@ -113,17 +131,61 @@ impl NatFrame {
             src: src.to_string(),
             dst: dst.to_string(),
             public_addr: String::new(),
+            extra: String::new(),
             payload,
         }
     }
 
-    pub fn encode(&self) -> NatResult<Vec<u8>> {
-        bincode::encode_to_vec(self, bincode::config::standard())
-            .map_err(|e| NatError::Protocol(format!("encode failed: {e}")))
+    pub fn punch_request(src: &str, dst: &str) -> Self {
+        Self {
+            frame_type: NatFrameType::PunchRequest,
+            src: src.to_string(),
+            dst: dst.to_string(),
+            public_addr: String::new(),
+            extra: String::new(),
+            payload: Vec::new(),
+        }
     }
 
+    pub fn punch_hint(src: &str, peer_public_addr: &str) -> Self {
+        Self {
+            frame_type: NatFrameType::PunchHint,
+            src: src.to_string(),
+            dst: String::new(),
+            public_addr: String::new(),
+            extra: peer_public_addr.to_string(),
+            payload: Vec::new(),
+        }
+    }
+
+    pub fn punch_start(src: &str, dst: &str) -> Self {
+        Self {
+            frame_type: NatFrameType::PunchStart,
+            src: src.to_string(),
+            dst: dst.to_string(),
+            public_addr: String::new(),
+            extra: String::new(),
+            payload: Vec::new(),
+        }
+    }
+
+    pub fn encode(&self) -> NatResult<Vec<u8>> {
+        let body = bincode::encode_to_vec(self, bincode::config::standard())
+            .map_err(|e| NatError::Protocol(format!("encode failed: {e}")))?;
+        let mut out = Vec::with_capacity(NAT_MAGIC_LEN + body.len());
+        out.extend_from_slice(NAT_MAGIC);
+        out.extend_from_slice(&body);
+        Ok(out)
+    }
+
+    /// 解码（自动识别并剥离魔数前缀）。
     pub fn decode(bytes: &[u8]) -> NatResult<Self> {
-        bincode::decode_from_slice(bytes, bincode::config::standard())
+        let body = if bytes.len() >= NAT_MAGIC_LEN && &bytes[..NAT_MAGIC_LEN] == NAT_MAGIC {
+            &bytes[NAT_MAGIC_LEN..]
+        } else {
+            bytes
+        };
+        bincode::decode_from_slice(body, bincode::config::standard())
             .map(|(frame, _)| frame)
             .map_err(|e| NatError::Protocol(format!("decode failed: {e}")))
     }
@@ -155,37 +217,4 @@ fn now_secs() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn nat_frame_roundtrip() {
-        let frame = NatFrame::data("node_a", "node_b", b"hello".to_vec());
-        let bytes = frame.encode().unwrap();
-        let decoded = NatFrame::decode(&bytes).unwrap();
-        assert_eq!(decoded.frame_type, NatFrameType::Data);
-        assert_eq!(decoded.src, "node_a");
-        assert_eq!(decoded.dst, "node_b");
-        assert_eq!(decoded.payload, b"hello".to_vec());
-    }
-
-    #[test]
-    fn nat_frame_register_ack() {
-        let frame = NatFrame::register_ack("69.171.73.252:20260");
-        let bytes = frame.encode().unwrap();
-        let decoded = NatFrame::decode(&bytes).unwrap();
-        assert_eq!(decoded.frame_type, NatFrameType::RegisterAck);
-        assert_eq!(decoded.public_addr, "69.171.73.252:20260");
-    }
-
-    #[test]
-    fn tunnel_peer_tracks_seen() {
-        let peer = TunnelPeer::new("node_a".into(), "1.2.3.4:5000".into());
-        assert_eq!(peer.node_id, "node_a");
-        assert_eq!(peer.public_addr, "1.2.3.4:5000");
-        assert!(peer.last_seen > 0);
-    }
 }

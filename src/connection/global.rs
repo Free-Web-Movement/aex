@@ -322,7 +322,7 @@ pub struct PeerInfo {
     pub direction: String,
     pub scope: String,
     pub uptime_secs: u64,
-    /// 握手后填充的 peer node_id（FreeWebMovementAddress 字符串），未完成握手则为 None
+    /// 握手后填充的 peer node_id（节点身份字符串），未完成握手则为 None
     pub node_id: Option<String>,
     /// peer 宣告的内网地址列表（ip:port），来自 AEX Node 的 ips(Intranet) + port
     pub intranet_ips: Vec<String>,

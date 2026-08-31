@@ -2,7 +2,10 @@
 //!
 //! 处于传输层以下，直接操作 `TcpStream`。内网节点（Edge，NAT 后）主动出站
 //! 连公网中继节点，注册自己并学习自己的公网映射地址，之后经中继收发数据。
+//! 支持打洞：经中继交换对端公网映射地址后，同时向对端 TCP 打洞，建立互为
+//! server/client 的直连（中继退出数据路径）；打洞失败回退中继转发。
 
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -11,6 +14,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::{Mutex, mpsc};
 
+use super::punch::{PunchCoordinator, PunchTunnel};
 use super::types::{NatError, NatFrame, NatFrameType, NatResult};
 
 const LEN_PREFIX_BYTES: usize = 4;
@@ -35,6 +39,17 @@ pub struct TunnelData {
     pub payload: Vec<u8>,
 }
 
+/// 打洞直连建立通知（互为 server/client 的双向连接）。
+#[derive(Clone)]
+pub struct PunchEstablished {
+    /// 对端节点身份。
+    pub peer: String,
+    /// 对端公网映射地址。
+    pub peer_public: SocketAddr,
+    /// 建立的直连隧道。
+    pub tunnel: Arc<PunchTunnel>,
+}
+
 /// 内网节点隧道客户端。
 pub struct NatTunnelClient {
     /// 本节点身份。
@@ -51,6 +66,10 @@ pub struct NatTunnelClient {
     state: Mutex<TunnelState>,
     /// 数据接收通道（收到 Data 帧转发给上层）。
     data_tx: Mutex<Option<mpsc::UnboundedSender<TunnelData>>>,
+    /// 打洞直连建立通道。
+    punch_tx: Mutex<Option<mpsc::UnboundedSender<PunchEstablished>>>,
+    /// 已收集的对端公网映射地址：node_id → SocketAddr。
+    punch_peers: Mutex<HashMap<String, SocketAddr>>,
     /// 注册确认等待。
     ready_rx: Mutex<Option<tokio::sync::oneshot::Receiver<bool>>>,
     ready_tx: Mutex<Option<tokio::sync::oneshot::Sender<bool>>>,
@@ -70,6 +89,8 @@ impl NatTunnelClient {
             writer: Mutex::new(Some(writer)),
             state: Mutex::new(TunnelState::Connecting),
             data_tx: Mutex::new(None),
+            punch_tx: Mutex::new(None),
+            punch_peers: Mutex::new(HashMap::new()),
             ready_rx: Mutex::new(Some(ready_rx)),
             ready_tx: Mutex::new(Some(ready_tx)),
         });
@@ -105,6 +126,25 @@ impl NatTunnelClient {
     /// 设置数据接收通道。
     pub async fn set_data_channel(&self, tx: mpsc::UnboundedSender<TunnelData>) {
         *self.data_tx.lock().await = Some(tx);
+    }
+
+    /// 设置打洞直连建立通知通道。
+    pub async fn set_punch_channel(&self, tx: mpsc::UnboundedSender<PunchEstablished>) {
+        *self.punch_tx.lock().await = Some(tx);
+    }
+
+    /// 发起与对端节点的打洞（经中继交换公网映射地址后 TCP 同时打洞）。
+    ///
+    /// 返回后对端公网映射地址尚未交换完成；打洞结果通过 `set_punch_channel`
+    /// 通知（[`PunchEstablished`]）。打洞失败时数据仍经中继转发（降级）。
+    pub async fn request_punch(&self, dst: &str) -> NatResult<()> {
+        let frame = NatFrame::punch_request(&self.node_id, dst);
+        self.write_frame(&frame).await
+    }
+
+    /// 查询已收集的对端公网映射地址。
+    pub async fn peer_public_addr(&self, peer: &str) -> Option<SocketAddr> {
+        self.punch_peers.lock().await.get(peer).copied()
     }
 
     /// 当前公网映射地址（注册确认后非空）。
@@ -189,9 +229,64 @@ impl NatTunnelClient {
                         });
                     }
                 }
+                NatFrameType::PunchHint => {
+                    // 中继告知对端公网映射地址（extra = 对端 `ip:port`）。
+                    if let Ok(peer_addr) = frame.extra.parse::<SocketAddr>() {
+                        self.punch_peers
+                            .lock()
+                            .await
+                            .insert(frame.src.clone(), peer_addr);
+                        tracing::info!(
+                            "🔓 NAT punch: peer {} public addr = {}",
+                            frame.src,
+                            peer_addr
+                        );
+                    }
+                }
+                NatFrameType::PunchStart => {
+                    // 通知开始打洞：对端公网地址（由 PunchHint 提供）。
+                    self.try_punch(&frame.dst).await;
+                }
                 _ => {
                     tracing::debug!("NAT tunnel: received {:?}", frame.frame_type);
                 }
+            }
+        }
+    }
+
+    /// 尝试与对端打洞建立直连（互为 server/client）。
+    async fn try_punch(&self, peer: &str) {
+        let peer_addr = match self.punch_peers.lock().await.get(peer).copied() {
+            Some(a) => a,
+            None => {
+                tracing::debug!("NAT punch: no peer addr for {}, skip", peer);
+                return;
+            }
+        };
+        let local_bind: SocketAddr = "0.0.0.0:0".parse().unwrap();
+        let coordinator = PunchCoordinator::new();
+        match coordinator.punch(peer_addr, local_bind).await {
+            Ok(tunnel) => {
+                tracing::info!(
+                    "🔓 NAT punch SUCCESS: {} <-> {} (direct P2P)",
+                    self.node_id,
+                    peer
+                );
+                if let Some(tx) = self.punch_tx.lock().await.clone() {
+                    let _ = tx.send(PunchEstablished {
+                        peer: peer.to_string(),
+                        peer_public: peer_addr,
+                        tunnel: Arc::new(tunnel),
+                    });
+                }
+            }
+            Err(e) => {
+                // 打洞失败：降级，数据继续经中继转发。
+                tracing::info!(
+                    "🔓 NAT punch {} failed: {:?} (fallback to relay)",
+                    peer,
+                    e
+                );
             }
         }
     }

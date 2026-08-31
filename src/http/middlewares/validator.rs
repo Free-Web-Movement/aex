@@ -183,7 +183,7 @@ pub fn to_validator(dsl_map: AHashMap<String, String>) -> Arc<Executor> {
             // 3️⃣ 处理转换与校验结果
             match value_result {
                 Ok(mut value) => {
-                    // 执行 zz-validator 校验
+                    // 执行规则校验
                     if let Err(e) = validate_object(&mut value, rules) {
                         let mut err_msg = String::with_capacity(64);
                         err_msg.push_str(source);

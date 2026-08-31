@@ -12,9 +12,15 @@
 //! 的**中继**路径；打洞（[`super::nat`] 后续 `punch` 子模块）留待扩展。
 
 pub mod client;
+pub mod punch;
 pub mod server;
+pub mod service;
 pub mod types;
 
-pub use client::{NatTunnelClient, TunnelData, TunnelState};
-pub use server::NatRelayServer;
-pub use types::{NatError, NatFrame, NatFrameType, NatResult, TunnelPeer};
+pub use client::{NatTunnelClient, PunchEstablished, TunnelData, TunnelState};
+pub use punch::{PunchCoordinator, PunchState, PunchTunnel};
+pub use server::{NatRelayServer, NatRelayService};
+pub use service::{NatDetector, NAT_PROTOCOL, UnifiedServerExt, nat_tcp_handler};
+pub use types::{
+    NatError, NatFrame, NatFrameType, NatResult, TunnelPeer, NAT_MAGIC, NAT_MAGIC_LEN,
+};
