@@ -17,7 +17,10 @@ pub mod server;
 pub mod service;
 pub mod types;
 
-pub use client::{NatTunnelClient, PunchEstablished, TunnelData, TunnelState};
+pub use client::{
+    NatTunnelChannel, NatTunnelClient, PeerStreamEstablished, PunchEstablished, TunnelData,
+    TunnelState,
+};
 pub use punch::{PunchCoordinator, PunchState, PunchTunnel};
 pub use server::{NatRelayServer, NatRelayService};
 pub use service::{NatDetector, NAT_PROTOCOL, UnifiedServerExt, nat_tcp_handler};

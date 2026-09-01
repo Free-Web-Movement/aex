@@ -94,6 +94,8 @@ pub enum NatFrameType {
     PunchHint,
     /// 打洞开始：公网节点通知双方同时向对方打洞。
     PunchStart,
+    /// 在线对端列表：中继广播当前登记的隧道 peer（payload = 编码的 peer 列表）。
+    Peers,
 }
 
 /// 穿透协议帧。
@@ -198,6 +200,20 @@ impl NatFrame {
             public_addr: String::new(),
             extra: String::new(),
             payload: Vec::new(),
+        }
+    }
+
+    /// 在线对端列表广播（payload = bincode 编码的 `Vec<(node_id, public_addr)>`）。
+    pub fn peers(src: &str, peers: &[(String, String)]) -> Self {
+        let payload = bincode::encode_to_vec(peers, bincode::config::standard())
+            .unwrap_or_default();
+        Self {
+            frame_type: NatFrameType::Peers,
+            src: src.to_string(),
+            dst: String::new(),
+            public_addr: String::new(),
+            extra: String::new(),
+            payload,
         }
     }
 

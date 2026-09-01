@@ -235,3 +235,79 @@ async fn oversized_frame_header_does_not_crash_relay() {
     assert!(server.peer_public_addr("node_after_oversize").is_some());
 }
 
+
+#[tokio::test]
+async fn open_channel_relays_byte_stream_between_peers() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let server = start_relay().await;
+    let relay_addr = server.addr;
+
+    let a = start_client("node_a", relay_addr).await;
+    let b = start_client("node_b", relay_addr).await;
+
+    // A、B 各自打开到对方的字节通道。
+    let mut a_ch = a.clone().open_channel("node_b").await;
+    let mut b_ch = b.clone().open_channel("node_a").await;
+
+    // A 写 → 中继 → B 的通道读到。
+    a_ch.write_all(b"hello-b").await.expect("a write");
+    let mut buf = [0u8; 7];
+    tokio::time::timeout(Duration::from_secs(3), b_ch.read_exact(&mut buf))
+        .await
+        .expect("b read timeout")
+        .expect("b read");
+    assert_eq!(&buf, b"hello-b");
+
+    // B 写 → 中继 → A 的通道读到。
+    b_ch.write_all(b"hi-a").await.expect("b write");
+    let mut buf2 = [0u8; 4];
+    tokio::time::timeout(Duration::from_secs(3), a_ch.read_exact(&mut buf2))
+        .await
+        .expect("a read timeout")
+        .expect("a read");
+    assert_eq!(&buf2, b"hi-a");
+}
+
+#[tokio::test]
+async fn auto_connect_delivers_peer_stream_to_upper_layer() {
+    let server = start_relay().await;
+    let relay_addr = server.addr;
+
+    // B 先注册并设置流对象消费者。
+    let b = start_client("node_b", relay_addr).await;
+    let (stream_tx, mut stream_rx) =
+        tokio::sync::mpsc::unbounded_channel::<aex::nat::PeerStreamEstablished>();
+    b.set_stream_channel(stream_tx).await;
+
+    // A 后注册：中继广播 peers，B 自动发现 A 并建立流对象。
+    let a = start_client("node_a", relay_addr).await;
+
+    let est = tokio::time::timeout(Duration::from_secs(3), stream_rx.recv())
+        .await
+        .expect("B 应收到 A 的流对象")
+        .expect("channel closed");
+    assert_eq!(est.peer, "node_a");
+
+    // 用该流对象双向收发：A 写入 → B 的流读到。
+    let mut b_stream = est.stream;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    a.send_to("node_b", b"ping-b".to_vec()).await.unwrap();
+    let mut buf = [0u8; 6];
+    tokio::time::timeout(Duration::from_secs(3), b_stream.read_exact(&mut buf))
+        .await
+        .expect("read timeout")
+        .expect("read");
+    assert_eq!(&buf, b"ping-b");
+
+    // B 经流对象写 → A 经 send_to 收到（A 用传统 data_channel 接收验证）。
+    let (tx_a, mut rx_a) = tokio::sync::mpsc::unbounded_channel();
+    a.set_data_channel(tx_a).await;
+    b_stream.write_all(b"pong-a").await.unwrap();
+    let data = tokio::time::timeout(Duration::from_secs(3), rx_a.recv())
+        .await
+        .expect("A 应收到")
+        .expect("channel closed");
+    assert_eq!(data.from, "node_b");
+    assert_eq!(data.payload, b"pong-a".to_vec());
+}

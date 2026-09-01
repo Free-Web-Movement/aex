@@ -21,7 +21,7 @@ use crate::connection::context::{BoxReader, BoxWriter};
 
 use super::types::{
     frame_len_from_header, NatError, NatFrame, NatFrameType, NatResult, TunnelPeer,
-    NAT_KEEPALIVE_TIMEOUT, NAT_MAGIC_LEN,
+    NAT_KEEPALIVE_TIMEOUT, NAT_MAGIC, NAT_MAGIC_LEN,
 };
 
 /// 帧长度前缀占位大小（u32 LE）。
@@ -163,6 +163,8 @@ impl NatRelayService {
                     // 回 RegisterAck，携带公网映射地址（内网节点据此知道自己公网地址）。
                     let ack = NatFrame::register_ack(&addr.to_string());
                     write_frame(&conn.writer, &ack).await?;
+                    // 广播在线 peer 列表，使各 client 自动发现并建立互连。
+                    self.broadcast_peers(&frame.src).await;
                 }
                 NatFrameType::KeepAlive => {
                     let ack = NatFrame::keep_alive_ack(&frame.src);
@@ -203,6 +205,38 @@ impl NatRelayService {
     /// 当前登记的隧道对端数。
     pub fn peer_count(&self) -> usize {
         self.peers.len()
+    }
+
+    /// 向所有已登记的 client 广播当前在线 peer 列表。
+    ///
+    /// 各 client 收到完整列表（跳过自身），据此自动发现其它经同一中继的
+    /// 节点并建立互连。`except` 保留为兼容（当前忽略——新注册者也应收列表，
+    /// 由 client 侧跳过自身）。
+    pub async fn broadcast_peers(&self, _except: &str) {
+        let list: Vec<(String, String)> = self
+            .peers
+            .iter()
+            .map(|e| (e.key().clone(), e.value().public_addr.clone()))
+            .collect();
+        let frame = NatFrame::peers("", &list);
+        match frame.encode() {
+            Ok(body) => {
+                for entry in self.peers.iter() {
+                    let peer = entry.value();
+                    let mut frame_bytes = Vec::with_capacity(NAT_MAGIC_LEN + LEN_PREFIX_BYTES + body.len());
+                    frame_bytes.extend_from_slice(NAT_MAGIC);
+                    frame_bytes.extend_from_slice(&(body.len() as u32).to_le_bytes());
+                    frame_bytes.extend_from_slice(&body);
+                    if let Err(e) = {
+                        let mut w = peer.writer.lock().await;
+                        w.write_all(&frame_bytes).await
+                    } {
+                        tracing::debug!("NAT relay: peer broadcast to {} failed: {:?}", entry.key(), e);
+                    }
+                }
+            }
+            Err(e) => tracing::debug!("NAT relay: peers frame encode failed: {:?}", e),
+        }
     }
 
     /// 查询某对端的公网映射地址。

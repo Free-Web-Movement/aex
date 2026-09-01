@@ -41,7 +41,10 @@ impl PunchTunnel {
         local_bind: SocketAddr,
     ) -> NatResult<PunchTunnel> {
         for attempt in 0..PUNCH_RETRIES {
-            let bind_addr = if local_bind.ip().is_unspecified() {
+            // local_bind 提供绑定端口（固定端口打洞：公网节点从自身 PunchHint
+            // 广播的端口 listen，使对端出站打洞能命中本节点 listener）。
+            // 仅当 IP 未指定**且端口为 0** 时才分配随机端口。
+            let bind_addr = if local_bind.ip().is_unspecified() && local_bind.port() == 0 {
                 SocketAddr::new(IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED), 0)
             } else {
                 local_bind
