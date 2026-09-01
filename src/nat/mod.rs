@@ -23,4 +23,5 @@ pub use server::{NatRelayServer, NatRelayService};
 pub use service::{NatDetector, NAT_PROTOCOL, UnifiedServerExt, nat_tcp_handler};
 pub use types::{
     NatError, NatFrame, NatFrameType, NatResult, TunnelPeer, NAT_MAGIC, NAT_MAGIC_LEN,
+    NAT_MAX_FRAME_BODY, frame_len_from_header,
 };

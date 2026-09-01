@@ -15,7 +15,9 @@ use tokio::net::TcpStream;
 use tokio::sync::{Mutex, mpsc};
 
 use super::punch::{PunchCoordinator, PunchTunnel};
-use super::types::{NatError, NatFrame, NatFrameType, NatResult, NAT_MAGIC_LEN};
+use super::types::{
+    frame_len_from_header, NatError, NatFrame, NatFrameType, NatResult, NAT_MAGIC_LEN,
+};
 
 const LEN_PREFIX_BYTES: usize = 4;
 
@@ -202,11 +204,7 @@ impl NatTunnelClient {
                 }
                 Err(e) => return Err(e.into()),
             }
-            let len = u32::from_le_bytes(
-                head_buf[NAT_MAGIC_LEN..NAT_MAGIC_LEN + LEN_PREFIX_BYTES]
-                    .try_into()
-                    .unwrap_or([0u8; 4]),
-            ) as usize;
+            let len = frame_len_from_header(&head_buf)?;
             let mut frame_buf = vec![0u8; len];
             reader.read_exact(&mut frame_buf).await?;
             let frame = NatFrame::decode(&frame_buf)?;

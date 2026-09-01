@@ -3,7 +3,10 @@
 //! 验证：检测层识别 NAT 魔数（与 HTTP/SOCKS 在同一端口共存）、NatFrame
 //! 编解码（带魔数）、NatRelayService 连接处理。
 
-use aex::nat::{NatDetector, NatFrame, NatFrameType, NatRelayService, TunnelPeer, NAT_MAGIC};
+use aex::nat::{
+    frame_len_from_header, NatDetector, NatFrame, NatFrameType, NatRelayService, TunnelPeer,
+    NAT_MAGIC, NAT_MAGIC_LEN, NAT_MAX_FRAME_BODY,
+};
 use aex::unified::detect::{DetectionState, ProtocolDetector, Verdict};
 
 #[test]
@@ -99,3 +102,29 @@ async fn nat_relay_service_starts_empty() {
     assert_eq!(service.peer_count(), 0);
     assert!(service.peers_snapshot().is_empty());
 }
+
+#[test]
+fn frame_len_from_header_rejects_oversized_length() {
+    // 帧头 = 魔数 + 4 字节长度前缀。超限长度必须被拒绝（防巨大内存分配崩溃）。
+    let mut header = vec![0u8; NAT_MAGIC_LEN + 4];
+    header[..NAT_MAGIC_LEN].copy_from_slice(NAT_MAGIC);
+    let oversize = (NAT_MAX_FRAME_BODY as u32) + 1;
+    header[NAT_MAGIC_LEN..].copy_from_slice(&oversize.to_le_bytes());
+    let err = frame_len_from_header(&header).unwrap_err();
+    assert!(err.to_string().contains("exceeds max"), "got: {err}");
+}
+
+#[test]
+fn frame_len_from_header_accepts_normal_length() {
+    let mut header = vec![0u8; NAT_MAGIC_LEN + 4];
+    header[..NAT_MAGIC_LEN].copy_from_slice(NAT_MAGIC);
+    header[NAT_MAGIC_LEN..].copy_from_slice(&123u32.to_le_bytes());
+    assert_eq!(frame_len_from_header(&header).unwrap(), 123);
+}
+
+#[test]
+fn frame_len_from_header_rejects_short_header() {
+    // 帧头不足魔数+长度 → 协议错误。
+    assert!(frame_len_from_header(&[0u8; NAT_MAGIC_LEN]).is_err());
+}
+

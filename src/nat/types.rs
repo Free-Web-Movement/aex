@@ -41,6 +41,38 @@ pub const NAT_MAGIC: &[u8] = b"ZZNAT";
 /// 魔数长度。
 pub const NAT_MAGIC_LEN: usize = 5;
 
+/// 帧体（body）长度前缀占位大小（u32 LE）。
+pub const NAT_LEN_PREFIX_BYTES: usize = 4;
+
+/// 帧体（body）最大允许长度。解帧时从帧头解析出的 `len` 必须在
+/// `[0, NAT_MAX_FRAME_BODY]` 内，否则视为协议错误并断开——
+/// 防止异常/错位的帧头触发巨大内存分配（如 512MB 中继节点分配 1.3GB 崩溃）。
+pub const NAT_MAX_FRAME_BODY: usize = 16 * 1024 * 1024; // 16 MiB
+
+/// 从线上帧头（`魔数 + 长度前缀`）解析并校验 body 长度。
+///
+/// 返回 `Err(NatError::Protocol)` 当长度前缀缺失或超出 [`NAT_MAX_FRAME_BODY`]，
+/// 以防任意巨大 `len` 导致不受控的内存分配。
+pub fn frame_len_from_header(head_buf: &[u8]) -> NatResult<usize> {
+    if head_buf.len() < NAT_MAGIC_LEN + NAT_LEN_PREFIX_BYTES {
+        return Err(NatError::Protocol(
+            "frame header too short".to_string(),
+        ));
+    }
+    let len = u32::from_le_bytes(
+        head_buf[NAT_MAGIC_LEN..NAT_MAGIC_LEN + NAT_LEN_PREFIX_BYTES]
+            .try_into()
+            .unwrap_or([0u8; 4]),
+    ) as usize;
+    if len > NAT_MAX_FRAME_BODY {
+        return Err(NatError::Protocol(format!(
+            "frame body length {len} exceeds max {}",
+            NAT_MAX_FRAME_BODY
+        )));
+    }
+    Ok(len)
+}
+
 /// 穿透协议帧类型。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, bincode::Encode, bincode::Decode)]
 pub enum NatFrameType {

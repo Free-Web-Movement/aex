@@ -207,3 +207,31 @@ async fn nat_tcp_handler_builds() {
     let service2 = service.clone();
     assert_eq!(service2.peer_count(), 0);
 }
+
+#[tokio::test]
+async fn oversized_frame_header_does_not_crash_relay() {
+    use tokio::io::AsyncWriteExt;
+    use tokio::net::TcpStream;
+    let server = start_relay().await;
+    let relay_addr = server.addr;
+
+    // 直接向中继发一个帧头：魔数 + 超限长度前缀。
+    // 这曾导致 512MB 中继节点读取异常帧头后分配 1.3GB 崩溃。
+    // 修复后应安全拒绝该帧，中继继续存活。
+    let mut stream = TcpStream::connect(relay_addr)
+        .await
+        .expect("connect to relay");
+    let mut head = Vec::new();
+    head.extend_from_slice(aex::nat::types::NAT_MAGIC);
+    // 超限长度（> NAT_MAX_FRAME_BODY）
+    let oversize = (aex::nat::types::NAT_MAX_FRAME_BODY as u32) + 1;
+    head.extend_from_slice(&oversize.to_le_bytes());
+    stream.write_all(&head).await.expect("write malformed header");
+
+    // 稍等，让中继处理异常帧；随后一个正常节点仍能注册，证明中继未崩溃。
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let ok = start_client("node_after_oversize", relay_addr).await;
+    assert_eq!(ok.state().await, TunnelState::Ready);
+    assert!(server.peer_public_addr("node_after_oversize").is_some());
+}
+

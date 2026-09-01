@@ -13,7 +13,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpSocket};
 use tokio::sync::Mutex;
 
-use super::types::{NatError, NatResult};
+use super::types::{NatError, NatResult, NAT_MAX_FRAME_BODY};
 
 /// 打洞重试次数。
 const PUNCH_RETRIES: usize = 8;
@@ -155,6 +155,12 @@ impl PunchTunnel {
         let mut len_buf = [0u8; 4];
         self.reader.read_exact(&mut len_buf).await?;
         let len = u32::from_le_bytes(len_buf) as usize;
+        if len > NAT_MAX_FRAME_BODY {
+            return Err(NatError::Protocol(format!(
+                "punch frame length {len} exceeds max {}",
+                NAT_MAX_FRAME_BODY
+            )));
+        }
         let mut buf = vec![0u8; len];
         self.reader.read_exact(&mut buf).await?;
         Ok(buf)

@@ -20,8 +20,8 @@ use tokio::net::{TcpListener, TcpStream};
 use crate::connection::context::{BoxReader, BoxWriter};
 
 use super::types::{
-    NatError, NatFrame, NatFrameType, NatResult, TunnelPeer, NAT_KEEPALIVE_TIMEOUT,
-    NAT_MAGIC_LEN,
+    frame_len_from_header, NatError, NatFrame, NatFrameType, NatResult, TunnelPeer,
+    NAT_KEEPALIVE_TIMEOUT, NAT_MAGIC_LEN,
 };
 
 /// 帧长度前缀占位大小（u32 LE）。
@@ -137,11 +137,7 @@ impl NatRelayService {
                 }
                 Err(e) => return Err(e.into()),
             }
-            let len = u32::from_le_bytes(
-                head_buf[NAT_MAGIC_LEN..NAT_MAGIC_LEN + LEN_PREFIX_BYTES]
-                    .try_into()
-                    .unwrap_or([0u8; 4]),
-            ) as usize;
+            let len = frame_len_from_header(&head_buf)?;
             let mut frame_buf = vec![0u8; len];
             reader.read_exact(&mut frame_buf).await?;
             let frame = NatFrame::decode(&frame_buf)?;
