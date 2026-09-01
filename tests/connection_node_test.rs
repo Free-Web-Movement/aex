@@ -104,4 +104,66 @@ mod tests {
         // 注意：在 CI 环境（如 Github Actions）中，有时只有 loopback
         println!("Detected IPs: {:?}", node.ips);
     }
+
+    // --- 5. NAT 转发地址（多地址带端口）测试 ---
+    #[test]
+    fn test_nat_addrs_init_from_ips() {
+        // from_addr / new 构造时，nat_addrs 与 ips 等价（每个 IP 拼主监听端口）
+        let node = Node::from_addr("1.2.3.4:9090".parse().unwrap(), None, Some(vec![1; 32]));
+        assert_eq!(node.port, 9090);
+        assert_eq!(node.nat_addrs.len(), node.ips.len());
+        assert!(node
+            .nat_addrs
+            .contains(&(NetworkScope::Extranet, "1.2.3.4:9090".parse().unwrap())));
+    }
+
+    #[test]
+    fn test_add_nat_addr_dedup_and_scope() {
+        let mut node = Node::from_addr("127.0.0.1:80".parse().unwrap(), None, None);
+        node.nat_addrs.clear();
+
+        // 添加公网映射地址（不同端口）
+        node.add_nat_addr(NetworkScope::Extranet, "8.8.8.8:20261".parse().unwrap());
+        node.add_nat_addr(NetworkScope::Extranet, "8.8.8.8:20261".parse().unwrap()); // 去重
+        assert_eq!(node.nat_addrs_of(NetworkScope::Extranet).len(), 1);
+
+        // 私网地址
+        node.add_nat_addr(NetworkScope::Intranet, "192.168.3.56:20901".parse().unwrap());
+        assert_eq!(node.nat_addrs_of(NetworkScope::Intranet).len(), 1);
+        assert_eq!(node.all_nat_addrs().len(), 2);
+    }
+
+    #[test]
+    fn test_set_nat_addr_replaces_same_scope() {
+        let mut node = Node::from_addr("127.0.0.1:80".parse().unwrap(), None, None);
+        node.nat_addrs.clear();
+
+        node.set_nat_addr(NetworkScope::Extranet, "1.2.3.4:1111".parse().unwrap());
+        node.set_nat_addr(NetworkScope::Extranet, "1.2.3.4:2222".parse().unwrap()); // 替换同一 scope
+        let ext = node.nat_addrs_of(NetworkScope::Extranet);
+        assert_eq!(ext.len(), 1);
+        assert_eq!(ext[0], "1.2.3.4:2222".parse().unwrap());
+
+        // set 相同地址应幂等（不重复）
+        node.set_nat_addr(NetworkScope::Extranet, "1.2.3.4:2222".parse().unwrap());
+        assert_eq!(node.nat_addrs_of(NetworkScope::Extranet).len(), 1);
+    }
+
+    #[test]
+    fn test_add_observed_ip_updates_nat_addrs() {
+        let mut node = Node::from_addr("127.0.0.1:80".parse().unwrap(), None, None);
+        node.ips.clear();
+        node.nat_addrs.clear();
+
+        node.add_observed_ip(NetworkScope::Intranet, "10.0.0.9".parse().unwrap());
+        assert_eq!(node.ips.len(), 1);
+        assert!(node
+            .nat_addrs
+            .contains(&(NetworkScope::Intranet, "10.0.0.9:80".parse().unwrap())));
+
+        // 重复 IP 不再添加（ips 与 nat_addrs 都去重）
+        node.add_observed_ip(NetworkScope::Intranet, "10.0.0.9".parse().unwrap());
+        assert_eq!(node.ips.len(), 1);
+        assert_eq!(node.nat_addrs.len(), 1);
+    }
 }

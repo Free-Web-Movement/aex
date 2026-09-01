@@ -38,9 +38,10 @@
 
 ## 测试规则（不得违背）
 
-1. **测试不与源码混放**：测试代码**一律放 `tests/` 目录**（`tests/<module>_test.rs`
-   或 `tests/<module>/`），**禁止在 `src/` 下写 `#[cfg(test)] mod tests {}`**。
-   源码只包含生产逻辑。
+1. **测试不与源码混放**：**所有**测试代码一律放 `tests/` 目录（`tests/<module>_test.rs`
+   或 `tests/<module>/`），**禁止在 `src/` 下写任何 `#[cfg(test)]` / `mod tests` / `#[test]`**。
+   `src/` 只包含生产逻辑，不得出现任何测试代码。存量 `src/` 内已有的 `#[cfg(test)]`
+   一律迁移到 `tests/` 对应文件，不得新增。
 2. **独立运行**：`cargo test --test <module>_test` 可单独跑该模块测试。
 3. **引用方式**：集成测试通过 `use aex::<module>::...` 引用公开 API，不访问私有项。
 4. **覆盖**：每个公开函数、每个 `Err` 分支、边界条件（空输入/非法输入/并发）都要有测试。

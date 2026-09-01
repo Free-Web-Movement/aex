@@ -66,6 +66,7 @@ async fn test_update_indexes_node() {
             port: 3001,
             protocols: HashSet::new(),
             ips: vec![],
+            nat_addrs: vec![],
         });
     }
     let global = Arc::new(GlobalContext::new(addr, None));

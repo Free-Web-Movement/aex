@@ -162,6 +162,7 @@ async fn test_global_get_connection_info() {
                 (NetworkScope::Intranet, "10.0.0.5".parse().unwrap()),
                 (NetworkScope::Extranet, "1.2.3.4".parse().unwrap()),
             ],
+            nat_addrs: Vec::new(),
         });
     }
 

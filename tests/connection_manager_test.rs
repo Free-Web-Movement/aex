@@ -290,6 +290,7 @@ mod tests {
                 port: 8080,
                 protocols: HashSet::new(),
                 ips: Vec::new(),
+                nat_addrs: Vec::new(),
             });
         }
 
@@ -352,6 +353,7 @@ mod tests {
                 port: 8080,
                 protocols: HashSet::new(),
                 ips: Vec::new(),
+                nat_addrs: Vec::new(),
             });
         }
 
@@ -564,5 +566,90 @@ mod tests {
 
         let executed = tokio::time::timeout(Duration::from_secs(1), rx).await;
         assert!(matches!(executed, Ok(Ok(true))));
+    }
+
+    // --- nat_contact_addrs：按 node_id 汇总对端 NAT 转发地址（多地址带端口） ---
+    fn make_entry_with_node(
+        node_id: Vec<u8>,
+        port: u16,
+        nat_addrs: Vec<(NetworkScope, SocketAddr)>,
+    ) -> Arc<aex::connection::entry::ConnectionEntry> {
+        Arc::new(aex::connection::entry::ConnectionEntry {
+            addr: "1.1.1.1:8080".parse().unwrap(),
+            node: Arc::new(tokio::sync::RwLock::new(Some(Node {
+                id: node_id,
+                version: 1,
+                started_at: 0,
+                port,
+                protocols: HashSet::new(),
+                ips: Vec::new(),
+                nat_addrs,
+            }))),
+            abort_handle: tokio::spawn(async {}).abort_handle(),
+            connected_at: 0,
+            context: None,
+            cancel_token: tokio_util::sync::CancellationToken::new(),
+            last_seen: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+        })
+    }
+
+    #[tokio::test]
+    async fn test_nat_contact_addrs_via_index() {
+        let manager = ConnectionManager::new();
+        let node_id = vec![7u8];
+        let entry = make_entry_with_node(
+            node_id.clone(),
+            20901,
+            vec![
+                (NetworkScope::Intranet, "192.168.3.56:20901".parse().unwrap()),
+                (NetworkScope::Extranet, "69.171.73.252:20901".parse().unwrap()),
+            ],
+        );
+        manager.index_node(node_id.clone(), entry);
+
+        let addrs = manager.nat_contact_addrs(&node_id).await;
+        assert_eq!(addrs.len(), 2);
+        assert!(addrs.contains(&"192.168.3.56:20901".parse().unwrap()));
+        assert!(addrs.contains(&"69.171.73.252:20901".parse().unwrap()));
+    }
+
+    #[tokio::test]
+    async fn test_nat_contact_addrs_fallback_traversal_and_dedup() {
+        let manager = ConnectionManager::new();
+        let node_id = vec![8u8];
+
+        // 不经过 index_node，只放进 connections（触发回落遍历路径）
+        let addr: SocketAddr = "9.9.9.9:3000".parse().unwrap();
+        let handle = tokio::spawn(async {}).abort_handle();
+        let ct = tokio_util::sync::CancellationToken::new();
+        manager.add(addr, handle, ct.clone(), true, None);
+
+        let ip = addr.ip();
+        let scope = NetworkScope::from_ip(&ip);
+        let bi = manager.connections.get(&(ip, scope)).unwrap();
+        let entry = bi.clients.get(&addr).unwrap();
+        let mut lock = entry.node.write().await;
+        *lock = Some(Node {
+            id: node_id.clone(),
+            version: 1,
+            started_at: 0,
+            port: 3000,
+            protocols: HashSet::new(),
+            ips: Vec::new(),
+            nat_addrs: vec![
+                (NetworkScope::Extranet, "69.171.73.252:3000".parse().unwrap()),
+                (NetworkScope::Intranet, "192.168.1.10:3000".parse().unwrap()),
+            ],
+        });
+        drop(lock);
+
+        let addrs = manager.nat_contact_addrs(&node_id).await;
+        assert_eq!(addrs.len(), 2);
+        assert!(addrs.contains(&"69.171.73.252:3000".parse().unwrap()));
+        assert!(addrs.contains(&"192.168.1.10:3000".parse().unwrap()));
+
+        // 不匹配的 node_id → 空
+        let none = manager.nat_contact_addrs(&vec![9u8]).await;
+        assert!(none.is_empty());
     }
 }

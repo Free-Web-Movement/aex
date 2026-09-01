@@ -26,11 +26,26 @@ pub struct Node {
     /// 💡 支持的协议列表，例如: ["tcp", "udp", "http", "ws"]
     pub protocols: HashSet<Protocol>,
     pub ips: Vec<(NetworkScope, IpAddr)>,
+    /// NAT 转发地址表：每个地址携带独立的 `ip:port`（不只是 IP）。
+    ///
+    /// NAT 场景下，一个节点可能同时有：
+    /// - 私网监听地址（`192.168.x.x:port`，仅内网可达）
+    /// - 公网映射地址（中继观察到的 `public ip:port`，NAT 打洞/转发目标）
+    ///
+    /// `ips` 只存 IP + 单一 `port`，无法表达「私网端口 ≠ 公网映射端口」。
+    /// 本字段按 scope 记录每个地址最终的 `ip:port`，供打洞、选路、
+    /// 中继转发使用。
+    pub nat_addrs: Vec<(NetworkScope, SocketAddr)>,
 }
 
 impl Node {
     /// 基础构造：手动传入所有信息
     pub fn new(port: u16, id: Vec<u8>, version: u8, ips: Vec<(NetworkScope, IpAddr)>) -> Self {
+        // nat_addrs 初始 = 每个 IP 拼上主监听端口（与 ips+port 等价）。
+        let nat_addrs = ips
+            .iter()
+            .map(|(scope, ip)| (*scope, SocketAddr::new(*ip, port)))
+            .collect();
         Self {
             id,
             version,
@@ -40,6 +55,7 @@ impl Node {
                 .unwrap_or_default()
                 .as_secs(),
             ips,
+            nat_addrs,
             protocols: Self::default_protocols(),
         }
     }
@@ -80,6 +96,11 @@ impl Node {
 
     /// 自动化构造：从系统环境创建完整节点信息
     pub fn from_system(port: u16, id: Vec<u8>, version: u8) -> Self {
+        let ips = Self::system_ips();
+        let nat_addrs = ips
+            .iter()
+            .map(|(scope, ip)| (*scope, SocketAddr::new(*ip, port)))
+            .collect();
         Self {
             id,
             version,
@@ -88,7 +109,8 @@ impl Node {
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_secs(),
-            ips: Self::system_ips(),
+            ips,
+            nat_addrs,
             protocols: Self::default_protocols(),
         }
     }
@@ -181,5 +203,55 @@ impl Node {
         if !self.ips.contains(&(scope, addr)) {
             self.ips.push((scope, addr));
         }
+        let sa = SocketAddr::new(addr, self.port);
+        if !self.nat_addrs.contains(&(scope, sa)) {
+            self.nat_addrs.push((scope, sa));
+        }
+    }
+
+    /// 添加/更新一个 NAT 转发地址（自带独立端口，公网映射地址等）。
+    pub fn add_nat_addr(&mut self, scope: NetworkScope, addr: SocketAddr) {
+        if let Some(slot) = self.nat_addrs.iter_mut().find(|(s, a)| *s == scope && *a == addr) {
+            let _ = slot; // 已存在
+        } else {
+            self.nat_addrs.push((scope, addr));
+        }
+    }
+
+    /// 设置某 scope 的 NAT 转发地址（替换同 scope 旧值）。
+    pub fn set_nat_addr(&mut self, scope: NetworkScope, addr: SocketAddr) {
+        let mut replaced = false;
+        let mut to_remove = Vec::new();
+        for (s, a) in self.nat_addrs.iter() {
+            if *s == scope {
+                if *a == addr {
+                    replaced = true;
+                    break;
+                }
+                to_remove.push(*a);
+            }
+        }
+        if replaced {
+            return;
+        }
+        for old in to_remove {
+            self.nat_addrs
+                .retain(|(s, a)| !(*s == scope && *a == old));
+        }
+        self.nat_addrs.push((scope, addr));
+    }
+
+    /// 按 scope 获取 NAT 转发地址（ip:port）。
+    pub fn nat_addrs_of(&self, scope: NetworkScope) -> Vec<SocketAddr> {
+        self.nat_addrs
+            .iter()
+            .filter(|(s, _)| *s == scope)
+            .map(|(_, a)| *a)
+            .collect()
+    }
+
+    /// 获取全部 NAT 转发地址（ip:port）。
+    pub fn all_nat_addrs(&self) -> Vec<SocketAddr> {
+        self.nat_addrs.iter().map(|(_, a)| *a).collect()
     }
 }

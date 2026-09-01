@@ -662,4 +662,48 @@ impl ConnectionManager {
         // 执行回调
         f(targets).await;
     }
+
+    /// 获取对端节点宣告的 NAT 转发地址（contact candidates，可直连或经打洞/中继）。
+    ///
+    /// NAT 场景下 peer 有多个地址：私网监听地址 + 中继学到的公网映射地址。
+    /// ConnectionManager 维护每个 peer 的多地址信息，这里汇总返回，
+    /// 供回连选路、打洞、中继转发使用。
+    ///
+    /// 返回顺序：优先公网(Extranet)地址，其次内网(Intranet)地址。
+    pub async fn nat_contact_addrs(&self, node_id: &[u8]) -> Vec<std::net::SocketAddr> {
+        let mut all = Vec::new();
+        if let Some(entry) = self.index_by_id.get(node_id) {
+            if let Some(node) = &*entry.value().node.read().await {
+                let mut addrs = node.all_nat_addrs();
+                all.append(&mut addrs);
+            }
+        } else {
+            // 回退：全量遍历匹配 node_id
+            for bucket_ref in self.connections.iter() {
+                let bi_conn = bucket_ref.value();
+                for entry_ref in bi_conn.clients.iter() {
+                    let entry = entry_ref.value();
+                    let is_match =
+                        { entry.node.read().await.as_ref().map_or(false, |n| n.id == node_id) };
+                    if is_match {
+                        if let Some(node) = &*entry.node.read().await {
+                            all.append(&mut node.all_nat_addrs());
+                        }
+                    }
+                }
+                for entry_ref in bi_conn.servers.iter() {
+                    let entry = entry_ref.value();
+                    let is_match =
+                        { entry.node.read().await.as_ref().map_or(false, |n| n.id == node_id) };
+                    if is_match {
+                        if let Some(node) = &*entry.node.read().await {
+                            all.append(&mut node.all_nat_addrs());
+                        }
+                    }
+                }
+            }
+        }
+        all.dedup();
+        all
+    }
 }
