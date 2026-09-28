@@ -211,7 +211,11 @@ impl Node {
 
     /// 添加/更新一个 NAT 转发地址（自带独立端口，公网映射地址等）。
     pub fn add_nat_addr(&mut self, scope: NetworkScope, addr: SocketAddr) {
-        if let Some(slot) = self.nat_addrs.iter_mut().find(|(s, a)| *s == scope && *a == addr) {
+        if let Some(slot) = self
+            .nat_addrs
+            .iter_mut()
+            .find(|(s, a)| *s == scope && *a == addr)
+        {
             let _ = slot; // 已存在
         } else {
             self.nat_addrs.push((scope, addr));
@@ -235,8 +239,7 @@ impl Node {
             return;
         }
         for old in to_remove {
-            self.nat_addrs
-                .retain(|(s, a)| !(*s == scope && *a == old));
+            self.nat_addrs.retain(|(s, a)| !(*s == scope && *a == old));
         }
         self.nat_addrs.push((scope, addr));
     }

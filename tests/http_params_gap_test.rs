@@ -1,5 +1,5 @@
-use ahash::AHashMap;
 use aex::http::params::{Params, SmallParams};
+use ahash::AHashMap;
 
 #[test]
 fn test_small_params_insert_get_len_clear() {

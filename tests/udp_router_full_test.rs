@@ -3,8 +3,8 @@ use aex::tcp::types::{Codec, Command, Frame, RawCodec};
 use aex::udp::router::Router;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::net::UdpSocket;
 use tokio::time::Duration;
 
@@ -74,18 +74,18 @@ fn udp_router_new_with_handler_registers_default() {
 #[test]
 fn udp_router_on_registers_handler() {
     let mut router = Router::<(), ()>::new();
-    router.on(7, |_g: Arc<GlobalContext>, _f: (), _c: (), _a: SocketAddr, _s: Arc<UdpSocket>| async move {
-        Ok::<bool, anyhow::Error>(true)
-    });
+    router.on(
+        7,
+        |_g: Arc<GlobalContext>, _f: (), _c: (), _a: SocketAddr, _s: Arc<UdpSocket>| async move {
+            Ok::<bool, anyhow::Error>(true)
+        },
+    );
     assert_eq!(router.handler_count(), 1);
 }
 
 #[tokio::test]
 async fn udp_router_handle_without_extractor_errors() {
-    let global = Arc::new(GlobalContext::new(
-        "127.0.0.1:0".parse().unwrap(),
-        None,
-    ));
+    let global = Arc::new(GlobalContext::new("127.0.0.1:0".parse().unwrap(), None));
     let socket = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
     let router = Arc::new(Router::<RawCodec, RawCodec>::new());
     assert!(router.handle(global, socket).await.is_err());
@@ -93,10 +93,7 @@ async fn udp_router_handle_without_extractor_errors() {
 
 #[tokio::test]
 async fn udp_router_handle_dispatches_flat_frame() {
-    let global = Arc::new(GlobalContext::new(
-        "127.0.0.1:0".parse().unwrap(),
-        None,
-    ));
+    let global = Arc::new(GlobalContext::new("127.0.0.1:0".parse().unwrap(), None));
     let socket = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
     let target = socket.local_addr().unwrap();
 
@@ -136,10 +133,7 @@ async fn udp_router_handle_dispatches_flat_frame() {
 
 #[tokio::test]
 async fn udp_router_handle_dispatches_nonflat_frame() {
-    let global = Arc::new(GlobalContext::new(
-        "127.0.0.1:0".parse().unwrap(),
-        None,
-    ));
+    let global = Arc::new(GlobalContext::new("127.0.0.1:0".parse().unwrap(), None));
     let socket = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
     let target = socket.local_addr().unwrap();
 
@@ -190,10 +184,7 @@ async fn udp_router_handle_dispatches_nonflat_frame() {
 
 #[tokio::test]
 async fn udp_router_handle_discards_garbage() {
-    let global = Arc::new(GlobalContext::new(
-        "127.0.0.1:0".parse().unwrap(),
-        None,
-    ));
+    let global = Arc::new(GlobalContext::new("127.0.0.1:0".parse().unwrap(), None));
     let socket = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
     let target = socket.local_addr().unwrap();
     let router = Arc::new(Router::<RawCodec, RawCodec>::new().extractor(rawcodec_key));
@@ -205,7 +196,10 @@ async fn udp_router_handle_discards_garbage() {
         async move { router.handle(global, socket).await }
     });
     let client = UdpSocket::bind("127.0.0.1:0").await.unwrap();
-    client.send_to(b"\xde\xad\xbe\xef garbage", target).await.unwrap();
+    client
+        .send_to(b"\xde\xad\xbe\xef garbage", target)
+        .await
+        .unwrap();
     tokio::time::sleep(Duration::from_millis(100)).await;
     task.abort();
 }
@@ -213,10 +207,7 @@ async fn udp_router_handle_discards_garbage() {
 #[tokio::test]
 async fn udp_router_handle_flat_downcast_failure_no_dispatch() {
     // F = RawCodec (flat), C = TestCommand：downcast::<TestCommand> 必然失败 → 不分发
-    let global = Arc::new(GlobalContext::new(
-        "127.0.0.1:0".parse().unwrap(),
-        None,
-    ));
+    let global = Arc::new(GlobalContext::new("127.0.0.1:0".parse().unwrap(), None));
     let socket = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
     let target = socket.local_addr().unwrap();
 

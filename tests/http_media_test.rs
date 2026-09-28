@@ -463,7 +463,10 @@ mod tests {
         use aex::http::protocol::media_type::SubMediaType;
         let cases = [
             (SubMediaType::Json, "application/json"),
-            (SubMediaType::UrlEncoded, "application/x-www-form-urlencoded"),
+            (
+                SubMediaType::UrlEncoded,
+                "application/x-www-form-urlencoded",
+            ),
             (SubMediaType::OctetStream, "application/octet-stream"),
             (SubMediaType::Xml, "application/xml"),
             (SubMediaType::Pdf, "application/pdf"),

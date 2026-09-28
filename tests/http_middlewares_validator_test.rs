@@ -825,19 +825,18 @@ async fn test_validator_range_validation_failure_400() {
 
     // id=105 超出 [1,100] 范围 → 校验失败返回 400
     let mut stream = TcpStream::connect(actual_addr).await.unwrap();
-    let request =
-        "POST /check/105 HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+    let request = "POST /check/105 HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
     stream.write_all(request.as_bytes()).await.unwrap();
 
     let mut response = Vec::new();
     stream.read_to_end(&mut response).await.unwrap();
     let resp_str = String::from_utf8_lossy(&response);
 
-    println!("--- Range Error Response ---\n{}\n----------------------------", resp_str);
-    assert!(
-        resp_str.contains("400 Bad Request"),
-        "超范围参数应返回 400"
+    println!(
+        "--- Range Error Response ---\n{}\n----------------------------",
+        resp_str
     );
+    assert!(resp_str.contains("400 Bad Request"), "超范围参数应返回 400");
     assert!(
         resp_str.contains("validate error"),
         "应包含 validate error 前缀"

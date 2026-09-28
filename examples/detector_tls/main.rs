@@ -18,8 +18,8 @@ use tokio::io::AsyncWriteExt;
 
 use aex::connection::context::Context;
 use aex::connection::global::GlobalContext;
-use aex::unified::detect::DetectionState;
 use aex::unified::UnifiedServer;
+use aex::unified::detect::DetectionState;
 
 async fn sni_echo(mut ctx: Context) {
     let hello = ctx

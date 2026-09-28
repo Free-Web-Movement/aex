@@ -45,8 +45,14 @@ async fn test_dequeue_empty_returns_none() {
 #[tokio::test]
 async fn test_enqueue_dequeue_fifo_order() {
     let queue = MessageQueue::new(MessageQueueConfig::new(10));
-    queue.enqueue(Message::new(CommandId::Ping, vec![1])).await.unwrap();
-    queue.enqueue(Message::new(CommandId::Pong, vec![2])).await.unwrap();
+    queue
+        .enqueue(Message::new(CommandId::Ping, vec![1]))
+        .await
+        .unwrap();
+    queue
+        .enqueue(Message::new(CommandId::Pong, vec![2]))
+        .await
+        .unwrap();
 
     let first = queue.dequeue().await.unwrap();
     let second = queue.dequeue().await.unwrap();

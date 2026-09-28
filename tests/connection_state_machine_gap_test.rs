@@ -1,5 +1,5 @@
-use aex::connection::state_machine::{ConnectionState, ConnectionStateMachine};
 use ConnectionState::*;
+use aex::connection::state_machine::{ConnectionState, ConnectionStateMachine};
 
 /// 从 Initial 沿合法迁移链走到 target 状态
 fn enter(sm: &ConnectionStateMachine, target: ConnectionState) {
@@ -81,8 +81,15 @@ fn test_invalid_transitions_rejected_and_state_kept() {
         let sm = ConnectionStateMachine::new();
         enter(&sm, *from);
         assert_eq!(sm.current(), *from);
-        assert!(!sm.set(*to), "transition {from:?} -> {to:?} should be invalid");
-        assert_eq!(sm.current(), *from, "state must be kept after invalid transition");
+        assert!(
+            !sm.set(*to),
+            "transition {from:?} -> {to:?} should be invalid"
+        );
+        assert_eq!(
+            sm.current(),
+            *from,
+            "state must be kept after invalid transition"
+        );
     }
 }
 

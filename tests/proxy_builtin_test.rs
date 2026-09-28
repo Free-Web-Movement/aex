@@ -44,7 +44,10 @@ async fn spawn_upstream(body: &'static str) -> SocketAddr {
                 let req = String::from_utf8_lossy(&buf[..n]).to_string();
                 // Echo which path was requested so tests can verify routing.
                 let path = req.split_whitespace().nth(1).unwrap_or("-");
-                let resp = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body} path={path}", body.len() + path.len() + 6);
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body} path={path}",
+                    body.len() + path.len() + 6
+                );
                 let _ = sock.write_all(resp.as_bytes()).await;
                 let _ = sock.shutdown().await;
             });
@@ -82,7 +85,8 @@ async fn read_all(sock: &mut TcpStream) -> String {
             Ok(0) | Err(_) => break,
             Ok(n) => {
                 buf.extend_from_slice(&chunk[..n]);
-                if String::from_utf8_lossy(&buf).contains("\r\n\r\n") && !buf.ends_with(b"\r\n\r\n") {
+                if String::from_utf8_lossy(&buf).contains("\r\n\r\n") && !buf.ends_with(b"\r\n\r\n")
+                {
                     // got headers plus some body — good enough for asserts
                     break;
                 }
@@ -111,7 +115,10 @@ async fn one_port_serves_website_and_http_proxy() {
         .unwrap();
     let resp = read_all(&mut site).await;
     assert!(resp.starts_with("HTTP/1.1 "), "got: {resp}");
-    assert!(!resp.contains("UPSTREAM"), "origin-form must not be proxied");
+    assert!(
+        !resp.contains("UPSTREAM"),
+        "origin-form must not be proxied"
+    );
 
     // 2) Absolute-form → forwarded to the upstream.
     let mut proxy_req = TcpStream::connect(addr).await.unwrap();
@@ -133,21 +140,34 @@ async fn connect_tunnel_relays_raw_bytes() {
     wait_listening(addr).await;
 
     let mut sock = TcpStream::connect(addr).await.unwrap();
-    sock.write_all(format!("CONNECT {} HTTP/1.1\r\nHost: {}\r\n\r\n", upstream, upstream).as_bytes())
-        .await
-        .unwrap();
+    sock.write_all(
+        format!(
+            "CONNECT {} HTTP/1.1\r\nHost: {}\r\n\r\n",
+            upstream, upstream
+        )
+        .as_bytes(),
+    )
+    .await
+    .unwrap();
 
     // Read just the head of the 2xx response.
     let mut head = vec![0u8; 64];
     let n = sock.read(&mut head).await.unwrap();
-    assert!(String::from_utf8_lossy(&head[..n]).contains("200"), "got: {:?}", &head[..n]);
+    assert!(
+        String::from_utf8_lossy(&head[..n]).contains("200"),
+        "got: {:?}",
+        &head[..n]
+    );
 
     // Inside the tunnel speak plain HTTP to the upstream.
     sock.write_all(format!("GET /via-tunnel HTTP/1.1\r\nHost: {}\r\n\r\n", upstream).as_bytes())
         .await
         .unwrap();
     let resp = read_all(&mut sock).await;
-    assert!(resp.contains("TUNNELED") && resp.contains("path=/via-tunnel"), "got: {resp}");
+    assert!(
+        resp.contains("TUNNELED") && resp.contains("path=/via-tunnel"),
+        "got: {resp}"
+    );
 }
 
 #[tokio::test]
@@ -182,7 +202,10 @@ async fn socks5_no_auth_connect() {
         .await
         .unwrap();
     let resp = read_all(&mut s).await;
-    assert!(resp.contains("SOCKS5") && resp.contains("path=/socks5"), "got: {resp}");
+    assert!(
+        resp.contains("SOCKS5") && resp.contains("path=/socks5"),
+        "got: {resp}"
+    );
 }
 
 #[tokio::test]
@@ -253,9 +276,14 @@ async fn socks4_and_v4a_domain() {
     s.read_exact(&mut rep).await.unwrap();
     assert_eq!(rep[1], 0x5A, "v4 connect granted");
 
-    s.write_all(b"GET /v4 HTTP/1.1\r\nHost: x\r\n\r\n").await.unwrap();
+    s.write_all(b"GET /v4 HTTP/1.1\r\nHost: x\r\n\r\n")
+        .await
+        .unwrap();
     let resp = read_all(&mut s).await;
-    assert!(resp.contains("SOCKS4") && resp.contains("path=/v4"), "got: {resp}");
+    assert!(
+        resp.contains("SOCKS4") && resp.contains("path=/v4"),
+        "got: {resp}"
+    );
 
     // --- SOCKS4a with hostname ---
     let mut s = TcpStream::connect(addr).await.unwrap();
@@ -268,9 +296,14 @@ async fn socks4_and_v4a_domain() {
     s.read_exact(&mut rep).await.unwrap();
     assert_eq!(rep[1], 0x5A, "v4a connect granted");
 
-    s.write_all(b"GET /v4a HTTP/1.1\r\nHost: x\r\n\r\n").await.unwrap();
+    s.write_all(b"GET /v4a HTTP/1.1\r\nHost: x\r\n\r\n")
+        .await
+        .unwrap();
     let resp = read_all(&mut s).await;
-    assert!(resp.contains("SOCKS4") && resp.contains("path=/v4a"), "got: {resp}");
+    assert!(
+        resp.contains("SOCKS4") && resp.contains("path=/v4a"),
+        "got: {resp}"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -291,7 +324,11 @@ async fn socks5_no_acceptable_auth_rejected() {
     s.write_all(&[0x05, 0x01, 0x00]).await.unwrap();
     let mut reply = [0u8; 2];
     s.read_exact(&mut reply).await.unwrap();
-    assert_eq!(reply, [0x05, 0xFF], "server must reject when no acceptable method");
+    assert_eq!(
+        reply,
+        [0x05, 0xFF],
+        "server must reject when no acceptable method"
+    );
 }
 
 #[tokio::test]
@@ -388,7 +425,11 @@ async fn socks5_ipv6_atyp_connect() {
                 return;
             };
             tokio::spawn(async move {
-                let _ = sock.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\niv6-ok").await;
+                let _ = sock
+                    .write_all(
+                        b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\niv6-ok",
+                    )
+                    .await;
             });
         }
     });
@@ -411,10 +452,16 @@ async fn socks5_ipv6_atyp_connect() {
     s.write_all(&req).await.unwrap();
     let mut rep = [0u8; 10];
     s.read_exact(&mut rep).await.unwrap();
-    assert_eq!(rep[1], 0x00, "IPv6 CONNECT must report success, got REP={}", rep[1]);
+    assert_eq!(
+        rep[1], 0x00,
+        "IPv6 CONNECT must report success, got REP={}",
+        rep[1]
+    );
 
     // Tunnel an HTTP request through the IPv6 upstream to confirm relaying works.
-    s.write_all(b"GET /v6 HTTP/1.1\r\nHost: x\r\n\r\n").await.unwrap();
+    s.write_all(b"GET /v6 HTTP/1.1\r\nHost: x\r\n\r\n")
+        .await
+        .unwrap();
     let resp = read_all(&mut s).await;
     assert!(resp.contains("iv6-ok"), "got: {resp}");
 }
@@ -441,10 +488,19 @@ async fn socks5_domain_atyp_connect() {
     s.write_all(&req).await.unwrap();
     let mut rep = [0u8; 10];
     s.read_exact(&mut rep).await.unwrap();
-    assert_eq!(rep[1], 0x00, "domain CONNECT must succeed, got REP={}", rep[1]);
+    assert_eq!(
+        rep[1], 0x00,
+        "domain CONNECT must succeed, got REP={}",
+        rep[1]
+    );
 
     // Tunnel through it.
-    s.write_all(b"GET /domain HTTP/1.1\r\nHost: x\r\n\r\n").await.unwrap();
+    s.write_all(b"GET /domain HTTP/1.1\r\nHost: x\r\n\r\n")
+        .await
+        .unwrap();
     let resp = read_all(&mut s).await;
-    assert!(resp.contains("SOCKS5-DOMAIN") && resp.contains("path=/domain"), "got: {resp}");
+    assert!(
+        resp.contains("SOCKS5-DOMAIN") && resp.contains("path=/domain"),
+        "got: {resp}"
+    );
 }

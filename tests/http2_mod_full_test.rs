@@ -117,7 +117,10 @@ async fn h2_codec_handle_handshake_failure() {
 
     // 客户端连上但不发送 h2 preface → 握手失败
     let mut client = TcpStream::connect(addr).await.unwrap();
-    client.write_all(b"GET / HTTP/1.1\r\nHost: x\r\n\r\n").await.unwrap();
+    client
+        .write_all(b"GET / HTTP/1.1\r\nHost: x\r\n\r\n")
+        .await
+        .unwrap();
     client.flush().await.unwrap();
 
     let result = tokio::time::timeout(std::time::Duration::from_secs(3), server_task)

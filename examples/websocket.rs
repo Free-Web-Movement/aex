@@ -34,7 +34,9 @@ async fn main() -> anyhow::Result<()> {
         true
     });
 
-    router.get("/ws", |_ctx: &mut Context| true).middleware(ws_middleware);
+    router
+        .get("/ws", |_ctx: &mut Context| true)
+        .middleware(ws_middleware);
 
     println!("Server running at http://{}", addr);
     println!("WebSocket endpoint: ws://{}/ws", addr);

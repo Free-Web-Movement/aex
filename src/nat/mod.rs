@@ -23,8 +23,8 @@ pub use client::{
 };
 pub use punch::{PunchCoordinator, PunchState, PunchTunnel};
 pub use server::{NatRelayServer, NatRelayService};
-pub use service::{NatDetector, NAT_PROTOCOL, UnifiedServerExt, nat_tcp_handler};
+pub use service::{NAT_PROTOCOL, NatDetector, UnifiedServerExt, nat_tcp_handler};
 pub use types::{
-    NatError, NatFrame, NatFrameType, NatResult, TunnelPeer, NAT_MAGIC, NAT_MAGIC_LEN,
-    NAT_MAX_FRAME_BODY, frame_len_from_header,
+    NAT_MAGIC, NAT_MAGIC_LEN, NAT_MAX_FRAME_BODY, NatError, NatFrame, NatFrameType, NatResult,
+    TunnelPeer, frame_len_from_header,
 };

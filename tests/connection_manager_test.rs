@@ -601,8 +601,14 @@ mod tests {
             node_id.clone(),
             20901,
             vec![
-                (NetworkScope::Intranet, "192.168.3.56:20901".parse().unwrap()),
-                (NetworkScope::Extranet, "69.171.73.252:20901".parse().unwrap()),
+                (
+                    NetworkScope::Intranet,
+                    "192.168.3.56:20901".parse().unwrap(),
+                ),
+                (
+                    NetworkScope::Extranet,
+                    "69.171.73.252:20901".parse().unwrap(),
+                ),
             ],
         );
         manager.index_node(node_id.clone(), entry);
@@ -637,7 +643,10 @@ mod tests {
             protocols: HashSet::new(),
             ips: Vec::new(),
             nat_addrs: vec![
-                (NetworkScope::Extranet, "69.171.73.252:3000".parse().unwrap()),
+                (
+                    NetworkScope::Extranet,
+                    "69.171.73.252:3000".parse().unwrap(),
+                ),
                 (NetworkScope::Intranet, "192.168.1.10:3000".parse().unwrap()),
             ],
         });

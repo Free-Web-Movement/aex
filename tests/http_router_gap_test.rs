@@ -207,11 +207,17 @@ fn test_fluent_with_middlewares_registered() {
 
     let mut params = SmallParams::new();
     let node = router.match_route(&segs("/p"), &mut params).unwrap();
-    let mws = node.middlewares.as_ref().expect("post_with middleware missing");
+    let mws = node
+        .middlewares
+        .as_ref()
+        .expect("post_with middleware missing");
     assert_eq!(mws.get("POST").map(|v| v.len()), Some(1));
 
     let node = router.match_route(&segs("/any"), &mut params).unwrap();
-    let mws = node.middlewares.as_ref().expect("all_with middleware missing");
+    let mws = node
+        .middlewares
+        .as_ref()
+        .expect("all_with middleware missing");
     assert_eq!(mws.get("*").map(|v| v.len()), Some(1));
 }
 

@@ -13,7 +13,10 @@ mod tests {
             9999,
             vec![1, 2, 3, 4],
             3,
-            vec![(NetworkScope::Extranet, IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)))],
+            vec![(
+                NetworkScope::Extranet,
+                IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)),
+            )],
         );
         assert_eq!(node.port, 9999);
         assert_eq!(node.id, vec![1, 2, 3, 4]);
@@ -47,14 +50,18 @@ mod tests {
     fn test_node_get_ips_mismatch_returns_empty() {
         let mut node = Node::from_addr("1.1.1.1:80".parse().unwrap(), None, None);
         node.ips.clear();
-        node.add_observed_ip(NetworkScope::Intranet, IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)));
+        node.add_observed_ip(
+            NetworkScope::Intranet,
+            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
+        );
 
-        assert!(node
-            .get_ips(
+        assert!(
+            node.get_ips(
                 NetworkScope::Intranet,
                 Some(IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1)))
             )
-            .is_empty());
+            .is_empty()
+        );
         assert!(node.get_ips(NetworkScope::Extranet, None).is_empty());
     }
 
@@ -62,7 +69,10 @@ mod tests {
     fn test_node_get_ips_mixed_family_filter() {
         let mut node = Node::from_addr("1.1.1.1:80".parse().unwrap(), None, None);
         node.ips.clear();
-        node.add_observed_ip(NetworkScope::Intranet, IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)));
+        node.add_observed_ip(
+            NetworkScope::Intranet,
+            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
+        );
         node.add_observed_ip(
             NetworkScope::Intranet,
             IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1)),
@@ -89,7 +99,10 @@ mod tests {
             80,
             vec![1],
             1,
-            vec![(NetworkScope::Intranet, IpAddr::V4(Ipv4Addr::new(192, 168, 1, 10)))],
+            vec![(
+                NetworkScope::Intranet,
+                IpAddr::V4(Ipv4Addr::new(192, 168, 1, 10)),
+            )],
         );
         assert!(node.get_extranet_ips().is_empty());
         assert!(node.get_extranet_ips_v4().is_empty());
@@ -102,11 +115,15 @@ mod tests {
     fn test_node_add_observed_ip_new_and_get_all() {
         let mut node = Node::from_addr("1.1.1.1:80".parse().unwrap(), None, None);
         let before = node.ips.len();
-        node.add_observed_ip(NetworkScope::Extranet, IpAddr::V4(Ipv4Addr::new(9, 9, 9, 9)));
+        node.add_observed_ip(
+            NetworkScope::Extranet,
+            IpAddr::V4(Ipv4Addr::new(9, 9, 9, 9)),
+        );
         assert_eq!(node.ips.len(), before + 1);
-        assert!(node
-            .get_all()
-            .contains(&IpAddr::V4(Ipv4Addr::new(9, 9, 9, 9))));
+        assert!(
+            node.get_all()
+                .contains(&IpAddr::V4(Ipv4Addr::new(9, 9, 9, 9)))
+        );
     }
 
     #[test]
@@ -123,7 +140,10 @@ mod tests {
             8080,
             vec![9, 9, 9],
             2,
-            vec![(NetworkScope::Extranet, IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4)))],
+            vec![(
+                NetworkScope::Extranet,
+                IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4)),
+            )],
         );
         let json = serde_json::to_string(&node).unwrap();
         let decoded: Node = serde_json::from_str(&json).unwrap();

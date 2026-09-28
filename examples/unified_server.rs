@@ -3,7 +3,7 @@ use aex::connection::global::GlobalContext;
 use aex::http::middlewares::websocket::WebSocket;
 use aex::http::router::Router as HttpRouter;
 use aex::http::types::Executor;
-use aex::unified::{Http11Detector, Http2Detector, UnifiedServer};
+use aex::unified::{Http2Detector, Http11Detector, UnifiedServer};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -51,7 +51,9 @@ async fn main() -> anyhow::Result<()> {
 
     let ws_middleware: Arc<Executor> = Arc::from(WebSocket::to_middleware(ws_handler));
 
-    router.get("/ws", |_ctx: &mut Context| true).middleware(ws_middleware);
+    router
+        .get("/ws", |_ctx: &mut Context| true)
+        .middleware(ws_middleware);
 
     router.get("/test", |ctx: &mut Context| {
         let html = r#"<!DOCTYPE html>

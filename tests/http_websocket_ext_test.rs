@@ -24,8 +24,14 @@ mod tests {
     #[test]
     fn test_ws_frame_payload_reserved_and_continuation() {
         assert_eq!(WSFrame::Continuation(vec![1]).payload(), Some(vec![1]));
-        assert_eq!(WSFrame::ReservedNonControl(3, vec![2]).payload(), Some(vec![2]));
-        assert_eq!(WSFrame::ReservedControl(0xB, vec![3]).payload(), Some(vec![3]));
+        assert_eq!(
+            WSFrame::ReservedNonControl(3, vec![2]).payload(),
+            Some(vec![2])
+        );
+        assert_eq!(
+            WSFrame::ReservedControl(0xB, vec![3]).payload(),
+            Some(vec![3])
+        );
         assert_eq!(WSFrame::Close(1000, None).payload(), None);
     }
 
@@ -184,7 +190,9 @@ mod tests {
     fn test_ws_codec_encode_continuation() {
         let mut codec = WSCodec {};
         let mut dst = BytesMut::new();
-        codec.encode(WSFrame::Continuation(vec![1, 2]), &mut dst).unwrap();
+        codec
+            .encode(WSFrame::Continuation(vec![1, 2]), &mut dst)
+            .unwrap();
         assert_eq!(dst[0], 0x80);
         assert_eq!(dst[1], 0x02);
         assert_eq!(&dst[2..], &[1, 2]);
@@ -194,7 +202,9 @@ mod tests {
     fn test_ws_codec_encode_reserved_non_control() {
         let mut codec = WSCodec {};
         let mut dst = BytesMut::new();
-        codec.encode(WSFrame::ReservedNonControl(0x7, vec![0xDE, 0xAD]), &mut dst).unwrap();
+        codec
+            .encode(WSFrame::ReservedNonControl(0x7, vec![0xDE, 0xAD]), &mut dst)
+            .unwrap();
         assert_eq!(dst[0], 0x80 | 0x07);
         assert_eq!(dst[1], 0x02);
         assert_eq!(&dst[2..], &[0xDE, 0xAD]);
@@ -204,7 +214,9 @@ mod tests {
     fn test_ws_codec_encode_reserved_control() {
         let mut codec = WSCodec {};
         let mut dst = BytesMut::new();
-        codec.encode(WSFrame::ReservedControl(0xB, vec![0xCC]), &mut dst).unwrap();
+        codec
+            .encode(WSFrame::ReservedControl(0xB, vec![0xCC]), &mut dst)
+            .unwrap();
         assert_eq!(dst[0], 0x80 | 0x0B);
         assert_eq!(dst[1], 0x01);
         assert_eq!(&dst[2..], &[0xCC]);
@@ -224,7 +236,9 @@ mod tests {
     fn test_ws_codec_encode_empty_text() {
         let mut codec = WSCodec {};
         let mut dst = BytesMut::new();
-        codec.encode(WSFrame::Text(String::new()), &mut dst).unwrap();
+        codec
+            .encode(WSFrame::Text(String::new()), &mut dst)
+            .unwrap();
         assert_eq!(dst[0], 0x81);
         assert_eq!(dst[1], 0x00);
         assert_eq!(dst.len(), 2);

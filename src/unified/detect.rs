@@ -258,7 +258,10 @@ impl DetectorRegistry {
         reg
     }
 
-    fn check_insertable(entries: &[Arc<dyn ProtocolDetector>], d: &dyn ProtocolDetector) -> Result<(), RegisterError> {
+    fn check_insertable(
+        entries: &[Arc<dyn ProtocolDetector>],
+        d: &dyn ProtocolDetector,
+    ) -> Result<(), RegisterError> {
         if entries.iter().any(|e| e.name() == d.name()) {
             return Err(RegisterError::Duplicate(d.name().to_string()));
         }
@@ -311,7 +314,11 @@ impl DetectorRegistry {
     }
 
     /// Insert a detector at an explicit position after conflict checks.
-    pub fn register_at(&self, pos: Position, d: Arc<dyn ProtocolDetector>) -> Result<(), RegisterError> {
+    pub fn register_at(
+        &self,
+        pos: Position,
+        d: Arc<dyn ProtocolDetector>,
+    ) -> Result<(), RegisterError> {
         let mut entries = self.entries.write().expect("detector registry poisoned");
         Self::check_insertable(&entries, d.as_ref())?;
         Self::insert_at(&mut entries, &pos, d)?;
@@ -357,7 +364,10 @@ impl DetectorRegistry {
     }
 
     pub fn len(&self) -> usize {
-        self.entries.read().expect("detector registry poisoned").len()
+        self.entries
+            .read()
+            .expect("detector registry poisoned")
+            .len()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -380,7 +390,11 @@ impl DetectorRegistry {
 /// sets the claim and short-circuits the rest. Returns once the state is
 /// finished (matched or fully declined); callers should keep feeding bytes
 /// while `!state.is_finished()` and more data may arrive.
-pub fn run_pipeline(detectors: &[Arc<dyn ProtocolDetector>], buf: &[u8], state: &mut DetectionState) {
+pub fn run_pipeline(
+    detectors: &[Arc<dyn ProtocolDetector>],
+    buf: &[u8],
+    state: &mut DetectionState,
+) {
     if state.is_finished() {
         return;
     }
@@ -418,11 +432,7 @@ pub fn run_pipeline(detectors: &[Arc<dyn ProtocolDetector>], buf: &[u8], state: 
         // Every pending detector passed: nothing will ever claim this
         // connection regardless of future bytes.
         state.finish();
-    } else if state
-        .buffered
-        .saturating_add(needed.unwrap_or(0))
-        > MAX_PEEK
-    {
+    } else if state.buffered.saturating_add(needed.unwrap_or(0)) > MAX_PEEK {
         // The outstanding need can never be satisfied within the peek cap:
         // give up and fall through to the default handler.
         state.finish();
@@ -598,8 +608,11 @@ mod tests {
 
         reg.register(Arc::new(Scripted::new("a", "pa", Verdict::Pass)))
             .unwrap();
-        reg.register_at(Position::Front, Arc::new(Scripted::new("b", "pb", Verdict::Pass)))
-            .unwrap();
+        reg.register_at(
+            Position::Front,
+            Arc::new(Scripted::new("b", "pb", Verdict::Pass)),
+        )
+        .unwrap();
         reg.register_at(
             Position::Before("a".into()),
             Arc::new(Scripted::new("c", "pc", Verdict::Pass)),
@@ -632,14 +645,18 @@ mod tests {
         reg.register(Arc::new(Scripted::new("a", "pa", Verdict::Pass)))
             .unwrap();
         assert!(matches!(
-            reg.register(Arc::new(Scripted::new("b", "pb", Verdict::Pass).with_conflicts(&["a"]))),
+            reg.register(Arc::new(
+                Scripted::new("b", "pb", Verdict::Pass).with_conflicts(&["a"])
+            )),
             Err(RegisterError::Conflict { .. })
         ));
 
         // Existing detector declared conflict with the newcomer.
         let reg2 = DetectorRegistry::new();
-        reg2.register(Arc::new(Scripted::new("a", "pa", Verdict::Pass).with_conflicts(&["late"])))
-            .unwrap();
+        reg2.register(Arc::new(
+            Scripted::new("a", "pa", Verdict::Pass).with_conflicts(&["late"]),
+        ))
+        .unwrap();
         assert!(matches!(
             reg2.register(Arc::new(Scripted::new("late", "pl", Verdict::Pass))),
             Err(RegisterError::Conflict { .. })
@@ -671,7 +688,10 @@ mod tests {
     fn anchor_not_found() {
         let reg = DetectorRegistry::new();
         assert!(matches!(
-            reg.register_at(Position::Before("ghost".into()), Arc::new(Scripted::new("x", "p", Verdict::Pass))),
+            reg.register_at(
+                Position::Before("ghost".into()),
+                Arc::new(Scripted::new("x", "p", Verdict::Pass))
+            ),
             Err(RegisterError::AnchorNotFound(_))
         ));
     }
@@ -695,8 +715,7 @@ mod tests {
 
     #[test]
     fn need_more_across_rounds_then_match() {
-        let detectors: Vec<Arc<dyn ProtocolDetector>> =
-            vec![Arc::new(Counting { threshold: 3 })];
+        let detectors: Vec<Arc<dyn ProtocolDetector>> = vec![Arc::new(Counting { threshold: 3 })];
         let mut state = DetectionState::new();
 
         for round in 1..=3 {
@@ -714,17 +733,19 @@ mod tests {
 
     #[test]
     fn all_pass_finishes_without_claim() {
-        let detectors: Vec<Arc<dyn ProtocolDetector>> = vec![
-            Arc::new(Http2Detector),
-            Arc::new(Http11Detector),
-        ];
+        let detectors: Vec<Arc<dyn ProtocolDetector>> =
+            vec![Arc::new(Http2Detector), Arc::new(Http11Detector)];
         let mut state = DetectionState::new();
         run_pipeline(&detectors, b"\x16\x03\x01\x00\x00", &mut state);
 
         assert!(state.is_finished());
         assert!(state.claim().is_none());
         assert_eq!(
-            state.history().iter().map(|e| e.verdict_name).collect::<Vec<_>>(),
+            state
+                .history()
+                .iter()
+                .map(|e| e.verdict_name)
+                .collect::<Vec<_>>(),
             vec!["pass", "pass"]
         );
     }
@@ -813,8 +834,11 @@ mod tests {
         let nat = Arc::new(NatDetector {
             flow_tracked: Mutex::new(false),
         });
-        let detectors: Vec<Arc<dyn ProtocolDetector>> =
-            vec![nat.clone(), Arc::new(Http2Detector), Arc::new(Http11Detector)];
+        let detectors: Vec<Arc<dyn ProtocolDetector>> = vec![
+            nat.clone(),
+            Arc::new(Http2Detector),
+            Arc::new(Http11Detector),
+        ];
 
         let mut state = DetectionState::new();
         run_pipeline(&detectors, b"\x16\x03\x01\x00\xee", &mut state);
@@ -830,10 +854,7 @@ mod tests {
         // Non-matching traffic still flows through the standard chain.
         let mut state = DetectionState::new();
         run_pipeline(&detectors, b"GET / HTTP/1.1\r\n", &mut state);
-        assert_eq!(
-            state.claim().map(|c| c.protocol.as_str()),
-            Some("http")
-        );
+        assert_eq!(state.claim().map(|c| c.protocol.as_str()), Some("http"));
     }
 
     #[test]
@@ -876,7 +897,10 @@ mod tests {
     #[test]
     fn register_at_after_missing_anchor() {
         let reg = DetectorRegistry::new();
-        let result = reg.register_at(Position::After("nope".to_string()), Arc::new(Http11Detector));
+        let result = reg.register_at(
+            Position::After("nope".to_string()),
+            Arc::new(Http11Detector),
+        );
         assert!(matches!(result, Err(RegisterError::AnchorNotFound(_))));
     }
 

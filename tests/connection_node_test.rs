@@ -112,9 +112,10 @@ mod tests {
         let node = Node::from_addr("1.2.3.4:9090".parse().unwrap(), None, Some(vec![1; 32]));
         assert_eq!(node.port, 9090);
         assert_eq!(node.nat_addrs.len(), node.ips.len());
-        assert!(node
-            .nat_addrs
-            .contains(&(NetworkScope::Extranet, "1.2.3.4:9090".parse().unwrap())));
+        assert!(
+            node.nat_addrs
+                .contains(&(NetworkScope::Extranet, "1.2.3.4:9090".parse().unwrap()))
+        );
     }
 
     #[test]
@@ -128,7 +129,10 @@ mod tests {
         assert_eq!(node.nat_addrs_of(NetworkScope::Extranet).len(), 1);
 
         // 私网地址
-        node.add_nat_addr(NetworkScope::Intranet, "192.168.3.56:20901".parse().unwrap());
+        node.add_nat_addr(
+            NetworkScope::Intranet,
+            "192.168.3.56:20901".parse().unwrap(),
+        );
         assert_eq!(node.nat_addrs_of(NetworkScope::Intranet).len(), 1);
         assert_eq!(node.all_nat_addrs().len(), 2);
     }
@@ -157,9 +161,10 @@ mod tests {
 
         node.add_observed_ip(NetworkScope::Intranet, "10.0.0.9".parse().unwrap());
         assert_eq!(node.ips.len(), 1);
-        assert!(node
-            .nat_addrs
-            .contains(&(NetworkScope::Intranet, "10.0.0.9:80".parse().unwrap())));
+        assert!(
+            node.nat_addrs
+                .contains(&(NetworkScope::Intranet, "10.0.0.9:80".parse().unwrap()))
+        );
 
         // 重复 IP 不再添加（ips 与 nat_addrs 都去重）
         node.add_observed_ip(NetworkScope::Intranet, "10.0.0.9".parse().unwrap());

@@ -90,10 +90,11 @@ async fn cors_allow_origin_all_false_skips_origin_header() {
     let ok = CorsConfig::new().allow_origin_all(false).build()(&mut ctx).await;
     assert!(ok);
     let meta = ctx.local.get_ref::<HttpMetadata>().unwrap();
-    assert!(meta
-        .headers
-        .get(&HeaderKey::AccessControlAllowOrigin)
-        .is_none());
+    assert!(
+        meta.headers
+            .get(&HeaderKey::AccessControlAllowOrigin)
+            .is_none()
+    );
 }
 
 #[tokio::test]
@@ -102,10 +103,11 @@ async fn cors_credentials_false_omits_credentials_header() {
     let ok = CorsConfig::new().allow_credentials(false).build()(&mut ctx).await;
     assert!(ok);
     let meta = ctx.local.get_ref::<HttpMetadata>().unwrap();
-    assert!(meta
-        .headers
-        .get(&HeaderKey::AccessControlAllowCredentials)
-        .is_none());
+    assert!(
+        meta.headers
+            .get(&HeaderKey::AccessControlAllowCredentials)
+            .is_none()
+    );
 }
 
 #[tokio::test]
@@ -127,7 +129,7 @@ async fn cors_methods_are_uppercased_and_custom_values_written() {
         .allow_headers(vec!["X-Custom"])
         .max_age(60)
         .build()(&mut ctx)
-        .await;
+    .await;
     assert!(ok);
     let meta = ctx.local.get_ref::<HttpMetadata>().unwrap();
     assert_eq!(
@@ -180,8 +182,9 @@ async fn cors_macro_with_chained_options() {
     let mut ctx = make_ctx(9008);
     assert!(aex::cors!(.allow_credentials(false))(&mut ctx).await);
     let meta = ctx.local.get_ref::<HttpMetadata>().unwrap();
-    assert!(meta
-        .headers
-        .get(&HeaderKey::AccessControlAllowCredentials)
-        .is_none());
+    assert!(
+        meta.headers
+            .get(&HeaderKey::AccessControlAllowCredentials)
+            .is_none()
+    );
 }

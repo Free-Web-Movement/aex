@@ -4,8 +4,8 @@ use aex::tcp::router::{Doer, Router};
 use aex::tcp::types::{Codec, Command, Frame};
 use futures::future::BoxFuture;
 use serde::{Deserialize, Serialize};
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::io::{AsyncWriteExt, BufReader};
 use tokio::sync::Mutex;
 
@@ -60,10 +60,7 @@ fn frame(cmd_data: Option<Vec<u8>>) -> TestFrame {
     }
 }
 fn ctx_none() -> Arc<Mutex<Context>> {
-    let global = Arc::new(GlobalContext::new(
-        "127.0.0.1:0".parse().unwrap(),
-        None,
-    ));
+    let global = Arc::new(GlobalContext::new("127.0.0.1:0".parse().unwrap(), None));
     Arc::new(Mutex::new(Context::new(
         None,
         None,
@@ -235,16 +232,17 @@ async fn handle_frame_handler_error_propagates() {
 #[tokio::test]
 async fn handle_frame_middlewares_run_in_order_then_handler() {
     let order = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let make =
-        |name: &'static str, order: Arc<std::sync::Mutex<Vec<&'static str>>>| -> Doer<TestFrame, TestCommand> {
-            Box::new(move |_ctx, _f, _c| {
-                let order = order.clone();
-                Box::pin(async move {
-                    order.lock().unwrap().push(name);
-                    Ok(true)
-                })
+    let make = |name: &'static str,
+                order: Arc<std::sync::Mutex<Vec<&'static str>>>|
+     -> Doer<TestFrame, TestCommand> {
+        Box::new(move |_ctx, _f, _c| {
+            let order = order.clone();
+            Box::pin(async move {
+                order.lock().unwrap().push(name);
+                Ok(true)
             })
-        };
+        })
+    };
     let mut router = Router::<TestFrame, TestCommand>::new().extractor(|c: &TestCommand| c.key);
     router.on(
         1,
@@ -274,10 +272,7 @@ async fn handle_without_reader_returns_ok() {
 
 #[tokio::test]
 async fn handle_reads_single_frame() {
-    let global = Arc::new(GlobalContext::new(
-        "127.0.0.1:0".parse().unwrap(),
-        None,
-    ));
+    let global = Arc::new(GlobalContext::new("127.0.0.1:0".parse().unwrap(), None));
     let (mut client, server) = tokio::io::duplex(8192);
     let mut router = Router::<TestFrame, TestCommand>::new().extractor(|c: &TestCommand| c.key);
     router.on_simple(1, doer(true));
@@ -307,10 +302,7 @@ async fn handle_reads_two_frames_sticky() {
     });
     router.on(1, handler, Vec::new());
 
-    let global = Arc::new(GlobalContext::new(
-        "127.0.0.1:0".parse().unwrap(),
-        None,
-    ));
+    let global = Arc::new(GlobalContext::new("127.0.0.1:0".parse().unwrap(), None));
     let (mut client, server) = tokio::io::duplex(16384);
     let f1 = frame(Some(cmd(1).encode().unwrap())).encode().unwrap();
     let f2 = frame(Some(cmd(1).encode().unwrap())).encode().unwrap();
@@ -341,10 +333,7 @@ async fn handle_stops_when_handler_returns_false() {
     });
     router.on(1, handler, Vec::new());
 
-    let global = Arc::new(GlobalContext::new(
-        "127.0.0.1:0".parse().unwrap(),
-        None,
-    ));
+    let global = Arc::new(GlobalContext::new("127.0.0.1:0".parse().unwrap(), None));
     let (mut client, server) = tokio::io::duplex(8192);
     let f1 = frame(Some(cmd(1).encode().unwrap())).encode().unwrap();
     let f2 = frame(Some(cmd(1).encode().unwrap())).encode().unwrap();

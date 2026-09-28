@@ -1,4 +1,4 @@
-use aex::connection::context::{get_tcp_router, TypeMapExt};
+use aex::connection::context::{TypeMapExt, get_tcp_router};
 use aex::http::middlewares::websocket::WebSocket;
 use aex::http::router::Router as HttpRouter;
 use aex::server::{HttpVersions, Server};
@@ -51,7 +51,13 @@ fn server_new_defaults() {
     let server = Server::new(a, None);
     assert_eq!(server.addr, a);
     assert!(!server.has_ws());
-    assert!(server.globals.routers.get_value::<Arc<HttpRouter>>().is_none());
+    assert!(
+        server
+            .globals
+            .routers
+            .get_value::<Arc<HttpRouter>>()
+            .is_none()
+    );
 }
 
 #[test]
@@ -65,7 +71,13 @@ fn server_http_sets_router() {
     let mut router = HttpRouter::default();
     router.get("/", |_ctx: &mut aex::connection::context::Context| true);
     let server = Server::new(addr(), None).http(router);
-    assert!(server.globals.routers.get_value::<Arc<HttpRouter>>().is_some());
+    assert!(
+        server
+            .globals
+            .routers
+            .get_value::<Arc<HttpRouter>>()
+            .is_some()
+    );
 }
 
 #[test]
@@ -108,7 +120,10 @@ async fn server_start_udp_missing_router_errors() {
 async fn server_start_http_only_serves_route() {
     let a = free_addr().await;
     let mut router = HttpRouter::default();
-    router.get("/ping", |_ctx: &mut aex::connection::context::Context| "pong");
+    router.get(
+        "/ping",
+        |_ctx: &mut aex::connection::context::Context| "pong",
+    );
     let server = Server::new(a, None).http(router);
     let handle = tokio::spawn(async move { server.start().await });
 

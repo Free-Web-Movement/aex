@@ -76,10 +76,7 @@ impl AsyncWrite for H2Io {
         }
     }
 
-    fn poll_flush(
-        mut self: Pin<&mut Self>,
-        cx: &mut TaskContext<'_>,
-    ) -> Poll<std::io::Result<()>> {
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut TaskContext<'_>) -> Poll<std::io::Result<()>> {
         match &mut *self {
             H2Io::Owned(s) => Pin::new(s).poll_flush(cx),
             H2Io::Combined { writer, .. } => {
@@ -103,11 +100,10 @@ impl AsyncWrite for H2Io {
     }
 }
 
-
 pub mod detect;
 pub use detect::{
-    run_pipeline, Claim, DetectionEvent, DetectionState, DetectorMode, DetectorRegistry,
-    Http11Detector, Http2Detector, Position, ProtocolDetector, RegisterError, Verdict, MAX_PEEK,
+    Claim, DetectionEvent, DetectionState, DetectorMode, DetectorRegistry, Http2Detector,
+    Http11Detector, MAX_PEEK, Position, ProtocolDetector, RegisterError, Verdict, run_pipeline,
 };
 
 use crate::connection::context::{BoxReader, BoxWriter, ConnectionFd, Context};
@@ -326,18 +322,13 @@ impl UnifiedServer {
         // custom_handler("socks", ...) for full control.
         self.custom_handlers
             .entry("socks".to_string())
-            .or_insert_with(|| {
-                socks_tcp_handler(self.proxy_authorizer.clone())
-            });
+            .or_insert_with(|| socks_tcp_handler(self.proxy_authorizer.clone()));
         self
     }
 
     #[cfg(feature = "proxy")]
     /// Credential gate shared by the HTTP and SOCKS proxy services.
-    pub fn proxy_authenticator(
-        mut self,
-        f: Arc<dyn Fn(&str, &str) -> bool + Send + Sync>,
-    ) -> Self {
+    pub fn proxy_authenticator(mut self, f: Arc<dyn Fn(&str, &str) -> bool + Send + Sync>) -> Self {
         self.proxy_authorizer = Some(f);
         // Refresh a pre-existing socks handler so it sees the authenticator.
         if self.socks_proxy_enabled {
@@ -475,8 +466,7 @@ impl UnifiedServer {
 
         #[cfg(feature = "proxy")]
         if self.http_proxy_enabled
-            && crate::proxy::maybe_handle_http_proxy(&mut ctx, self.proxy_authorizer.as_ref())
-                .await
+            && crate::proxy::maybe_handle_http_proxy(&mut ctx, self.proxy_authorizer.as_ref()).await
         {
             return; // connection fully served as proxy traffic
         }

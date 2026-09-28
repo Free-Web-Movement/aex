@@ -109,8 +109,10 @@ pub fn socks_tcp_handler(authorizer: Option<ProxyAuthorizer>) -> TCPHandler {
     })
 }
 
-
-async fn serve_socks(ctx: &mut Context, authorizer: Option<&ProxyAuthorizer>) -> anyhow::Result<()> {
+async fn serve_socks(
+    ctx: &mut Context,
+    authorizer: Option<&ProxyAuthorizer>,
+) -> anyhow::Result<()> {
     let Some(mut reader) = ctx.reader.take() else {
         anyhow::bail!("no reader installed");
     };
@@ -198,7 +200,12 @@ async fn serve_v5(
         reader.read_exact(&mut pass).await?;
 
         let ok = authorizer
-            .map(|f| f(&String::from_utf8_lossy(&user), &String::from_utf8_lossy(&pass)))
+            .map(|f| {
+                f(
+                    &String::from_utf8_lossy(&user),
+                    &String::from_utf8_lossy(&pass),
+                )
+            })
             .unwrap_or(false);
         writer.write_all(&[0x01, u8::from(!ok)]).await?;
         if !ok {
@@ -319,9 +326,7 @@ async fn resolve_target(target: &SocksTarget) -> std::io::Result<TcpStream> {
         TargetHost::V6(a) => vec![SocketAddr::from((Ipv6Addr::from(*a), target.port))],
         TargetHost::Domain(d) => {
             use std::net::ToSocketAddrs;
-            (d.as_str(), target.port)
-                .to_socket_addrs()?
-                .collect()
+            (d.as_str(), target.port).to_socket_addrs()?.collect()
         }
     };
 

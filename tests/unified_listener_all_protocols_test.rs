@@ -2,7 +2,7 @@ use aex::connection::context::Context;
 use aex::connection::global::GlobalContext;
 use aex::http::router::Router as HttpRouter;
 use aex::http::websocket::{WSCodec, WSFrame};
-use aex::unified::{Http11Detector, Http2Detector, Protocol, UnifiedServer};
+use aex::unified::{Http2Detector, Http11Detector, Protocol, UnifiedServer};
 use bytes::BytesMut;
 use std::net::SocketAddr;
 use std::sync::Arc;

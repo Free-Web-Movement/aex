@@ -1,7 +1,7 @@
 use aex::connection::context::Context;
 use aex::connection::global::GlobalContext;
 use aex::http::router::Router as HttpRouter;
-use aex::unified::{Http11Detector, Http2Detector, UnifiedServer};
+use aex::unified::{Http2Detector, Http11Detector, UnifiedServer};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};

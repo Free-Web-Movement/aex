@@ -24,11 +24,7 @@ use aex::http::types::Executor;
 use aex::unified::UnifiedServer;
 
 fn uuid_str(b: &[u8; 16]) -> String {
-    let h = |r: std::ops::Range<usize>| {
-        b[r].iter()
-            .map(|x| format!("{x:02x}"))
-            .collect::<String>()
-    };
+    let h = |r: std::ops::Range<usize>| b[r].iter().map(|x| format!("{x:02x}")).collect::<String>();
     format!(
         "{}-{}-{}-{}-{}",
         h(0..4),
@@ -74,9 +70,10 @@ async fn run(cert: String, key: String) -> anyhow::Result<()> {
                     if !chain(&mut ctx).await {
                         return;
                     }
-                    if let (Some(w), Some(req)) =
-                        (ctx.writer.as_mut(), ctx.local.get_ref::<VlessRequestInfo>().cloned())
-                    {
+                    if let (Some(w), Some(req)) = (
+                        ctx.writer.as_mut(),
+                        ctx.local.get_ref::<VlessRequestInfo>().cloned(),
+                    ) {
                         let _ = w
                             .write_all(
                                 format!(

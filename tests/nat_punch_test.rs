@@ -17,13 +17,23 @@ async fn punch_tunnel_send_recv_roundtrip() {
         let (stream, _) = listener.accept().await.unwrap();
         let local = stream.local_addr().unwrap();
         let (reader, writer) = stream.into_split();
-        PunchTunnel { peer_public: local, local_addr: local, reader, writer }
+        PunchTunnel {
+            peer_public: local,
+            local_addr: local,
+            reader,
+            writer,
+        }
     });
     let dialer = tokio::spawn(async move {
         let stream = tokio::net::TcpStream::connect(peer_addr).await.unwrap();
         let local = stream.local_addr().unwrap();
         let (reader, writer) = stream.into_split();
-        PunchTunnel { peer_public: peer_addr, local_addr: local, reader, writer }
+        PunchTunnel {
+            peer_public: peer_addr,
+            local_addr: local,
+            reader,
+            writer,
+        }
     });
 
     let mut a = dialer.await.unwrap();
@@ -51,7 +61,12 @@ async fn punch_coordinator_tracks_state() {
         let (stream, _) = listener.accept().await.unwrap();
         let local = stream.local_addr().unwrap();
         let (reader, writer) = stream.into_split();
-        let _ = PunchTunnel { peer_public: local, local_addr: local, reader, writer };
+        let _ = PunchTunnel {
+            peer_public: local,
+            local_addr: local,
+            reader,
+            writer,
+        };
     });
     let bind: SocketAddr = "0.0.0.0:0".parse().unwrap();
     let t = c2.punch(peer, bind).await.expect("punch failed");

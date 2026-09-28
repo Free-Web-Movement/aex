@@ -32,7 +32,10 @@ const VIA: &str = "1.1 aex-proxy";
 /// Inspect parsed request metadata and serve proxy traffic. Returns true if
 /// the connection was fully handled as proxy traffic (caller must stop
 /// routing), false when it is ordinary website traffic.
-pub async fn maybe_handle_http_proxy(ctx: &mut Context, authorizer: Option<&ProxyAuthorizer>) -> bool {
+pub async fn maybe_handle_http_proxy(
+    ctx: &mut Context,
+    authorizer: Option<&ProxyAuthorizer>,
+) -> bool {
     let Some(meta) = ctx.local.get_ref::<HttpMetadata>().cloned() else {
         return false;
     };
@@ -65,7 +68,8 @@ async fn handle_connect(ctx: &mut Context, authority: &str, authorizer: Option<&
         write_simple_response(ctx, 400, "CONNECT requires authority-form host:port\n").await;
         return;
     };
-    let Ok(upstream) = tokio::time::timeout(UPSTREAM_TIMEOUT, TcpStream::connect((host.as_str(), port))).await
+    let Ok(upstream) =
+        tokio::time::timeout(UPSTREAM_TIMEOUT, TcpStream::connect((host.as_str(), port))).await
     else {
         write_simple_response(ctx, 504, "upstream connect timed out\n").await;
         return;
@@ -77,7 +81,9 @@ async fn handle_connect(ctx: &mut Context, authority: &str, authorizer: Option<&
 
     // Only after the tunnel exists do we green-light the client.
     if let Some(w) = ctx.writer.as_mut() {
-        let _ = w.write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n").await;
+        let _ = w
+            .write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n")
+            .await;
         let _ = w.flush().await;
     }
 
@@ -91,7 +97,11 @@ async fn handle_connect(ctx: &mut Context, authority: &str, authorizer: Option<&
     let _ = tokio::join!(c2u, u2c);
 }
 
-async fn handle_absolute_form(ctx: &mut Context, meta: &HttpMetadata, authorizer: Option<&ProxyAuthorizer>) {
+async fn handle_absolute_form(
+    ctx: &mut Context,
+    meta: &HttpMetadata,
+    authorizer: Option<&ProxyAuthorizer>,
+) {
     if !authorized(ctx, authorizer) {
         write_simple_response(ctx, 407, "proxy authentication required\n").await;
         return;
@@ -146,7 +156,8 @@ async fn handle_absolute_form(ctx: &mut Context, meta: &HttpMetadata, authorizer
         }
     };
 
-    let upstream = tokio::time::timeout(UPSTREAM_TIMEOUT, TcpStream::connect((host.as_str(), port))).await;
+    let upstream =
+        tokio::time::timeout(UPSTREAM_TIMEOUT, TcpStream::connect((host.as_str(), port))).await;
     let Ok(Ok(mut upstream)) = upstream else {
         write_simple_response(ctx, 502, "cannot reach upstream\n").await;
         return;
@@ -166,7 +177,6 @@ async fn handle_absolute_form(ctx: &mut Context, meta: &HttpMetadata, authorizer
     };
     let _ = tokio::io::copy(&mut upstream, &mut client_write).await;
     let _ = client_write.shutdown().await;
-
 }
 
 fn authorized(ctx: &Context, authorizer: Option<&ProxyAuthorizer>) -> bool {
@@ -177,9 +187,9 @@ fn authorized(ctx: &Context, authorizer: Option<&ProxyAuthorizer>) -> bool {
         .local
         .get_ref::<HttpMetadata>()
         .and_then(|m| {
-            m.headers.iter().find(|(k, _)| {
-                k.as_str().eq_ignore_ascii_case("proxy-authorization")
-            })
+            m.headers
+                .iter()
+                .find(|(k, _)| k.as_str().eq_ignore_ascii_case("proxy-authorization"))
         })
         .and_then(|(_, v)| {
             let encoded = v.strip_prefix("Basic ").map(str::trim)?;
@@ -193,7 +203,9 @@ fn authorized(ctx: &Context, authorizer: Option<&ProxyAuthorizer>) -> bool {
 
 fn decode_basic_auth(encoded: &str) -> Option<(String, String)> {
     use base64::Engine as _;
-    let decoded = base64::engine::general_purpose::STANDARD.decode(encoded).ok()?;
+    let decoded = base64::engine::general_purpose::STANDARD
+        .decode(encoded)
+        .ok()?;
     let text = String::from_utf8(decoded).ok()?;
     let (user, pass) = text.split_once(':')?;
     Some((user.to_string(), pass.to_string()))

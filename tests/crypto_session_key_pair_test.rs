@@ -235,9 +235,7 @@ mod tests {
     #[tokio::test]
     async fn test_with_session_key_not_found_error() {
         let manager = PairedSessionKey::new(16);
-        let result = manager
-            .with_session(&vec![9u8; 16], |_sk| Ok(()))
-            .await;
+        let result = manager.with_session(&vec![9u8; 16], |_sk| Ok(())).await;
         assert!(result.is_err());
     }
 
@@ -277,7 +275,12 @@ mod tests {
         let peer_pub = generate_peer_public();
         // temp 表中没有该 session_id
         let result = manager
-            .establish_ends(vec![3u8; 16], vec![4u8; 16], vec![5u8; 16], peer_pub.as_bytes())
+            .establish_ends(
+                vec![3u8; 16],
+                vec![4u8; 16],
+                vec![5u8; 16],
+                peer_pub.as_bytes(),
+            )
             .await?;
         assert!(!result);
         Ok(())

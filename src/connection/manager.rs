@@ -683,8 +683,14 @@ impl ConnectionManager {
                 let bi_conn = bucket_ref.value();
                 for entry_ref in bi_conn.clients.iter() {
                     let entry = entry_ref.value();
-                    let is_match =
-                        { entry.node.read().await.as_ref().map_or(false, |n| n.id == node_id) };
+                    let is_match = {
+                        entry
+                            .node
+                            .read()
+                            .await
+                            .as_ref()
+                            .map_or(false, |n| n.id == node_id)
+                    };
                     if is_match {
                         if let Some(node) = &*entry.node.read().await {
                             all.append(&mut node.all_nat_addrs());
@@ -693,8 +699,14 @@ impl ConnectionManager {
                 }
                 for entry_ref in bi_conn.servers.iter() {
                     let entry = entry_ref.value();
-                    let is_match =
-                        { entry.node.read().await.as_ref().map_or(false, |n| n.id == node_id) };
+                    let is_match = {
+                        entry
+                            .node
+                            .read()
+                            .await
+                            .as_ref()
+                            .map_or(false, |n| n.id == node_id)
+                    };
                     if is_match {
                         if let Some(node) = &*entry.node.read().await {
                             all.append(&mut node.all_nat_addrs());

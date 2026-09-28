@@ -1,6 +1,6 @@
 use aex::communicators::event::Event;
-use aex::http::router::Router as HttpRouter;
 use aex::connection::context::Context;
+use aex::http::router::Router as HttpRouter;
 use aex::server::Server;
 use futures::FutureExt;
 use std::net::SocketAddr;

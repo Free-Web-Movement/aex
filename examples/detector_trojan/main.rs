@@ -16,7 +16,9 @@ mod detectors_common;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use detectors_common::{TlsDetector, TlsLoader, TlsMiddleware, TrojanMiddleware, TrojanRequestInfo};
+use detectors_common::{
+    TlsDetector, TlsLoader, TlsMiddleware, TrojanMiddleware, TrojanRequestInfo,
+};
 use tokio::io::AsyncWriteExt;
 
 use aex::connection::context::Context;
@@ -63,8 +65,13 @@ async fn run(cert: String, key: String) -> anyhow::Result<()> {
                             Some(req) => {
                                 let _ = w
                                     .write_all(
-                                        format!("trojan ok target={}:{}, hash={}\n", req.target, req.port, &req.hash[..12])
-                                            .as_bytes(),
+                                        format!(
+                                            "trojan ok target={}:{}, hash={}\n",
+                                            req.target,
+                                            req.port,
+                                            &req.hash[..12]
+                                        )
+                                        .as_bytes(),
                                     )
                                     .await;
                             }

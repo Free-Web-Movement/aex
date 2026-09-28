@@ -10,11 +10,7 @@ use std::time::Duration;
 /// 启动一个公网中继节点，返回 server 句柄（Arc，保持 run 存活）。
 async fn start_relay() -> std::sync::Arc<NatRelayServer> {
     let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
-    let server = std::sync::Arc::new(
-        NatRelayServer::bind(addr)
-            .await
-            .expect("relay bind failed"),
-    );
+    let server = std::sync::Arc::new(NatRelayServer::bind(addr).await.expect("relay bind failed"));
     let runner = server.clone();
     tokio::spawn(async move {
         let _ = runner.run().await;
@@ -226,7 +222,10 @@ async fn oversized_frame_header_does_not_crash_relay() {
     // 超限长度（> NAT_MAX_FRAME_BODY）
     let oversize = (aex::nat::types::NAT_MAX_FRAME_BODY as u32) + 1;
     head.extend_from_slice(&oversize.to_le_bytes());
-    stream.write_all(&head).await.expect("write malformed header");
+    stream
+        .write_all(&head)
+        .await
+        .expect("write malformed header");
 
     // 稍等，让中继处理异常帧；随后一个正常节点仍能注册，证明中继未崩溃。
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -234,7 +233,6 @@ async fn oversized_frame_header_does_not_crash_relay() {
     assert_eq!(ok.state().await, TunnelState::Ready);
     assert!(server.peer_public_addr("node_after_oversize").is_some());
 }
-
 
 #[tokio::test]
 async fn open_channel_relays_byte_stream_between_peers() {

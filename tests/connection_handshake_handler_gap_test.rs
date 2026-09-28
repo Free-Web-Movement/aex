@@ -11,7 +11,11 @@ use aex::connection::handshake_handler::HandshakeHandler;
 use aex::connection::node::Node;
 
 fn create_test_node() -> Node {
-    Node::from_addr("127.0.0.1:8080".parse().unwrap(), Some(1), Some(vec![1; 32]))
+    Node::from_addr(
+        "127.0.0.1:8080".parse().unwrap(),
+        Some(1),
+        Some(vec![1; 32]),
+    )
 }
 
 async fn preload_reader(request: &[u8]) -> (Arc<Mutex<Context>>, tokio::io::DuplexStream) {

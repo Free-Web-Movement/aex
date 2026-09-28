@@ -21,5 +21,5 @@
 pub mod http_proxy;
 pub mod socks;
 
-pub use http_proxy::{maybe_handle_http_proxy, ProxyAuthorizer};
-pub use socks::{socks_tcp_handler, SocksDetector};
+pub use http_proxy::{ProxyAuthorizer, maybe_handle_http_proxy};
+pub use socks::{SocksDetector, socks_tcp_handler};

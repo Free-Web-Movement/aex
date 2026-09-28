@@ -373,10 +373,7 @@ async fn test_static_files_custom_index() {
     std::fs::write(dir.join("index.html"), "default-index").unwrap();
 
     let mut router = Router::default();
-    router.static_files_with(
-        "/custom",
-        StaticFiles::new(&dir).index("home.html"),
-    );
+    router.static_files_with("/custom", StaticFiles::new(&dir).index("home.html"));
     let s = start_router(router).await;
 
     let r = get(s.addr, "/custom/").await.expect("server unreachable");
@@ -384,6 +381,8 @@ async fn test_static_files_custom_index() {
     assert_eq!(String::from_utf8_lossy(&r.1), "custom-home");
 
     // 直接访问自定义入口文件名也应 200
-    let r = get(s.addr, "/custom/home.html").await.expect("server unreachable");
+    let r = get(s.addr, "/custom/home.html")
+        .await
+        .expect("server unreachable");
     assert_eq!(r.0, 200);
 }

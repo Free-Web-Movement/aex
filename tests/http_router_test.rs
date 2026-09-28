@@ -94,19 +94,30 @@ mod tests {
         use aex::{_async, _sync};
         let mut router = Router::default();
         router.get("/a", _sync!(|_| "Hello world!"));
-        router.get("/b", _sync!(|ctx| {
-            ctx.text("Hello world!");
-        }));
-        router.get("/c", _sync!(|ctx| {
-            ctx.send("Hello world!", None);
-            true
-        }));
-        router.get("/d", _async!(|ctx| {
-            ctx.text("async Hello");
-            true
-        }));
+        router.get(
+            "/b",
+            _sync!(|ctx| {
+                ctx.text("Hello world!");
+            }),
+        );
+        router.get(
+            "/c",
+            _sync!(|ctx| {
+                ctx.send("Hello world!", None);
+                true
+            }),
+        );
+        router.get(
+            "/d",
+            _async!(|ctx| {
+                ctx.text("async Hello");
+                true
+            }),
+        );
         // 中间件链也支持 _sync! + _async! 混排
-        router.get("/e", _sync!(|_| true)).middleware(_sync!(|_| true));
+        router
+            .get("/e", _sync!(|_| true))
+            .middleware(_sync!(|_| true));
         assert!(router.has_route("GET", "/a"));
         assert!(router.has_route("GET", "/b"));
         assert!(router.has_route("GET", "/c"));
@@ -119,20 +130,28 @@ mod tests {
         // `exe!` / `now!` / `then!` 分别是 `_async!` / `_sync!` / `_async!` 的别名
         use aex::{_async, _sync, exe, now, then};
         let mut router = Router::default();
-        router.get("/a", exe!(|ctx| {
-            ctx.text("exe alias");
-            true
-        }));
+        router.get(
+            "/a",
+            exe!(|ctx| {
+                ctx.text("exe alias");
+                true
+            }),
+        );
         router.get("/b", now!(|_| "now alias"));
-        router.get("/c", then!(|ctx| {
-            ctx.text("then alias");
-            true
-        }));
+        router.get(
+            "/c",
+            then!(|ctx| {
+                ctx.text("then alias");
+                true
+            }),
+        );
         // 别名产物与 _sync!/_async! 一致，可与主宏混排
-        router.get("/d", _sync!(|_| true)).middleware(_async!(|ctx| {
-            let _ = ctx;
-            true
-        }));
+        router
+            .get("/d", _sync!(|_| true))
+            .middleware(_async!(|ctx| {
+                let _ = ctx;
+                true
+            }));
         // `|_|` 通配参数：body 内不引用 ctx 即可
         router.get("/e", _async!(|_| { true }));
         router.get("/f", _async!(move |_| { false }));
@@ -169,7 +188,11 @@ mod tests {
 
         let mut router = Router::default();
         // 数组形式 + 直接返回字符串
-        router.get_with("/admin", [mw_a.clone(), mw_b.clone()], |_: &mut Context| "Admin OK");
+        router.get_with(
+            "/admin",
+            [mw_a.clone(), mw_b.clone()],
+            |_: &mut Context| "Admin OK",
+        );
         // Vec 形式 + ctx 便捷方法
         router.get_with("/api", vec![mw_a.clone()], |ctx: &mut Context| {
             ctx.text("API OK");

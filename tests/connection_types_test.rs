@@ -6,8 +6,8 @@ mod tests {
     };
     use std::{
         net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
-        sync::atomic::Ordering,
         sync::Arc,
+        sync::atomic::Ordering,
     };
     use tokio_util::sync::CancellationToken;
 

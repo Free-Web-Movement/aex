@@ -9,9 +9,7 @@ use std::time::Duration;
 
 async fn start_relay() -> std::sync::Arc<NatRelayServer> {
     let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
-    let server = std::sync::Arc::new(
-        NatRelayServer::bind(addr).await.expect("relay bind failed"),
-    );
+    let server = std::sync::Arc::new(NatRelayServer::bind(addr).await.expect("relay bind failed"));
     let runner = server.clone();
     tokio::spawn(async move {
         let _ = runner.run().await;
@@ -39,7 +37,9 @@ async fn punch_request_exchanges_peer_addresses_bidirectionally() {
     let b = start_client("node_b", relay_addr).await;
 
     // A 发起打洞请求。
-    a.request_punch("node_b").await.expect("punch request failed");
+    a.request_punch("node_b")
+        .await
+        .expect("punch request failed");
 
     // 中继应完成双向地址交换：A、B 都学到对方公网映射地址。
     tokio::time::timeout(Duration::from_secs(3), async {
@@ -55,8 +55,14 @@ async fn punch_request_exchanges_peer_addresses_bidirectionally() {
     .await
     .expect("timeout waiting for punch hint exchange");
 
-    let a_sees_b = a.peer_public_addr("node_b").await.expect("a missing b addr");
-    let b_sees_a = b.peer_public_addr("node_a").await.expect("b missing a addr");
+    let a_sees_b = a
+        .peer_public_addr("node_b")
+        .await
+        .expect("a missing b addr");
+    let b_sees_a = b
+        .peer_public_addr("node_a")
+        .await
+        .expect("b missing a addr");
 
     // 双方学到的是对方的连接源地址（本机模拟下都是 127.0.0.1）。
     assert_eq!(a_sees_b.ip(), b_sees_a.ip());

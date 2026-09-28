@@ -10,23 +10,22 @@ mod detectors_common;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use detectors_common::{
-    parse_client_hello, ClientHelloParse, SocksDetector, SocksVersion,
-    TlsClientHello as _, TlsDetector, TlsLoader, TlsMiddleware, TrojanMiddleware,
-    TrojanRequestInfo, VlessMiddleware, VlessRequestInfo,
-};
 use aex::unified::detect::ProtocolDetector;
 use detectors_common::TlsSession;
+use detectors_common::{
+    ClientHelloParse, SocksDetector, SocksVersion, TlsClientHello as _, TlsDetector, TlsLoader,
+    TlsMiddleware, TrojanMiddleware, TrojanRequestInfo, VlessMiddleware, VlessRequestInfo,
+    parse_client_hello,
+};
 use rcgen::generate_simple_self_signed;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
+use tokio_rustls::TlsConnector;
 use tokio_rustls::rustls::{
-    self,
+    self, DigitallySignedStruct, SignatureScheme,
     client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier},
     pki_types::{CertificateDer, ServerName, UnixTime},
-    DigitallySignedStruct, SignatureScheme,
 };
-use tokio_rustls::TlsConnector;
 
 use aex::connection::context::{BoxReader, Context};
 use aex::connection::global::GlobalContext;
@@ -325,35 +324,34 @@ async fn trojan_over_tls_e2e() {
     let loader = TlsLoader::from_der(vec![cert], der_key(key)).unwrap();
 
     spawn_server(addr, |s| {
-        s.detector(Arc::new(TlsDetector))
-            .custom_handler(
-                "tls",
-                Arc::new(move |ctx: Context| {
-                    let loader = loader.clone();
-                    tokio::spawn(async move {
-                        let mut ctx = ctx;
-                        let tls = TlsMiddleware::accept(loader);
-                        if !tls(&mut ctx).await {
-                            return;
-                        }
-                        let trojan = TrojanMiddleware::validate();
-                        if !trojan(&mut ctx).await {
-                            return;
-                        }
-                        let req = ctx.local.get_ref::<TrojanRequestInfo>().cloned().unwrap();
-                        if let Some(w) = ctx.writer.as_mut() {
-                            let _ = w
-                                .write_all(format!("{}:{}\n", req.target, req.port).as_bytes())
-                                .await;
-                        }
-                        // Payload after the header should flow untouched.
-                        let mut rest = Vec::new();
-                        if let Some(r) = ctx.reader.as_mut() {
-                            let _ = r.read_to_end(&mut rest).await;
-                        }
-                    })
-                }),
-            )
+        s.detector(Arc::new(TlsDetector)).custom_handler(
+            "tls",
+            Arc::new(move |ctx: Context| {
+                let loader = loader.clone();
+                tokio::spawn(async move {
+                    let mut ctx = ctx;
+                    let tls = TlsMiddleware::accept(loader);
+                    if !tls(&mut ctx).await {
+                        return;
+                    }
+                    let trojan = TrojanMiddleware::validate();
+                    if !trojan(&mut ctx).await {
+                        return;
+                    }
+                    let req = ctx.local.get_ref::<TrojanRequestInfo>().cloned().unwrap();
+                    if let Some(w) = ctx.writer.as_mut() {
+                        let _ = w
+                            .write_all(format!("{}:{}\n", req.target, req.port).as_bytes())
+                            .await;
+                    }
+                    // Payload after the header should flow untouched.
+                    let mut rest = Vec::new();
+                    if let Some(r) = ctx.reader.as_mut() {
+                        let _ = r.read_to_end(&mut rest).await;
+                    }
+                })
+            }),
+        )
     });
     wait_listening(addr).await;
 
@@ -385,30 +383,29 @@ async fn vless_over_tls_e2e() {
     let loader = TlsLoader::from_der(vec![cert], der_key(key)).unwrap();
 
     spawn_server(addr, |s| {
-        s.detector(Arc::new(TlsDetector))
-            .custom_handler(
-                "tls",
-                Arc::new(move |ctx: Context| {
-                    let loader = loader.clone();
-                    tokio::spawn(async move {
-                        let mut ctx = ctx;
-                        let tls = TlsMiddleware::accept(loader);
-                        if !tls(&mut ctx).await {
-                            return;
-                        }
-                        let vless = VlessMiddleware::validate();
-                        if !vless(&mut ctx).await {
-                            return;
-                        }
-                        let req = ctx.local.get_ref::<VlessRequestInfo>().cloned().unwrap();
-                        if let Some(w) = ctx.writer.as_mut() {
-                            let _ = w
-                                .write_all(format!("{}:{}\n", req.target, req.port).as_bytes())
-                                .await;
-                        }
-                    })
-                }),
-            )
+        s.detector(Arc::new(TlsDetector)).custom_handler(
+            "tls",
+            Arc::new(move |ctx: Context| {
+                let loader = loader.clone();
+                tokio::spawn(async move {
+                    let mut ctx = ctx;
+                    let tls = TlsMiddleware::accept(loader);
+                    if !tls(&mut ctx).await {
+                        return;
+                    }
+                    let vless = VlessMiddleware::validate();
+                    if !vless(&mut ctx).await {
+                        return;
+                    }
+                    let req = ctx.local.get_ref::<VlessRequestInfo>().cloned().unwrap();
+                    if let Some(w) = ctx.writer.as_mut() {
+                        let _ = w
+                            .write_all(format!("{}:{}\n", req.target, req.port).as_bytes())
+                            .await;
+                    }
+                })
+            }),
+        )
     });
     wait_listening(addr).await;
 
@@ -432,7 +429,10 @@ async fn vless_over_tls_e2e() {
     tls.write_all(&request).await.unwrap();
     let mut buf = vec![0u8; 64];
     let n = tls.read(&mut buf).await.unwrap();
-    assert_eq!(String::from_utf8_lossy(&buf[..n]).trim_end(), "example.com:8443");
+    assert_eq!(
+        String::from_utf8_lossy(&buf[..n]).trim_end(),
+        "example.com:8443"
+    );
 }
 
 #[tokio::test]
@@ -481,16 +481,12 @@ async fn malformed_trojan_header_is_rejected() {
             Box::new(tokio::io::BufReader::new(server_side));
         let writer = Box::new(tokio::io::sink());
         let globals = Arc::new(GlobalContext::new(free_addr(), None));
-        let mut ctx =
-            Context::new(Some(reader), Some(writer), globals, free_addr());
+        let mut ctx = Context::new(Some(reader), Some(writer), globals, free_addr());
         TrojanMiddleware::validate()(&mut ctx).await
     });
 
     // Only 10 bytes of the required 59 arrive, then EOF.
-    client_side
-        .write_all(&b"deadbeef00"[..10])
-        .await
-        .unwrap();
+    client_side.write_all(&b"deadbeef00"[..10]).await.unwrap();
     drop(client_side);
 
     assert_eq!(task.await.unwrap(), false);

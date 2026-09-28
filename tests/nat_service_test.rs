@@ -4,8 +4,8 @@
 //! 编解码（带魔数）、NatRelayService 连接处理。
 
 use aex::nat::{
-    frame_len_from_header, NatDetector, NatFrame, NatFrameType, NatRelayService, TunnelPeer,
-    NAT_MAGIC, NAT_MAGIC_LEN, NAT_MAX_FRAME_BODY,
+    NAT_MAGIC, NAT_MAGIC_LEN, NAT_MAX_FRAME_BODY, NatDetector, NatFrame, NatFrameType,
+    NatRelayService, TunnelPeer, frame_len_from_header,
 };
 use aex::unified::detect::{DetectionState, ProtocolDetector, Verdict};
 
@@ -127,4 +127,3 @@ fn frame_len_from_header_rejects_short_header() {
     // 帧头不足魔数+长度 → 协议错误。
     assert!(frame_len_from_header(&[0u8; NAT_MAGIC_LEN]).is_err());
 }
-

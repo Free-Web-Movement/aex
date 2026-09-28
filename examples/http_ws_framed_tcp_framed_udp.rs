@@ -97,7 +97,8 @@ async fn main() -> Result<()> {
     let addr: SocketAddr = "0.0.0.0:8080".parse()?;
 
     let mut http = setup_http();
-    http.get("/ws", |_ctx: &mut Context| true).middleware(setup_ws());
+    http.get("/ws", |_ctx: &mut Context| true)
+        .middleware(setup_ws());
 
     let srv = Server::new(addr, None)
         .http(http)

@@ -94,7 +94,13 @@ async fn custom_detector_routes_to_custom_handler() {
                     assert_eq!(claim_protocol.as_deref(), Some("magic-proto"));
 
                     let mut buf = [0u8; 64];
-                    let n = ctx.reader.as_mut().unwrap().read(&mut buf).await.unwrap_or(0);
+                    let n = ctx
+                        .reader
+                        .as_mut()
+                        .unwrap()
+                        .read(&mut buf)
+                        .await
+                        .unwrap_or(0);
                     assert_eq!(&buf[..n], b"MAGIC1-payload");
                     ctx.writer
                         .as_mut()
@@ -171,7 +177,12 @@ async fn forward_mode_terminates_detection_and_forwards_directly() {
                 tokio::spawn(async move {
                     let mut buf = Vec::new();
                     let _ = ctx.reader.as_mut().unwrap().read_to_end(&mut buf).await;
-                    ctx.writer.as_mut().unwrap().write_all(b"forwarded").await.ok();
+                    ctx.writer
+                        .as_mut()
+                        .unwrap()
+                        .write_all(b"forwarded")
+                        .await
+                        .ok();
                     fw.fetch_add(1, Ordering::SeqCst);
                 })
             }),
@@ -218,7 +229,13 @@ async fn empty_registry_is_pure_tcp_passthrough() {
             let h = h.clone();
             tokio::spawn(async move {
                 let mut buf = [0u8; 64];
-                let n = ctx.reader.as_mut().unwrap().read(&mut buf).await.unwrap_or(0);
+                let n = ctx
+                    .reader
+                    .as_mut()
+                    .unwrap()
+                    .read(&mut buf)
+                    .await
+                    .unwrap_or(0);
                 assert_eq!(&buf[..n], b"raw-bytes");
                 h.fetch_add(1, Ordering::SeqCst);
             })
@@ -252,7 +269,9 @@ async fn runtime_unregister_stops_claiming() {
             "magic2",
             Arc::new(move |_ctx| {
                 let ch = ch.clone();
-                tokio::spawn(async move { ch.fetch_add(1, Ordering::SeqCst); })
+                tokio::spawn(async move {
+                    ch.fetch_add(1, Ordering::SeqCst);
+                })
             }),
         )
         // TCP fallback reads the (chained) initial bytes to distinguish a
@@ -261,7 +280,13 @@ async fn runtime_unregister_stops_claiming() {
             let th = th.clone();
             tokio::spawn(async move {
                 let mut buf = [0u8; 16];
-                let n = ctx.reader.as_mut().unwrap().read(&mut buf).await.unwrap_or(0);
+                let n = ctx
+                    .reader
+                    .as_mut()
+                    .unwrap()
+                    .read(&mut buf)
+                    .await
+                    .unwrap_or(0);
                 if buf[..n].starts_with(b"MAGIC2-y") {
                     th.fetch_add(1, Ordering::SeqCst);
                 }

@@ -37,15 +37,9 @@ async fn rate_limit_consumes_tokens_then_rejects_429() {
     let executor = RateLimitConfig::new(2, 60).build();
 
     assert!(executor(&mut ctx).await);
-    assert_eq!(
-        remaining(ctx.local.get_ref::<HttpMetadata>().unwrap()),
-        "1"
-    );
+    assert_eq!(remaining(ctx.local.get_ref::<HttpMetadata>().unwrap()), "1");
     assert!(executor(&mut ctx).await);
-    assert_eq!(
-        remaining(ctx.local.get_ref::<HttpMetadata>().unwrap()),
-        "0"
-    );
+    assert_eq!(remaining(ctx.local.get_ref::<HttpMetadata>().unwrap()), "0");
 
     assert!(!executor(&mut ctx).await);
     let meta = ctx.local.get_ref::<HttpMetadata>().unwrap();
@@ -68,10 +62,7 @@ async fn rate_limit_window_zero_always_refills() {
     for _ in 0..5 {
         assert!(executor(&mut ctx).await);
     }
-    assert_eq!(
-        remaining(ctx.local.get_ref::<HttpMetadata>().unwrap()),
-        "0"
-    );
+    assert_eq!(remaining(ctx.local.get_ref::<HttpMetadata>().unwrap()), "0");
 }
 
 #[tokio::test]

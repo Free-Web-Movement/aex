@@ -1,7 +1,7 @@
 use aex::connection::context::Context;
 use aex::connection::global::GlobalContext;
 use aex::unified::{
-    DetectionState, DetectorRegistry, Http11Detector, Http2Detector, Position, Protocol,
+    DetectionState, DetectorRegistry, Http2Detector, Http11Detector, Position, Protocol,
     ProtocolDetector, UnifiedServer, Verdict,
 };
 use std::net::SocketAddr;
@@ -130,7 +130,9 @@ async fn test_detection_disabled_skips_peek() {
     sleep(Duration::from_millis(100)).await;
 
     let mut conn = TcpStream::connect(addr).await.unwrap();
-    conn.write_all(b"GET / HTTP/1.1\r\nHost: x\r\n\r\n").await.unwrap();
+    conn.write_all(b"GET / HTTP/1.1\r\nHost: x\r\n\r\n")
+        .await
+        .unwrap();
     conn.shutdown().await.ok();
     sleep(Duration::from_millis(150)).await;
 
@@ -186,7 +188,9 @@ async fn test_http2_preface_without_enable_falls_back_to_tcp() {
     sleep(Duration::from_millis(100)).await;
 
     let mut conn = TcpStream::connect(addr).await.unwrap();
-    conn.write_all(b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n").await.unwrap();
+    conn.write_all(b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n")
+        .await
+        .unwrap();
     conn.shutdown().await.ok();
     sleep(Duration::from_millis(200)).await;
 
@@ -262,8 +266,8 @@ async fn test_udp_handler_receives_datagram() {
     let hits = Arc::new(AtomicUsize::new(0));
     let h = hits.clone();
 
-    let server = UnifiedServer::new(addr, Arc::new(GlobalContext::new(addr, None)))
-        .udp_handler(Arc::new(move |ctx| {
+    let server = UnifiedServer::new(addr, Arc::new(GlobalContext::new(addr, None))).udp_handler(
+        Arc::new(move |ctx| {
             let h = h.clone();
             tokio::spawn(async move {
                 let data: Vec<u8> = ctx.get().unwrap_or_default();
@@ -271,7 +275,8 @@ async fn test_udp_handler_receives_datagram() {
                     h.fetch_add(1, Ordering::SeqCst);
                 }
             })
-        }));
+        }),
+    );
 
     tokio::spawn(async move {
         server.start().await.ok();

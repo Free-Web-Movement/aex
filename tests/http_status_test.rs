@@ -136,10 +136,16 @@ mod tests {
             (StatusCode::RequestTimeout, HttpStatus::REQUEST_TIMEOUT),
             (StatusCode::Conflict, HttpStatus::CONFLICT),
             (StatusCode::Gone, HttpStatus::GONE),
-            (StatusCode::InternalServerError, HttpStatus::INTERNAL_SERVER_ERROR),
+            (
+                StatusCode::InternalServerError,
+                HttpStatus::INTERNAL_SERVER_ERROR,
+            ),
             (StatusCode::NotImplemented, HttpStatus::NOT_IMPLEMENTED),
             (StatusCode::BadGateway, HttpStatus::BAD_GATEWAY),
-            (StatusCode::ServiceUnavailable, HttpStatus::SERVICE_UNAVAILABLE),
+            (
+                StatusCode::ServiceUnavailable,
+                HttpStatus::SERVICE_UNAVAILABLE,
+            ),
             (StatusCode::GatewayTimeout, HttpStatus::GATEWAY_TIMEOUT),
         ];
         for (aex_status, http_status) in cases.iter() {

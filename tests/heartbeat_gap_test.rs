@@ -58,7 +58,10 @@ async fn test_handle_ping_writes_pong() {
     )));
 
     let ping = PingCommand::new();
-    manager.handle_ping(ctx, &ping.encode(), peer).await.unwrap();
+    manager
+        .handle_ping(ctx, &ping.encode(), peer)
+        .await
+        .unwrap();
 
     let mut len_buf = [0u8; 4];
     resp_reader.read_exact(&mut len_buf).await.unwrap();
@@ -140,7 +143,9 @@ async fn test_start_server_heartbeat_cancel_removes_connection() {
     manager.set_connection_state(peer, 0, 111).await;
     assert_eq!(manager.get_latency(peer).await, Some(111));
 
-    manager.start_server_heartbeat(ctx, peer, token.clone()).await;
+    manager
+        .start_server_heartbeat(ctx, peer, token.clone())
+        .await;
     token.cancel();
     tokio::time::sleep(Duration::from_millis(100)).await;
 
@@ -169,7 +174,9 @@ async fn test_start_server_heartbeat_timeout_callback() {
         peer,
     )));
     let token = CancellationToken::new();
-    manager.start_server_heartbeat(ctx, peer, token.clone()).await;
+    manager
+        .start_server_heartbeat(ctx, peer, token.clone())
+        .await;
 
     tokio::time::timeout(Duration::from_secs(5), async {
         while !fired.load(Ordering::SeqCst) {

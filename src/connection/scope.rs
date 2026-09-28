@@ -12,10 +12,7 @@ impl NetworkScope {
         match ip {
             std::net::IpAddr::V4(v4) => {
                 // 0.0.0.0 (unspecified) 是本机地址，不是公网
-                if v4.is_loopback()
-                    || v4.is_unspecified()
-                    || v4.is_private()
-                    || v4.is_link_local()
+                if v4.is_loopback() || v4.is_unspecified() || v4.is_private() || v4.is_link_local()
                 {
                     NetworkScope::Intranet
                 } else {

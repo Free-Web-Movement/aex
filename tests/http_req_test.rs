@@ -135,7 +135,10 @@ mod tests {
         use aex::constants::http::MAX_REQUEST_LINE_SIZE;
         let mut local = LocalTypeMap::new();
         // 请求行超过 MAX_REQUEST_LINE_SIZE
-        let long = format!("GET /{} HTTP/1.1\r\n\r\n", "a".repeat(MAX_REQUEST_LINE_SIZE + 100));
+        let long = format!(
+            "GET /{} HTTP/1.1\r\n\r\n",
+            "a".repeat(MAX_REQUEST_LINE_SIZE + 100)
+        );
         let reader = BufReader::new(Cursor::new(long.into_bytes()));
         let mut reader: Option<BoxReader> = Some(Box::new(reader));
         let mut req = Request::new(&mut reader, &mut local);

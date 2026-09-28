@@ -6,7 +6,10 @@ use aex::{
     http::{
         meta::HttpMetadata,
         middlewares::websocket::{WebSocket, WsSenderList},
-        protocol::{header::{HeaderKey, Headers}, method::HttpMethod},
+        protocol::{
+            header::{HeaderKey, Headers},
+            method::HttpMethod,
+        },
         websocket::{WSCodec, WSFrame},
     },
 };
@@ -51,10 +54,7 @@ fn check_accepts_case_insensitive_upgrade_and_connection_list() {
 async fn handshake_writes_101_with_rfc6455_accept_key() {
     use tokio::io::AsyncReadExt;
     let (mut client, mut server) = duplex(1024);
-    let headers = Headers::new().with(
-        HeaderKey::SecWebSocketKey,
-        "dGhlIHNhbXBsZSBub25jZQ==",
-    );
+    let headers = Headers::new().with(HeaderKey::SecWebSocketKey, "dGhlIHNhbXBsZSBub25jZQ==");
     WebSocket::handshake(&mut server, &headers).await.unwrap();
 
     let mut buf = [0u8; 512];
@@ -70,7 +70,9 @@ async fn handshake_writes_101_with_rfc6455_accept_key() {
 async fn handshake_missing_key_returns_error() {
     let (_client, mut server) = duplex(1024);
     let headers = Headers::new();
-    let err = WebSocket::handshake(&mut server, &headers).await.unwrap_err();
+    let err = WebSocket::handshake(&mut server, &headers)
+        .await
+        .unwrap_err();
     assert!(err.to_string().contains("missing Sec-WebSocket-Key"));
 }
 
@@ -79,7 +81,9 @@ async fn run_errors_when_reader_missing() {
     let a = addr(9300);
     let global = Arc::new(GlobalContext::new(a, None));
     let mut ctx = Context::new(None, None, global, a);
-    let err = WebSocket::run(&WebSocket::new(), &mut ctx).await.unwrap_err();
+    let err = WebSocket::run(&WebSocket::new(), &mut ctx)
+        .await
+        .unwrap_err();
     assert!(err.to_string().contains("Reader missing"));
 }
 
@@ -90,7 +94,9 @@ async fn run_errors_when_writer_missing() {
     let a = addr(9301);
     let global = Arc::new(GlobalContext::new(a, None));
     let mut ctx = Context::new(reader, None, global, a);
-    let err = WebSocket::run(&WebSocket::new(), &mut ctx).await.unwrap_err();
+    let err = WebSocket::run(&WebSocket::new(), &mut ctx)
+        .await
+        .unwrap_err();
     assert!(err.to_string().contains("Writer missing"));
 }
 
@@ -119,8 +125,10 @@ async fn to_middleware_returns_false_when_no_writer() {
     let global = Arc::new(GlobalContext::new(a, None));
     let mut ctx = Context::new(None, None, global, a);
     let mut meta = HttpMetadata::new();
-    meta.headers.insert(HeaderKey::Upgrade, "websocket".to_string());
-    meta.headers.insert(HeaderKey::Connection, "Upgrade".to_string());
+    meta.headers
+        .insert(HeaderKey::Upgrade, "websocket".to_string());
+    meta.headers
+        .insert(HeaderKey::Connection, "Upgrade".to_string());
     ctx.local.set_value(meta);
     let mw = WebSocket::to_middleware(WebSocket::new());
     assert!(!mw(&mut ctx).await);

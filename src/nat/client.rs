@@ -19,7 +19,7 @@ use tokio::sync::{Mutex, mpsc};
 
 use super::punch::{PunchCoordinator, PunchTunnel};
 use super::types::{
-    frame_len_from_header, NatError, NatFrame, NatFrameType, NatResult, NAT_MAGIC_LEN,
+    NAT_MAGIC_LEN, NatError, NatFrame, NatFrameType, NatResult, frame_len_from_header,
 };
 
 const LEN_PREFIX_BYTES: usize = 4;
@@ -382,10 +382,9 @@ impl NatTunnelClient {
         };
         let local_port = *self.punch_local_port.lock().await;
         let local_bind: SocketAddr = match local_port {
-            Some(port) => SocketAddr::new(
-                std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED),
-                port,
-            ),
+            Some(port) => {
+                SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED), port)
+            }
             None => "0.0.0.0:0".parse().unwrap(),
         };
         let coordinator = PunchCoordinator::new();
@@ -406,11 +405,7 @@ impl NatTunnelClient {
             }
             Err(e) => {
                 // 打洞失败：降级，数据继续经中继转发。
-                tracing::info!(
-                    "🔓 NAT punch {} failed: {:?} (fallback to relay)",
-                    peer,
-                    e
-                );
+                tracing::info!("🔓 NAT punch {} failed: {:?} (fallback to relay)", peer, e);
             }
         }
     }

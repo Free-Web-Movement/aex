@@ -13,7 +13,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpSocket};
 use tokio::sync::Mutex;
 
-use super::types::{NatError, NatResult, NAT_MAX_FRAME_BODY};
+use super::types::{NAT_MAX_FRAME_BODY, NatError, NatResult};
 
 /// 打洞重试次数。
 const PUNCH_RETRIES: usize = 8;

@@ -55,9 +55,7 @@ pub const NAT_MAX_FRAME_BODY: usize = 16 * 1024 * 1024; // 16 MiB
 /// 以防任意巨大 `len` 导致不受控的内存分配。
 pub fn frame_len_from_header(head_buf: &[u8]) -> NatResult<usize> {
     if head_buf.len() < NAT_MAGIC_LEN + NAT_LEN_PREFIX_BYTES {
-        return Err(NatError::Protocol(
-            "frame header too short".to_string(),
-        ));
+        return Err(NatError::Protocol("frame header too short".to_string()));
     }
     let len = u32::from_le_bytes(
         head_buf[NAT_MAGIC_LEN..NAT_MAGIC_LEN + NAT_LEN_PREFIX_BYTES]
@@ -205,8 +203,8 @@ impl NatFrame {
 
     /// 在线对端列表广播（payload = bincode 编码的 `Vec<(node_id, public_addr)>`）。
     pub fn peers(src: &str, peers: &[(String, String)]) -> Self {
-        let payload = bincode::encode_to_vec(peers, bincode::config::standard())
-            .unwrap_or_default();
+        let payload =
+            bincode::encode_to_vec(peers, bincode::config::standard()).unwrap_or_default();
         Self {
             frame_type: NatFrameType::Peers,
             src: src.to_string(),

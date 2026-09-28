@@ -140,9 +140,18 @@ fn test_multicast_scope_address_range() {
 #[test]
 fn test_multicast_scope_from_addr_none_for_non_multicast() {
     // 非组播地址 → None
-    assert_eq!(MulticastScope::from_addr(&Ipv4Addr::new(192, 168, 1, 1)), None);
+    assert_eq!(
+        MulticastScope::from_addr(&Ipv4Addr::new(192, 168, 1, 1)),
+        None
+    );
     assert_eq!(MulticastScope::from_addr(&Ipv4Addr::new(10, 0, 0, 1)), None);
-    assert_eq!(MulticastScope::from_addr(&Ipv4Addr::new(230, 0, 0, 1)), None);
+    assert_eq!(
+        MulticastScope::from_addr(&Ipv4Addr::new(230, 0, 0, 1)),
+        None
+    );
     // 239 但第二段不是 0/192/255 → None
-    assert_eq!(MulticastScope::from_addr(&Ipv4Addr::new(239, 100, 0, 1)), None);
+    assert_eq!(
+        MulticastScope::from_addr(&Ipv4Addr::new(239, 100, 0, 1)),
+        None
+    );
 }

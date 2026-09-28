@@ -20,8 +20,8 @@ use tokio::net::{TcpListener, TcpStream};
 use crate::connection::context::{BoxReader, BoxWriter};
 
 use super::types::{
-    frame_len_from_header, NatError, NatFrame, NatFrameType, NatResult, TunnelPeer,
-    NAT_KEEPALIVE_TIMEOUT, NAT_MAGIC, NAT_MAGIC_LEN,
+    NAT_KEEPALIVE_TIMEOUT, NAT_MAGIC, NAT_MAGIC_LEN, NatError, NatFrame, NatFrameType, NatResult,
+    TunnelPeer, frame_len_from_header,
 };
 
 /// 帧长度前缀占位大小（u32 LE）。
@@ -186,10 +186,7 @@ impl NatRelayService {
                         let start_src = NatFrame::punch_start(&frame.src, &frame.dst);
                         write_frame(&conn.writer, &start_src).await?;
                     } else {
-                        tracing::warn!(
-                            "NAT relay: punch target {} not registered",
-                            frame.dst
-                        );
+                        tracing::warn!("NAT relay: punch target {} not registered", frame.dst);
                     }
                 }
                 NatFrameType::Data => {
@@ -223,7 +220,8 @@ impl NatRelayService {
             Ok(body) => {
                 for entry in self.peers.iter() {
                     let peer = entry.value();
-                    let mut frame_bytes = Vec::with_capacity(NAT_MAGIC_LEN + LEN_PREFIX_BYTES + body.len());
+                    let mut frame_bytes =
+                        Vec::with_capacity(NAT_MAGIC_LEN + LEN_PREFIX_BYTES + body.len());
                     frame_bytes.extend_from_slice(NAT_MAGIC);
                     frame_bytes.extend_from_slice(&(body.len() as u32).to_le_bytes());
                     frame_bytes.extend_from_slice(&body);
@@ -231,7 +229,11 @@ impl NatRelayService {
                         let mut w = peer.writer.lock().await;
                         w.write_all(&frame_bytes).await
                     } {
-                        tracing::debug!("NAT relay: peer broadcast to {} failed: {:?}", entry.key(), e);
+                        tracing::debug!(
+                            "NAT relay: peer broadcast to {} failed: {:?}",
+                            entry.key(),
+                            e
+                        );
                     }
                 }
             }

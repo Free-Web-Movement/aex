@@ -35,11 +35,11 @@ use std::path::Path;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use anyhow::{anyhow, bail, Context as _, Result};
+use anyhow::{Context as _, Result, anyhow, bail};
 use futures::future::FutureExt;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, ReadHalf, WriteHalf};
-use tokio_rustls::rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use tokio_rustls::TlsAcceptor;
+use tokio_rustls::rustls::pki_types::{CertificateDer, PrivateKeyDer};
 
 use aex::connection::context::{BoxReader, BoxWriter, Context};
 use aex::http::types::Executor;
@@ -384,18 +384,22 @@ impl TlsLoader {
 
     /// Build from PEM-encoded bytes.
     pub fn from_pem(cert_pem: &[u8], key_pem: &[u8]) -> Result<Self> {
-        let certs: Vec<CertificateDer<'static>> = rustls_pemfile::certs(&mut &cert_pem[..])
-            .collect::<std::result::Result<_, _>>()?;
+        let certs: Vec<CertificateDer<'static>> =
+            rustls_pemfile::certs(&mut &cert_pem[..]).collect::<std::result::Result<_, _>>()?;
         if certs.is_empty() {
             bail!("no certificates found in PEM");
         }
-        let key = rustls_pemfile::private_key(&mut &key_pem[..])?.ok_or_else(|| anyhow!("no private key found in PEM"))?;
+        let key = rustls_pemfile::private_key(&mut &key_pem[..])?
+            .ok_or_else(|| anyhow!("no private key found in PEM"))?;
         Self::from_der(certs, key)
     }
 
     /// Build from already-parsed DER objects. Uses the ring CryptoProvider
     /// explicitly so the binary does not depend on process-level defaults.
-    pub fn from_der(certs: Vec<CertificateDer<'static>>, key: PrivateKeyDer<'static>) -> Result<Self> {
+    pub fn from_der(
+        certs: Vec<CertificateDer<'static>>,
+        key: PrivateKeyDer<'static>,
+    ) -> Result<Self> {
         let provider = Arc::new(rustls::crypto::ring::default_provider());
         let config = rustls::ServerConfig::builder_with_provider(provider)
             .with_protocol_versions(&[&rustls::version::TLS13, &rustls::version::TLS12])
@@ -542,7 +546,9 @@ async fn read_atyp_addr(reader: &mut BoxReader, atyp: u8) -> Option<(TargetAddr,
         0x01 => {
             let raw = read_exact_vec(reader, 4).await.ok()?;
             Some((
-                TargetAddr::Ip(std::net::IpAddr::V4(Ipv4Addr::new(raw[0], raw[1], raw[2], raw[3]))),
+                TargetAddr::Ip(std::net::IpAddr::V4(Ipv4Addr::new(
+                    raw[0], raw[1], raw[2], raw[3],
+                ))),
                 4,
             ))
         }
@@ -556,7 +562,10 @@ async fn read_atyp_addr(reader: &mut BoxReader, atyp: u8) -> Option<(TargetAddr,
         0x04 => {
             let raw = read_exact_vec(reader, 16).await.ok()?;
             let octets: [u8; 16] = raw.try_into().unwrap();
-            Some((TargetAddr::Ip(std::net::IpAddr::V6(Ipv6Addr::from(octets))), 16))
+            Some((
+                TargetAddr::Ip(std::net::IpAddr::V6(Ipv6Addr::from(octets))),
+                16,
+            ))
         }
         _ => None,
     }
@@ -608,7 +617,8 @@ impl TrojanMiddleware {
                 };
 
                 put_streams(ctx, Box::new(reader), writer);
-                ctx.local.set_value(TrojanRequestInfo { hash, target, port });
+                ctx.local
+                    .set_value(TrojanRequestInfo { hash, target, port });
                 true
             }
             .boxed()

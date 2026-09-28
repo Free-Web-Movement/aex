@@ -202,4 +202,3 @@ fn test_protocol_codec_default() {
     let encoded = codec.encode(CommandId::Pong, b"x");
     assert!(codec.decode(&encoded).is_ok());
 }
-

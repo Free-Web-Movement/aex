@@ -52,15 +52,23 @@ async fn nat_service_detected_and_dispatch_on_shared_port() {
     let b = NatTunnelClient::connect("node_b".to_string(), addr)
         .await
         .expect("client b connect failed");
-    b.wait_ready(Duration::from_secs(5)).await.expect("b register failed");
+    b.wait_ready(Duration::from_secs(5))
+        .await
+        .expect("b register failed");
 
     // 数据经 NAT 服务中继（验证 handler 真正接管连接）。
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<aex::nat::TunnelData>();
     b.set_data_channel(tx).await;
-    client.send_to("node_b", b"via-unified-nat".to_vec()).await.expect("send");
+    client
+        .send_to("node_b", b"via-unified-nat".to_vec())
+        .await
+        .expect("send");
     match tokio::time::timeout(Duration::from_secs(3), rx.recv()).await {
         Ok(Some(d)) => assert_eq!(d.payload, b"via-unified-nat".to_vec()),
-        other => panic!("expected message via unified nat, got {:?}", other.map(|o| o.is_none())),
+        other => panic!(
+            "expected message via unified nat, got {:?}",
+            other.map(|o| o.is_none())
+        ),
     }
 }
 

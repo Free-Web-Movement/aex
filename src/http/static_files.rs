@@ -468,7 +468,10 @@ mod tests {
 
     #[test]
     fn html_escape_handles_all_special_chars() {
-        assert_eq!(html_escape("<a href=\"x\">&'"), "&lt;a href=&quot;x&quot;&gt;&amp;&#39;");
+        assert_eq!(
+            html_escape("<a href=\"x\">&'"),
+            "&lt;a href=&quot;x&quot;&gt;&amp;&#39;"
+        );
         assert_eq!(html_escape("plain text"), "plain text");
         assert_eq!(html_escape(""), "");
     }
