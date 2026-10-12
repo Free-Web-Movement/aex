@@ -21,11 +21,11 @@ async fn start_unified_nat_server() -> SocketAddr {
     let actual = probe.local_addr().unwrap();
     drop(probe);
 
-    let server = UnifiedServer::new(actual, globals.clone())
+    let server = UnifiedServer::at(actual, globals.clone())
         .enable_nat(service)
         // 注册 HTTP 检测器，验证与 NAT 同端口共存。
-        .detector(Arc::new(aex::unified::Http11Detector))
-        .detector(Arc::new(aex::unified::Http2Detector));
+        .detector(Arc::new(aex::protocols::http1::Http11Detector))
+        .detector(Arc::new(aex::protocols::http2::Http2Detector));
     tokio::spawn(async move {
         let _ = server.start().await;
     });

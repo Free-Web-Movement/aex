@@ -2,7 +2,11 @@ use aex::connection::context::Context;
 use aex::connection::global::GlobalContext;
 use aex::http::router::Router as HttpRouter;
 use aex::http::websocket::{WSCodec, WSFrame};
-use aex::unified::{Http2Detector, Http11Detector, Protocol, UnifiedServer};
+use aex::protocols::classify::ProtocolKind;
+use aex::protocols::http1::{self, Http1Config};
+use aex::protocols::http2::{self, Http2Config};
+use aex::protocols::tcp::{self, TcpConfig};
+use aex::unified::UnifiedServer;
 use bytes::BytesMut;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -34,36 +38,40 @@ fn setup_unified_server(
 
     let globals = Arc::new(GlobalContext::new(addr, None));
 
-    let mut unified = UnifiedServer::new(addr, globals);
+    let mut unified = UnifiedServer::at(addr, globals);
 
     let tcp_counter_clone = tcp_counter.clone();
 
     // Detection is opt-in since the pluggable pipeline: HTTP/2 first (exact
     // preface), then HTTP/1.x method prefixes.
     unified = unified
-        .http_router(make_http_router())
-        .detector(Arc::new(Http2Detector))
-        .detector(Arc::new(Http11Detector))
-        .tcp_handler(Arc::new(move |mut ctx| {
-            println!("[Test] TCP handler called");
-            let counter = tcp_counter_clone.clone();
-            tokio::spawn(async move {
-                let mut buf = [0u8; 1024];
-                let reader = ctx.reader.as_mut().unwrap();
-                match reader.read(&mut buf).await {
-                    Ok(n) => {
-                        println!("[Test] TCP read {} bytes", n);
-                        counter.fetch_add(1, Ordering::SeqCst);
+        .push(http1::protocol(Http1Config {
+            router: Some(Arc::new(make_http_router())),
+            handler: None,
+            ..Default::default()
+        }))
+        .push(tcp::protocol(TcpConfig {
+            handler: Some(Arc::new(move |mut ctx| {
+                println!("[Test] TCP handler called");
+                let counter = tcp_counter_clone.clone();
+                tokio::spawn(async move {
+                    let mut buf = [0u8; 1024];
+                    let reader = ctx.reader.as_mut().unwrap();
+                    match reader.read(&mut buf).await {
+                        Ok(n) => {
+                            println!("[Test] TCP read {} bytes", n);
+                            counter.fetch_add(1, Ordering::SeqCst);
+                        }
+                        Err(e) => {
+                            println!("[Test] TCP read error: {}", e);
+                        }
                     }
-                    Err(e) => {
-                        println!("[Test] TCP read error: {}", e);
-                    }
-                }
-            })
+                })
+            })),
         }));
 
     if enable_http2 {
-        unified = unified.enable_http2();
+        unified = unified.push(http2::protocol(Http2Config::default()));
     }
 
     (unified, http_counter, ws_counter, tcp_counter)
@@ -314,12 +322,12 @@ async fn test_websocket_frame_codec() {
 #[test]
 fn test_protocol_detect_http1() {
     let bytes = b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n";
-    let protocol = Protocol::detect(bytes, false);
-    assert_eq!(protocol, Protocol::Http11);
+    let protocol = ProtocolKind::detect(bytes, false);
+    assert_eq!(protocol, ProtocolKind::Http11);
 
     let bytes = b"POST /api/data HTTP/1.1\r\nHost: example.com\r\n\r\n";
-    let protocol = Protocol::detect(bytes, false);
-    assert_eq!(protocol, Protocol::Http11);
+    let protocol = ProtocolKind::detect(bytes, false);
+    assert_eq!(protocol, ProtocolKind::Http11);
 
     println!("[Test] Protocol::detect HTTP/1.1: OK");
 }
@@ -327,8 +335,8 @@ fn test_protocol_detect_http1() {
 #[test]
 fn test_protocol_detect_http2() {
     let bytes = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
-    let protocol = Protocol::detect(bytes, false);
-    assert_eq!(protocol, Protocol::Http2);
+    let protocol = ProtocolKind::detect(bytes, false);
+    assert_eq!(protocol, ProtocolKind::Http2);
 
     println!("[Test] Protocol::detect HTTP/2: OK");
 }
@@ -336,8 +344,8 @@ fn test_protocol_detect_http2() {
 #[test]
 fn test_protocol_detect_tcp() {
     let bytes = b"\x00\x01\x02\x03custom_tcp_data";
-    let protocol = Protocol::detect(bytes, false);
-    assert_eq!(protocol, Protocol::TCP);
+    let protocol = ProtocolKind::detect(bytes, false);
+    assert_eq!(protocol, ProtocolKind::TCP);
 
     println!("[Test] Protocol::detect TCP: OK");
 }
@@ -345,8 +353,8 @@ fn test_protocol_detect_tcp() {
 #[test]
 fn test_protocol_detect_udp() {
     let bytes = b"some data";
-    let protocol = Protocol::detect(bytes, true);
-    assert_eq!(protocol, Protocol::UDP);
+    let protocol = ProtocolKind::detect(bytes, true);
+    assert_eq!(protocol, ProtocolKind::UDP);
 
     println!("[Test] Protocol::detect UDP: OK");
 }
@@ -354,8 +362,8 @@ fn test_protocol_detect_udp() {
 #[test]
 fn test_protocol_detect_empty() {
     let bytes: &[u8] = b"";
-    let protocol = Protocol::detect(bytes, false);
-    assert_eq!(protocol, Protocol::Unknown);
+    let protocol = ProtocolKind::detect(bytes, false);
+    assert_eq!(protocol, ProtocolKind::Unknown);
 
     println!("[Test] Protocol::detect empty: OK");
 }

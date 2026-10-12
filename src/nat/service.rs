@@ -10,8 +10,9 @@
 use std::sync::Arc;
 
 use crate::connection::context::Context;
+use crate::protocols::tcp::TCPHandler;
+use crate::unified::DetectorMode;
 use crate::unified::detect::{DetectionState, ProtocolDetector, Verdict};
-use crate::unified::{DetectorMode, TCPHandler};
 
 use super::server::NatRelayService;
 use super::types::{NAT_MAGIC, NAT_MAGIC_LEN};
@@ -89,13 +90,12 @@ pub trait UnifiedServerExt {
 }
 
 impl UnifiedServerExt for crate::unified::UnifiedServer {
-    fn enable_nat(mut self, service: NatRelayService) -> Self {
+    fn enable_nat(self, service: NatRelayService) -> Self {
         if let Err(e) = self.registry.register(Arc::new(NatDetector)) {
             tracing::warn!("[Unified] nat detector registration failed: {}", e);
         }
-        self.custom_handlers
-            .entry(NAT_PROTOCOL.to_string())
-            .or_insert_with(|| nat_tcp_handler(service));
-        self
+        let handler =
+            crate::protocols::tcp::from_handler(NAT_PROTOCOL, Some(nat_tcp_handler(service)));
+        self.push(handler)
     }
 }

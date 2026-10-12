@@ -1,7 +1,10 @@
 use aex::connection::context::Context;
 use aex::connection::global::GlobalContext;
 use aex::http::router::Router as HttpRouter;
-use aex::unified::{Http2Detector, Http11Detector, UnifiedServer};
+use aex::protocols::http1::{self, Http1Config};
+use aex::protocols::http2::{self, Http2Config};
+use aex::protocols::tcp::{self, TcpConfig};
+use aex::unified::UnifiedServer;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -24,36 +27,40 @@ fn setup_unified_server(addr: SocketAddr, enable_http2: bool) -> (UnifiedServer,
 
     let globals = Arc::new(GlobalContext::new(addr, None));
 
-    let mut unified = UnifiedServer::new(addr, globals);
+    let mut unified = UnifiedServer::at(addr, globals);
 
     let counter_for_handler = tcp_counter.clone();
     // Detection is opt-in since the pluggable pipeline: HTTP/2 first (exact
     // preface), then HTTP/1.x method prefixes.
     unified = unified
-        .http_router(make_http_router())
-        .detector(Arc::new(Http2Detector))
-        .detector(Arc::new(Http11Detector))
-        .tcp_handler(Arc::new(move |mut ctx| {
-            println!("[Test] TCP handler called");
-            let counter = counter_for_handler.clone();
-            tokio::spawn(async move {
-                println!("[Test] TCP task spawned");
-                let mut buf = [0u8; 1024];
-                let reader = ctx.reader.as_mut().unwrap();
-                match reader.read(&mut buf).await {
-                    Ok(n) => {
-                        println!("[Test] TCP read {} bytes", n);
-                        counter.fetch_add(1, Ordering::SeqCst);
+        .push(http1::protocol(Http1Config {
+            router: Some(Arc::new(make_http_router())),
+            handler: None,
+            ..Default::default()
+        }))
+        .push(tcp::protocol(TcpConfig {
+            handler: Some(Arc::new(move |mut ctx| {
+                println!("[Test] TCP handler called");
+                let counter = counter_for_handler.clone();
+                tokio::spawn(async move {
+                    println!("[Test] TCP task spawned");
+                    let mut buf = [0u8; 1024];
+                    let reader = ctx.reader.as_mut().unwrap();
+                    match reader.read(&mut buf).await {
+                        Ok(n) => {
+                            println!("[Test] TCP read {} bytes", n);
+                            counter.fetch_add(1, Ordering::SeqCst);
+                        }
+                        Err(e) => {
+                            println!("[Test] TCP read error: {}", e);
+                        }
                     }
-                    Err(e) => {
-                        println!("[Test] TCP read error: {}", e);
-                    }
-                }
-            })
+                })
+            })),
         }));
 
     if enable_http2 {
-        unified = unified.enable_http2();
+        unified = unified.push(http2::protocol(Http2Config::default()));
     }
 
     (unified, tcp_counter)

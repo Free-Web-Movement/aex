@@ -1,6 +1,6 @@
 //! End-to-end trojan-over-TLS demo on a single port.
 //!
-//! Chain: `TlsDetector` (sniff) → custom_handler("tls") →
+//! Chain: `TlsDetector` (sniff) → `tcp::from_handler("tls")` →
 //! [`TlsMiddleware::accept`] (terminate TLS with cert/key) →
 //! [`TrojanMiddleware::validate`] (parse + strip request header, stash target
 //! into ctx.local) → report.
@@ -24,6 +24,7 @@ use tokio::io::AsyncWriteExt;
 use aex::connection::context::Context;
 use aex::connection::global::GlobalContext;
 use aex::http::types::Executor;
+use aex::protocols::tcp;
 use aex::unified::UnifiedServer;
 
 async fn run(cert: String, key: String) -> anyhow::Result<()> {
@@ -48,11 +49,11 @@ async fn run(cert: String, key: String) -> anyhow::Result<()> {
         })
     };
 
-    let server = UnifiedServer::new(addr, globals)
+    let server = UnifiedServer::at(addr, globals)
         .detector(Arc::new(TlsDetector))
-        .custom_handler(
+        .push(tcp::from_handler(
             "tls",
-            Arc::new(move |ctx: Context| {
+            Some(Arc::new(move |ctx: Context| {
                 let chain = chain.clone();
                 tokio::spawn(async move {
                     let mut ctx = ctx;
@@ -81,8 +82,8 @@ async fn run(cert: String, key: String) -> anyhow::Result<()> {
                         }
                     }
                 })
-            }),
-        );
+            })),
+        ));
 
     eprintln!("detector_trojan listening on {addr} (cert={cert})");
     server.start().await

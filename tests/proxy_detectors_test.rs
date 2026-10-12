@@ -29,6 +29,7 @@ use tokio_rustls::rustls::{
 
 use aex::connection::context::{BoxReader, Context};
 use aex::connection::global::GlobalContext;
+use aex::protocols::tcp;
 use aex::unified::UnifiedServer;
 
 // ---------------------------------------------------------------------------
@@ -44,7 +45,7 @@ fn free_addr() -> SocketAddr {
 
 fn spawn_server(addr: SocketAddr, configure: impl FnOnce(UnifiedServer) -> UnifiedServer) {
     let globals = Arc::new(GlobalContext::new(addr, None));
-    let server = configure(UnifiedServer::new(addr, globals));
+    let server = configure(UnifiedServer::at(addr, globals));
     tokio::spawn(async move {
         if let Err(e) = server.start().await {
             eprintln!("server exited: {e}");
@@ -261,9 +262,9 @@ async fn tls_sniff_and_termination_e2e() {
 
     spawn_server(addr, |s| {
         s.detector(Arc::new(TlsDetector))
-            .custom_handler(
+            .push(tcp::from_handler(
                 "tls",
-                Arc::new(move |ctx: Context| {
+                Some(Arc::new(move |ctx: Context| {
                     let loader = loader.clone();
                     tokio::spawn(async move {
                         let mut ctx = ctx;
@@ -282,15 +283,17 @@ async fn tls_sniff_and_termination_e2e() {
                             let _ = w.write_all(msg.as_bytes()).await;
                         }
                     })
-                }),
-            )
-            .tcp_handler(Arc::new(|ctx: Context| {
-                tokio::spawn(async move {
-                    let mut ctx = ctx;
-                    if let Some(w) = ctx.writer.as_mut() {
-                        let _ = w.write_all(b"plain\n").await;
-                    }
-                })
+                })),
+            ))
+            .push(tcp::protocol(tcp::TcpConfig {
+                handler: Some(Arc::new(|ctx: Context| {
+                    tokio::spawn(async move {
+                        let mut ctx = ctx;
+                        if let Some(w) = ctx.writer.as_mut() {
+                            let _ = w.write_all(b"plain\n").await;
+                        }
+                    })
+                })),
             }))
     });
     wait_listening(addr).await;
@@ -324,9 +327,9 @@ async fn trojan_over_tls_e2e() {
     let loader = TlsLoader::from_der(vec![cert], der_key(key)).unwrap();
 
     spawn_server(addr, |s| {
-        s.detector(Arc::new(TlsDetector)).custom_handler(
+        s.detector(Arc::new(TlsDetector)).push(tcp::from_handler(
             "tls",
-            Arc::new(move |ctx: Context| {
+            Some(Arc::new(move |ctx: Context| {
                 let loader = loader.clone();
                 tokio::spawn(async move {
                     let mut ctx = ctx;
@@ -350,8 +353,8 @@ async fn trojan_over_tls_e2e() {
                         let _ = r.read_to_end(&mut rest).await;
                     }
                 })
-            }),
-        )
+            })),
+        ))
     });
     wait_listening(addr).await;
 
@@ -383,9 +386,9 @@ async fn vless_over_tls_e2e() {
     let loader = TlsLoader::from_der(vec![cert], der_key(key)).unwrap();
 
     spawn_server(addr, |s| {
-        s.detector(Arc::new(TlsDetector)).custom_handler(
+        s.detector(Arc::new(TlsDetector)).push(tcp::from_handler(
             "tls",
-            Arc::new(move |ctx: Context| {
+            Some(Arc::new(move |ctx: Context| {
                 let loader = loader.clone();
                 tokio::spawn(async move {
                     let mut ctx = ctx;
@@ -404,8 +407,8 @@ async fn vless_over_tls_e2e() {
                             .await;
                     }
                 })
-            }),
-        )
+            })),
+        ))
     });
     wait_listening(addr).await;
 
@@ -439,9 +442,9 @@ async fn vless_over_tls_e2e() {
 async fn socks5_sniff_dispatch_e2e() {
     let addr = free_addr();
     spawn_server(addr, |s| {
-        s.detector(Arc::new(SocksDetector)).custom_handler(
+        s.detector(Arc::new(SocksDetector)).push(tcp::from_handler(
             "socks",
-            Arc::new(|ctx: Context| {
+            Some(Arc::new(|ctx: Context| {
                 tokio::spawn(async move {
                     let mut ctx = ctx;
                     let version = ctx
@@ -457,8 +460,8 @@ async fn socks5_sniff_dispatch_e2e() {
                         let _ = w.write_all(line.as_bytes()).await;
                     }
                 })
-            }),
-        )
+            })),
+        ))
     });
     wait_listening(addr).await;
 

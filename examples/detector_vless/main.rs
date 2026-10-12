@@ -21,6 +21,7 @@ use tokio::io::AsyncWriteExt;
 use aex::connection::context::Context;
 use aex::connection::global::GlobalContext;
 use aex::http::types::Executor;
+use aex::protocols::tcp;
 use aex::unified::UnifiedServer;
 
 fn uuid_str(b: &[u8; 16]) -> String {
@@ -59,11 +60,11 @@ async fn run(cert: String, key: String) -> anyhow::Result<()> {
         })
     };
 
-    let server = UnifiedServer::new(addr, globals)
+    let server = UnifiedServer::at(addr, globals)
         .detector(Arc::new(TlsDetector))
-        .custom_handler(
+        .push(tcp::from_handler(
             "tls",
-            Arc::new(move |ctx: Context| {
+            Some(Arc::new(move |ctx: Context| {
                 let chain = chain.clone();
                 tokio::spawn(async move {
                     let mut ctx = ctx;
@@ -87,8 +88,8 @@ async fn run(cert: String, key: String) -> anyhow::Result<()> {
                             .await;
                     }
                 })
-            }),
-        );
+            })),
+        ));
 
     eprintln!("detector_vless listening on {addr} (cert={cert})");
     server.start().await

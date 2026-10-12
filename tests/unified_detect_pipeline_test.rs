@@ -5,6 +5,7 @@
 
 use aex::connection::context::Context;
 use aex::connection::global::GlobalContext;
+use aex::protocols::{http1, tcp};
 use aex::unified::{
     DetectionState, DetectorMode, DetectorRegistry, ProtocolDetector, UnifiedServer, Verdict,
 };
@@ -79,11 +80,11 @@ async fn custom_detector_routes_to_custom_handler() {
     let handler_hits = hits.clone();
     let (detector, consults) = MagicDetector::standard(b"MAGIC1", "magic-proto");
 
-    let server = UnifiedServer::new(addr, Arc::new(GlobalContext::new(addr, None)))
+    let server = UnifiedServer::at(addr, Arc::new(GlobalContext::new(addr, None)))
         .detector(Arc::new(detector))
-        .custom_handler(
+        .push(tcp::from_handler(
             "magic-proto",
-            Arc::new(move |mut ctx| {
+            Some(Arc::new(move |mut ctx| {
                 let hits = handler_hits.clone();
                 tokio::spawn(async move {
                     // Link state must be attached to the context.
@@ -110,8 +111,8 @@ async fn custom_detector_routes_to_custom_handler() {
                         .ok();
                     hits.fetch_add(1, Ordering::SeqCst);
                 })
-            }),
-        );
+            })),
+        ));
 
     tokio::spawn(async move { server.start().await.ok() });
     sleep(Duration::from_millis(100)).await;
@@ -160,19 +161,21 @@ async fn forward_mode_terminates_detection_and_forwards_directly() {
     let http_handler_hits = http_hits.clone();
     // The forwarder's handler echoes whatever it receives.
     let fw = forward_hits.clone();
-    let server = UnifiedServer::new(addr, Arc::new(GlobalContext::new(addr, None)))
+    let server = UnifiedServer::at(addr, Arc::new(GlobalContext::new(addr, None)))
         .detector(Arc::new(NatForwarder(nat_hits)))
-        .detector(Arc::new(aex::unified::Http11Detector))
-        .http_handler(Arc::new(move |_ctx| {
-            let http_hits = http_handler_hits.clone();
-            Box::pin(async move {
-                http_hits.fetch_add(1, Ordering::SeqCst);
-                true
-            })
+        .push(http1::protocol(http1::Http1Config {
+            handler: Some(Arc::new(move |_ctx| {
+                let http_hits = http_handler_hits.clone();
+                Box::pin(async move {
+                    http_hits.fetch_add(1, Ordering::SeqCst);
+                    true
+                })
+            })),
+            ..Default::default()
         }))
-        .custom_handler(
+        .push(tcp::from_handler(
             "nat-flow",
-            Arc::new(move |mut ctx| {
+            Some(Arc::new(move |mut ctx| {
                 let fw = fw.clone();
                 tokio::spawn(async move {
                     let mut buf = Vec::new();
@@ -185,8 +188,8 @@ async fn forward_mode_terminates_detection_and_forwards_directly() {
                         .ok();
                     fw.fetch_add(1, Ordering::SeqCst);
                 })
-            }),
-        );
+            })),
+        ));
 
     tokio::spawn(async move { server.start().await.ok() });
     sleep(Duration::from_millis(100)).await;
@@ -224,21 +227,23 @@ async fn empty_registry_is_pure_tcp_passthrough() {
 
     // No detectors registered at all: nothing is peeked, everything goes to
     // the TCP handler verbatim.
-    let server = UnifiedServer::new(addr, Arc::new(GlobalContext::new(addr, None))).tcp_handler(
-        Arc::new(move |mut ctx| {
-            let h = h.clone();
-            tokio::spawn(async move {
-                let mut buf = [0u8; 64];
-                let n = ctx
-                    .reader
-                    .as_mut()
-                    .unwrap()
-                    .read(&mut buf)
-                    .await
-                    .unwrap_or(0);
-                assert_eq!(&buf[..n], b"raw-bytes");
-                h.fetch_add(1, Ordering::SeqCst);
-            })
+    let server = UnifiedServer::at(addr, Arc::new(GlobalContext::new(addr, None))).push(
+        tcp::protocol(tcp::TcpConfig {
+            handler: Some(Arc::new(move |mut ctx| {
+                let h = h.clone();
+                tokio::spawn(async move {
+                    let mut buf = [0u8; 64];
+                    let n = ctx
+                        .reader
+                        .as_mut()
+                        .unwrap()
+                        .read(&mut buf)
+                        .await
+                        .unwrap_or(0);
+                    assert_eq!(&buf[..n], b"raw-bytes");
+                    h.fetch_add(1, Ordering::SeqCst);
+                })
+            })),
         }),
     );
 
@@ -262,35 +267,37 @@ async fn runtime_unregister_stops_claiming() {
 
     let ch = custom_hits.clone();
     let th = tcp_hits.clone();
-    let server = UnifiedServer::new(addr, Arc::new(GlobalContext::new(addr, None)))
+    let server = UnifiedServer::at(addr, Arc::new(GlobalContext::new(addr, None)))
         .with_registry(registry.clone())
         .detector(Arc::new(detector))
-        .custom_handler(
+        .push(tcp::from_handler(
             "magic2",
-            Arc::new(move |_ctx| {
+            Some(Arc::new(move |_ctx| {
                 let ch = ch.clone();
                 tokio::spawn(async move {
                     ch.fetch_add(1, Ordering::SeqCst);
                 })
-            }),
-        )
+            })),
+        ))
         // TCP fallback reads the (chained) initial bytes to distinguish a
         // genuine passthrough from a claimed-but-unhandled protocol.
-        .tcp_handler(Arc::new(move |mut ctx| {
-            let th = th.clone();
-            tokio::spawn(async move {
-                let mut buf = [0u8; 16];
-                let n = ctx
-                    .reader
-                    .as_mut()
-                    .unwrap()
-                    .read(&mut buf)
-                    .await
-                    .unwrap_or(0);
-                if buf[..n].starts_with(b"MAGIC2-y") {
-                    th.fetch_add(1, Ordering::SeqCst);
-                }
-            })
+        .push(tcp::protocol(tcp::TcpConfig {
+            handler: Some(Arc::new(move |mut ctx| {
+                let th = th.clone();
+                tokio::spawn(async move {
+                    let mut buf = [0u8; 16];
+                    let n = ctx
+                        .reader
+                        .as_mut()
+                        .unwrap()
+                        .read(&mut buf)
+                        .await
+                        .unwrap_or(0);
+                    if buf[..n].starts_with(b"MAGIC2-y") {
+                        th.fetch_add(1, Ordering::SeqCst);
+                    }
+                })
+            })),
         }));
 
     tokio::spawn(async move { server.start().await.ok() });

@@ -1,0 +1,211 @@
+//! HTTP/2 protocol handler.
+//!
+//! Owns its detector ([`Http2Detector`]) and its request handler. The
+//! connection's split halves are re-united into a single `AsyncRead +
+//! AsyncWrite` stream so the `h2` handshake can run, then each request stream
+//! builds its own short-lived [`Context`] carrying an [`HttpMetadata`].
+
+use std::pin::Pin;
+use std::sync::Arc;
+use std::task::{Context as TaskContext, Poll};
+
+use bytes::Bytes;
+use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
+
+use crate::connection::context::{BoxReader, BoxWriter, Context};
+use crate::http::meta::HttpMetadata;
+use crate::http::middlewares::websocket::WebSocket;
+use crate::http::protocol::header::HeaderKey;
+use crate::http::protocol::method::HttpMethod;
+use crate::http::protocol::version::HttpVersion;
+use crate::protocols::classify::H2_CONNECTION_PREFACE;
+use crate::unified::detect::{DetectionState, ProtocolDetector, Verdict};
+use crate::unified::handler::{Outcome, ProtocolHandler};
+
+/// HTTP/2 request handler.
+pub type Http2Handler =
+    Arc<dyn Fn(&mut Context) -> futures::future::BoxFuture<'static, bool> + Send + Sync>;
+
+/// Configuration for the HTTP/2 handler.
+#[derive(Clone, Default)]
+pub struct Http2Config {
+    /// The request handler invoked for every HTTP/2 request stream.
+    pub handler: Option<Http2Handler>,
+}
+
+/// Build the HTTP/2 [`ProtocolHandler`].
+pub fn protocol(cfg: Http2Config) -> Arc<ProtocolHandler<Bytes>> {
+    let http2 = ProtocolHandler::new(
+        "http2",
+        move |_handler: &ProtocolHandler<Bytes>, ctx: &mut Context| {
+            let cfg = cfg.clone();
+            Box::pin(async move { handle(&cfg, ctx).await })
+        },
+    )
+    .with_detector(Arc::new(Http2Detector));
+    Arc::new(http2)
+}
+
+/// Serve one HTTP/2 connection.
+pub async fn handle(cfg: &Http2Config, ctx: &mut Context) -> Outcome {
+    let io = Reunited {
+        reader: ctx.reader.take(),
+        writer: ctx.writer.take(),
+    };
+
+    let mut conn = match h2::server::handshake(io).await {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!("[H2] handshake failed: {}", e);
+            return Outcome::Done;
+        }
+    };
+
+    let globals = ctx.global.clone();
+    let peer_addr = ctx.addr;
+
+    loop {
+        tokio::select! {
+            frame = conn.accept() => {
+                match frame {
+                    Some(Ok((request, mut responder))) => {
+                        let path = request.uri().path().to_string();
+                        let method_str = request.method().as_str();
+                        let http_method = HttpMethod::from_str(method_str).unwrap_or(HttpMethod::GET);
+
+                        let mut meta = HttpMetadata::default();
+                        meta.method = http_method;
+                        meta.path = path.clone();
+                        meta.version = HttpVersion::Http20;
+
+                        for (name, value) in request.headers() {
+                            if let Some(header_key) = HeaderKey::from_str(name.as_str()) {
+                                if let Ok(val) = value.to_str() {
+                                    meta.headers.insert(header_key, val.to_string());
+                                }
+                            }
+                        }
+
+                        let is_ws = WebSocket::check(http_method, &meta.headers);
+                        if is_ws {
+                            meta.is_websocket = true;
+                        }
+
+                        let mut stream_ctx = Context::new(None, None, globals.clone(), peer_addr);
+                        stream_ctx.set(meta);
+
+                        if let Some(h) = &cfg.handler {
+                            h(&mut stream_ctx).await;
+                        } else {
+                            tracing::warn!("[H2] No HTTP/2 handler registered");
+                        }
+
+                        let meta = stream_ctx.local.get_ref::<HttpMetadata>();
+                        let status = if let Some(m) = meta {
+                            m.status.to_http_status()
+                        } else {
+                            http::StatusCode::OK
+                        };
+                        let mut body_str = String::new();
+                        if let Some(m) = meta {
+                            body_str = String::from_utf8_lossy(&m.body).to_string();
+                        }
+
+                        let resp_builder = http::Response::builder().status(status);
+
+                        match resp_builder.body(()) {
+                            Ok(resp) => {
+                                if let Ok(mut send_stream) = responder.send_response(resp, false) {
+                                    let _ = send_stream.send_data(Bytes::from(body_str), true);
+                                }
+                            }
+                            Err(e) => {
+                                tracing::warn!("[H2] build response failed: {}", e);
+                            }
+                        }
+                    }
+                    Some(Err(e)) => {
+                        tracing::warn!("[H2] frame error: {}", e);
+                    }
+                    None => break,
+                }
+            }
+        }
+    }
+    Outcome::Done
+}
+
+/// Detector for the HTTP/2 connection preface.
+pub struct Http2Detector;
+
+impl ProtocolDetector for Http2Detector {
+    fn name(&self) -> &str {
+        "http2"
+    }
+
+    fn protocol(&self) -> &str {
+        "http2"
+    }
+
+    fn max_need(&self) -> Option<usize> {
+        Some(H2_CONNECTION_PREFACE.len())
+    }
+
+    fn detect(&self, buf: &[u8], _state: &mut DetectionState) -> Verdict {
+        let preface = H2_CONNECTION_PREFACE;
+        if buf.starts_with(preface) {
+            return Verdict::Match;
+        }
+        let shared = preface
+            .iter()
+            .zip(buf.iter())
+            .take_while(|(a, b)| a == b)
+            .count();
+        if shared > 0 {
+            return Verdict::NeedMore(preface.len() - shared);
+        }
+        Verdict::Pass
+    }
+}
+
+/// Re-unites the already-split connection halves into a single stream so a
+/// protocol needing `AsyncRead + AsyncWrite` (the `h2` handshake) can run.
+struct Reunited {
+    reader: Option<BoxReader>,
+    writer: Option<BoxWriter>,
+}
+
+impl AsyncRead for Reunited {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut TaskContext<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        let r = self.reader.as_mut().expect("reader taken");
+        Pin::new(r).poll_read(cx, buf)
+    }
+}
+
+impl AsyncWrite for Reunited {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut TaskContext<'_>,
+        buf: &[u8],
+    ) -> Poll<std::io::Result<usize>> {
+        let w = self.writer.as_mut().expect("writer taken");
+        Pin::new(w).poll_write(cx, buf)
+    }
+
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut TaskContext<'_>) -> Poll<std::io::Result<()>> {
+        let w = self.writer.as_mut().expect("writer taken");
+        Pin::new(w).poll_flush(cx)
+    }
+
+    fn poll_shutdown(
+        mut self: Pin<&mut Self>,
+        cx: &mut TaskContext<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        let w = self.writer.as_mut().expect("writer taken");
+        Pin::new(w).poll_shutdown(cx)
+    }
+}

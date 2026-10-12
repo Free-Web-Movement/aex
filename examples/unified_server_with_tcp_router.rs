@@ -3,8 +3,9 @@ use aex::connection::global::GlobalContext;
 use aex::http::middlewares::websocket::WebSocket;
 use aex::http::router::Router as HttpRouter;
 use aex::http::types::Executor;
+use aex::protocols::{http1, http2, tcp, udp};
 use aex::tcp::types::{Codec, Command, Frame};
-use aex::unified::{Http2Detector, Http11Detector, UnifiedServer};
+use aex::unified::UnifiedServer;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -53,7 +54,7 @@ async fn main() -> anyhow::Result<()> {
     let addr: SocketAddr = "0.0.0.0:8080".parse()?;
 
     let globals = Arc::new(GlobalContext::new(addr, None));
-    let mut unified = UnifiedServer::new(addr, globals);
+    let mut unified = UnifiedServer::at(addr, globals);
 
     let mut router = HttpRouter::new(aex::http::router::NodeType::default());
 
@@ -114,64 +115,71 @@ s.close()
         .middleware(ws_middleware);
 
     unified = unified
-        .http_router(router)
-        .enable_http2()
-        // Detection is opt-in: explicitly register the HTTP detectors so
-        // HTTP/1.1 and HTTP/2 traffic is routed to the HTTP paths.
-        .detector(Arc::new(Http2Detector))
-        .detector(Arc::new(Http11Detector))
-        .tcp_handler(Arc::new(move |mut ctx| {
-            tokio::spawn(async move {
-                let mut buf = [0u8; 4096];
-                let mut reader = match ctx.reader.take() {
-                    Some(r) => r,
-                    None => return,
-                };
-                match reader.read(&mut buf).await {
-                    Ok(n) => {
-                        if n > 0 {
-                            let data = &buf[..n];
-                            match MyFrame::decode(data) {
-                                Ok(frame) => {
-                                    println!(
-                                        "[TCP Frame] id={}, data={:?}",
-                                        frame.id,
-                                        String::from_utf8_lossy(&frame.data)
-                                    );
+        // Each protocol bundles its own detector, so mounting it also opts it
+        // into detection (HTTP/1.1 and HTTP/2 traffic is routed to the HTTP
+        // paths, everything else falls through to the TCP/UDP handlers).
+        .push(http1::protocol(http1::Http1Config {
+            router: Some(Arc::new(router)),
+            handler: None,
+            ..Default::default()
+        }))
+        .push(http2::protocol(http2::Http2Config::default()))
+        .push(tcp::protocol(tcp::TcpConfig {
+            handler: Some(Arc::new(move |mut ctx| {
+                tokio::spawn(async move {
+                    let mut buf = [0u8; 4096];
+                    let mut reader = match ctx.reader.take() {
+                        Some(r) => r,
+                        None => return,
+                    };
+                    match reader.read(&mut buf).await {
+                        Ok(n) => {
+                            if n > 0 {
+                                let data = &buf[..n];
+                                match MyFrame::decode(data) {
+                                    Ok(frame) => {
+                                        println!(
+                                            "[TCP Frame] id={}, data={:?}",
+                                            frame.id,
+                                            String::from_utf8_lossy(&frame.data)
+                                        );
 
-                                    let response = MyCommand {
-                                        id: frame.id,
-                                        data: b"ACK".to_vec(),
-                                    };
-                                    let encoded = Codec::encode(&response).unwrap();
+                                        let response = MyCommand {
+                                            id: frame.id,
+                                            data: b"ACK".to_vec(),
+                                        };
+                                        let encoded = Codec::encode(&response).unwrap();
 
-                                    if let Some(mut w) = ctx.writer.take() {
-                                        let _ = w.write_all(&encoded).await;
-                                        let _ = w.flush().await;
+                                        if let Some(mut w) = ctx.writer.take() {
+                                            let _ = w.write_all(&encoded).await;
+                                            let _ = w.flush().await;
+                                        }
                                     }
-                                }
-                                Err(e) => {
-                                    println!("[TCP Frame] Decode error: {}", e);
-                                    if let Some(mut w) = ctx.writer.take() {
-                                        let _ = w.write_all(b"[TCP] Invalid frame\n").await;
-                                        let _ = w.flush().await;
+                                    Err(e) => {
+                                        println!("[TCP Frame] Decode error: {}", e);
+                                        if let Some(mut w) = ctx.writer.take() {
+                                            let _ = w.write_all(b"[TCP] Invalid frame\n").await;
+                                            let _ = w.flush().await;
+                                        }
                                     }
                                 }
                             }
                         }
+                        Err(e) => {
+                            println!("[TCP] Read error: {}", e);
+                        }
                     }
-                    Err(e) => {
-                        println!("[TCP] Read error: {}", e);
-                    }
-                }
-            })
+                })
+            })),
         }))
-        .udp_handler(Arc::new(|ctx| {
-            tokio::spawn(async move {
-                if let Some(data) = ctx.local.get_value::<Vec<u8>>() {
-                    println!("[UDP] Received {} bytes", data.len());
-                }
-            })
+        .push(udp::protocol(udp::UdpConfig {
+            handler: Some(Arc::new(|ctx| {
+                tokio::spawn(async move {
+                    if let Some(data) = ctx.local.get_value::<Vec<u8>>() {
+                        println!("[UDP] Received {} bytes", data.len());
+                    }
+                })
+            })),
         }));
 
     println!("===========================================");

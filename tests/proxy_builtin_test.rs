@@ -58,7 +58,7 @@ async fn spawn_upstream(body: &'static str) -> SocketAddr {
 
 fn spawn_server(addr: SocketAddr, configure: impl FnOnce(UnifiedServer) -> UnifiedServer) {
     let globals = Arc::new(GlobalContext::new(addr, None));
-    let server = configure(UnifiedServer::new(addr, globals));
+    let server = configure(UnifiedServer::at(addr, globals));
     tokio::spawn(async move {
         if let Err(e) = server.start().await {
             eprintln!("server exited: {e}");
@@ -104,7 +104,12 @@ async fn read_all(sock: &mut TcpStream) -> String {
 async fn one_port_serves_website_and_http_proxy() {
     let upstream = spawn_upstream("UPSTREAM").await;
     let addr = free_addr();
-    spawn_server(addr, |s| s.enable_http_proxy());
+    spawn_server(addr, |s| {
+        s.push(aex::protocols::proxy::http_proxy(
+            aex::protocols::http1::Http1Config::default(),
+            None,
+        ))
+    });
     wait_listening(addr).await;
 
     // 1) Origin-form → website traffic: no handler registered, so we expect
@@ -136,7 +141,12 @@ async fn one_port_serves_website_and_http_proxy() {
 async fn connect_tunnel_relays_raw_bytes() {
     let upstream = spawn_upstream("TUNNELED").await;
     let addr = free_addr();
-    spawn_server(addr, |s| s.enable_http_proxy());
+    spawn_server(addr, |s| {
+        s.push(aex::protocols::proxy::http_proxy(
+            aex::protocols::http1::Http1Config::default(),
+            None,
+        ))
+    });
     wait_listening(addr).await;
 
     let mut sock = TcpStream::connect(addr).await.unwrap();
@@ -174,7 +184,7 @@ async fn connect_tunnel_relays_raw_bytes() {
 async fn socks5_no_auth_connect() {
     let upstream = spawn_upstream("SOCKS5").await;
     let addr = free_addr();
-    spawn_server(addr, |s| s.enable_socks_proxy());
+    spawn_server(addr, |s| s.push(aex::protocols::socks::protocol(None)));
     wait_listening(addr).await;
 
     let mut s = TcpStream::connect(addr).await.unwrap();
@@ -213,8 +223,9 @@ async fn socks5_with_user_pass_auth() {
     let upstream = spawn_upstream("AUTH").await;
     let addr = free_addr();
     spawn_server(addr, |s| {
-        s.enable_socks_proxy()
-            .proxy_authenticator(Arc::new(|u, p| u == "alice" && p == "wonderland"))
+        s.push(aex::protocols::socks::protocol(Some(Arc::new(|u, p| {
+            u == "alice" && p == "wonderland"
+        }))))
     });
     wait_listening(addr).await;
 
@@ -262,7 +273,7 @@ async fn socks4_and_v4a_domain() {
     };
 
     let addr = free_addr();
-    spawn_server(addr, |s| s.enable_socks_proxy());
+    spawn_server(addr, |s| s.push(aex::protocols::socks::protocol(None)));
     wait_listening(addr).await;
 
     // --- plain SOCKS4 ---
@@ -314,8 +325,9 @@ async fn socks4_and_v4a_domain() {
 async fn socks5_no_acceptable_auth_rejected() {
     let addr = free_addr();
     spawn_server(addr, |s| {
-        s.enable_socks_proxy()
-            .proxy_authenticator(Arc::new(|u, p| u == "alice" && p == "wonderland"))
+        s.push(aex::protocols::socks::protocol(Some(Arc::new(|u, p| {
+            u == "alice" && p == "wonderland"
+        }))))
     });
     wait_listening(addr).await;
 
@@ -334,7 +346,7 @@ async fn socks5_no_acceptable_auth_rejected() {
 #[tokio::test]
 async fn socks5_unsupported_command_rejected() {
     let addr = free_addr();
-    spawn_server(addr, |s| s.enable_socks_proxy());
+    spawn_server(addr, |s| s.push(aex::protocols::socks::protocol(None)));
     wait_listening(addr).await;
 
     let mut s = TcpStream::connect(addr).await.unwrap();
@@ -354,7 +366,7 @@ async fn socks5_unsupported_command_rejected() {
 #[tokio::test]
 async fn socks5_unsupported_atyp_rejected() {
     let addr = free_addr();
-    spawn_server(addr, |s| s.enable_socks_proxy());
+    spawn_server(addr, |s| s.push(aex::protocols::socks::protocol(None)));
     wait_listening(addr).await;
 
     let mut s = TcpStream::connect(addr).await.unwrap();
@@ -374,7 +386,7 @@ async fn socks5_unsupported_atyp_rejected() {
 #[tokio::test]
 async fn socks4_non_connect_rejected() {
     let addr = free_addr();
-    spawn_server(addr, |s| s.enable_socks_proxy());
+    spawn_server(addr, |s| s.push(aex::protocols::socks::protocol(None)));
     wait_listening(addr).await;
 
     // VER=4, CMD=0x02 (BIND), unsupported.
@@ -390,7 +402,7 @@ async fn socks4_non_connect_rejected() {
 #[tokio::test]
 async fn socks5_connect_to_unreachable_reports_failure() {
     let addr = free_addr();
-    spawn_server(addr, |s| s.enable_socks_proxy());
+    spawn_server(addr, |s| s.push(aex::protocols::socks::protocol(None)));
     wait_listening(addr).await;
 
     // Reserve a port then drop the listener so connect gets RST (deterministic).
@@ -435,7 +447,7 @@ async fn socks5_ipv6_atyp_connect() {
     });
 
     let addr = free_addr();
-    spawn_server(addr, |s| s.enable_socks_proxy());
+    spawn_server(addr, |s| s.push(aex::protocols::socks::protocol(None)));
     wait_listening(addr).await;
 
     let mut s = TcpStream::connect(addr).await.unwrap();
@@ -470,7 +482,7 @@ async fn socks5_ipv6_atyp_connect() {
 async fn socks5_domain_atyp_connect() {
     let upstream = spawn_upstream("SOCKS5-DOMAIN").await;
     let addr = free_addr();
-    spawn_server(addr, |s| s.enable_socks_proxy());
+    spawn_server(addr, |s| s.push(aex::protocols::socks::protocol(None)));
     wait_listening(addr).await;
 
     let mut s = TcpStream::connect(addr).await.unwrap();

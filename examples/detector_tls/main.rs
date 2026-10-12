@@ -18,6 +18,7 @@ use tokio::io::AsyncWriteExt;
 
 use aex::connection::context::Context;
 use aex::connection::global::GlobalContext;
+use aex::protocols::tcp;
 use aex::unified::UnifiedServer;
 use aex::unified::detect::DetectionState;
 
@@ -37,17 +38,22 @@ async fn sni_echo(mut ctx: Context) {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let addr: SocketAddr = "127.0.0.1:9443".parse()?;
-    let server = UnifiedServer::new(addr, Arc::new(GlobalContext::new(addr, None)))
+    let server = UnifiedServer::at(addr, Arc::new(GlobalContext::new(addr, None)))
         .detector(Arc::new(TlsDetector))
-        .custom_handler("tls", Arc::new(|ctx: Context| tokio::spawn(sni_echo(ctx))))
-        .tcp_handler(Arc::new(|ctx: Context| {
-            tokio::spawn(async move {
-                let mut ctx = ctx;
-                // Non-TLS traffic lands here.
-                if let Some(w) = ctx.writer.as_mut() {
-                    let _ = w.write_all(b"plain tcp\n").await;
-                }
-            })
+        .push(tcp::from_handler(
+            "tls",
+            Some(Arc::new(|ctx: Context| tokio::spawn(sni_echo(ctx)))),
+        ))
+        .push(tcp::protocol(tcp::TcpConfig {
+            handler: Some(Arc::new(|ctx: Context| {
+                tokio::spawn(async move {
+                    let mut ctx = ctx;
+                    // Non-TLS traffic lands here.
+                    if let Some(w) = ctx.writer.as_mut() {
+                        let _ = w.write_all(b"plain tcp\n").await;
+                    }
+                })
+            })),
         }));
 
     eprintln!("detector_tls listening on {addr}");
