@@ -18,7 +18,9 @@ use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::path::PathBuf;
 
 use aex::http::router::Router as HttpRouter;
-use aex::server::HTTPServer;
+use aex::protocols::{http1::Http1, tcp::Tcp};
+use aex::unified::Server;
+use std::sync::Arc;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -65,7 +67,16 @@ async fn main() -> anyhow::Result<()> {
     }
     println!("Press Ctrl+C to stop.");
 
-    HTTPServer::new(addr, None).http(router).start().await?;
+    let server = Server::solo(addr).push(
+        Tcp::new(None)
+            .sub(Http1::new(Some(Arc::new(router)), None).shared())
+            .shared(),
+    );
+    tokio::spawn(async move {
+        if let Err(e) = server.start().await {
+            eprintln!("server error: {e}");
+        }
+    });
     tokio::signal::ctrl_c().await?;
     Ok(())
 }

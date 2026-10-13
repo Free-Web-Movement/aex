@@ -11,10 +11,13 @@ use aex::connection::context::Context;
 use aex::http::middlewares::websocket::WebSocket;
 use aex::http::router::Router as HttpRouter;
 use aex::http::types::Executor;
-use aex::server::Server;
+use aex::protocols::http1::Http1;
+use aex::protocols::http2::Http2;
+use aex::protocols::tcp::Tcp;
 use aex::tcp::types::Codec;
 use aex::tcp::types::RawCodec;
 use aex::udp::router::Router as UdpRouter;
+use aex::unified::Server;
 use anyhow::Result;
 
 fn setup_http() -> HttpRouter {
@@ -72,15 +75,23 @@ async fn main() -> Result<()> {
     http.get("/ws", |_ctx: &mut Context| true)
         .middleware(setup_ws());
 
-    let srv = Server::new(addr, None).http(http).http2();
+    let srv = Server::solo(addr)
+        .push(
+            Tcp::new(None)
+                .sub(Http1::new(Some(std::sync::Arc::new(http)), None).shared())
+                .sub(Http2::new(None).shared())
+                .shared(),
+        );
+    let globals = srv.globals.clone();
     tokio::spawn(async move {
         let _ = srv.start().await;
     });
 
     // Framed UDP
-    let udp_srv = Server::new(addr, None).udp(setup_framed_udp());
+    let udp_router = std::sync::Arc::new(setup_framed_udp());
+    let socket = std::sync::Arc::new(tokio::net::UdpSocket::bind(addr).await?);
     tokio::spawn(async move {
-        let _ = udp_srv.start_with_protocols::<RawCodec, RawCodec>().await;
+        let _ = udp_router.handle(globals, socket).await;
     });
 
     println!("Started. Ctrl+C to stop.\n");

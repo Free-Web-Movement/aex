@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use aex::connection::context::Context;
 use aex::connection::global::GlobalContext;
-use aex::protocols::http1::{Http1Config, HttpHandler};
+use aex::protocols::http1::{Http1, HttpHandler};
 use aex::proxy::ProxyAuthorizer;
 use aex::unified::UnifiedServer;
 
@@ -43,10 +43,8 @@ async fn main() -> anyhow::Result<()> {
         // and the HTTP forward proxy (absolute-form / CONNECT), gated by the
         // same credentials.
         .push(aex::protocols::proxy::http_proxy(
-            Http1Config {
-                handler: Some(website),
-                ..Default::default()
-            },
+            None,
+            Some(website),
             Some(authorizer.clone()),
         ))
         .push(aex::protocols::socks::protocol(Some(authorizer)));

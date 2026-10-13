@@ -3,12 +3,12 @@
 //! Forward-mode (NAT-style) termination, link-state propagation, and runtime
 //! registry mutation while the server is running.
 
-use aex::connection::context::Context;
 use aex::connection::global::GlobalContext;
-use aex::protocols::{http1, tcp};
+use aex::protocols::tcp;
 use aex::unified::{
     DetectionState, DetectorMode, DetectorRegistry, ProtocolDetector, UnifiedServer, Verdict,
 };
+use aex::{http, tcp_raw};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -163,16 +163,14 @@ async fn forward_mode_terminates_detection_and_forwards_directly() {
     let fw = forward_hits.clone();
     let server = UnifiedServer::at(addr, Arc::new(GlobalContext::new(addr, None)))
         .detector(Arc::new(NatForwarder(nat_hits)))
-        .push(http1::protocol(http1::Http1Config {
-            handler: Some(Arc::new(move |_ctx| {
-                let http_hits = http_handler_hits.clone();
-                Box::pin(async move {
-                    http_hits.fetch_add(1, Ordering::SeqCst);
-                    true
-                })
-            })),
-            ..Default::default()
+        .push(http!(handler: move |_ctx| {
+            let http_hits = http_handler_hits.clone();
+            Box::pin(async move {
+                http_hits.fetch_add(1, Ordering::SeqCst);
+                true
+            })
         }))
+
         .push(tcp::from_handler(
             "nat-flow",
             Some(Arc::new(move |mut ctx| {
@@ -227,25 +225,23 @@ async fn empty_registry_is_pure_tcp_passthrough() {
 
     // No detectors registered at all: nothing is peeked, everything goes to
     // the TCP handler verbatim.
-    let server = UnifiedServer::at(addr, Arc::new(GlobalContext::new(addr, None))).push(
-        tcp::protocol(tcp::TcpConfig {
-            handler: Some(Arc::new(move |mut ctx| {
-                let h = h.clone();
-                tokio::spawn(async move {
-                    let mut buf = [0u8; 64];
-                    let n = ctx
-                        .reader
-                        .as_mut()
-                        .unwrap()
-                        .read(&mut buf)
-                        .await
-                        .unwrap_or(0);
-                    assert_eq!(&buf[..n], b"raw-bytes");
-                    h.fetch_add(1, Ordering::SeqCst);
-                })
-            })),
-        }),
-    );
+    let server = UnifiedServer::at(addr, Arc::new(GlobalContext::new(addr, None))).push(tcp_raw!(
+        move |mut ctx| {
+            let h = h.clone();
+            tokio::spawn(async move {
+                let mut buf = [0u8; 64];
+                let n = ctx
+                    .reader
+                    .as_mut()
+                    .unwrap()
+                    .read(&mut buf)
+                    .await
+                    .unwrap_or(0);
+                assert_eq!(&buf[..n], b"raw-bytes");
+                h.fetch_add(1, Ordering::SeqCst);
+            })
+        }
+    ));
 
     tokio::spawn(async move { server.start().await.ok() });
     sleep(Duration::from_millis(100)).await;
@@ -281,23 +277,21 @@ async fn runtime_unregister_stops_claiming() {
         ))
         // TCP fallback reads the (chained) initial bytes to distinguish a
         // genuine passthrough from a claimed-but-unhandled protocol.
-        .push(tcp::protocol(tcp::TcpConfig {
-            handler: Some(Arc::new(move |mut ctx| {
-                let th = th.clone();
-                tokio::spawn(async move {
-                    let mut buf = [0u8; 16];
-                    let n = ctx
-                        .reader
-                        .as_mut()
-                        .unwrap()
-                        .read(&mut buf)
-                        .await
-                        .unwrap_or(0);
-                    if buf[..n].starts_with(b"MAGIC2-y") {
-                        th.fetch_add(1, Ordering::SeqCst);
-                    }
-                })
-            })),
+        .push(tcp_raw!(move |mut ctx| {
+            let th = th.clone();
+            tokio::spawn(async move {
+                let mut buf = [0u8; 16];
+                let n = ctx
+                    .reader
+                    .as_mut()
+                    .unwrap()
+                    .read(&mut buf)
+                    .await
+                    .unwrap_or(0);
+                if buf[..n].starts_with(b"MAGIC2-y") {
+                    th.fetch_add(1, Ordering::SeqCst);
+                }
+            })
         }));
 
     tokio::spawn(async move { server.start().await.ok() });

@@ -7,15 +7,10 @@
 //! under [`crate::protocols`], never here.
 //!
 //! ```rust,ignore
-//! use aex::protocols::{http1, tcp};
-//! use std::sync::Arc;
-//!
-//! let mut cfg = http1::Http1Config::new();
-//! cfg.router = Some(Arc::new(router));
+//! use aex::{http, tcp};
 //!
 //! Server::new(globals)
-//!     .push(http1::protocol(cfg))
-//!     .push(tcp::protocol(tcp::TcpConfig::default()))
+//!     .push(tcp!(http!(router)))
 //!     .listen(addr).await?;
 //! ```
 
@@ -36,8 +31,9 @@ pub use detect::{
 };
 
 use crate::connection::context::{BoxReader, BoxWriter, ConnectionFd, Context};
+use crate::http::router::Router as HttpRouter;
 use crate::http::types::Executor;
-use crate::unified::handler::{CommandRegistry, HandlerState, Outcome, ProtocolHandler};
+use crate::unified::handler::{CommandRegistry, HandlerState, Outcome};
 
 /// What kind of transport a protocol serves.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -50,11 +46,18 @@ pub enum Transport {
 
 /// The one uniform interface every protocol implements.
 ///
-/// A protocol is assembled from the same building blocks regardless of which
-/// protocol it is:
+/// The **trait carries the uniform capabilities** — routing ([`router`]),
+/// [command handling](Self::commands), [middleware](Self::middleware),
+/// recursive sub-handlers, transport flags, claim resolution and the shared
+/// [`run`](Self::run) machinery. The **concrete struct carries the
+/// protocol-specific data and methods** (its router, handler closures,
+/// authorizer, …): protocol differences are realized by defining a struct per
+/// protocol, not by a config layer.
+///
+/// A protocol is therefore:
 ///
 /// - a **detector** — how stream connections are claimed for it;
-/// - a **handler** (with its own **router** where applicable) — how it serves;
+/// - a **router** — HTTP-style request routing, when the protocol serves HTTP;
 /// - **middleware** — the shared [`Executor`] chain (returning `false`
 ///   short-circuits the handler);
 /// - **sub-handlers** — child protocols it can hand a connection off to
@@ -62,13 +65,19 @@ pub enum Transport {
 /// - **command handlers** — decoded commands dispatched by name or id.
 ///
 /// The server knows none of these details: it only asks `is_mine` and calls
-/// `run`.
+/// `run`. The struct only tells the trait `process` — how to serve a claimed
+/// connection — and everything else comes from the uniform defaults.
 pub trait Protocol: Send + Sync {
     /// Unique name / protocol label.
     fn name(&self) -> &str;
 
     /// The protocol's own detector, if it wants connections claimed for it.
     fn detector(&self) -> Option<Arc<dyn ProtocolDetector>> {
+        None
+    }
+
+    /// The router serving HTTP-style requests, if this protocol routes.
+    fn router(&self) -> Option<Arc<HttpRouter>> {
         None
     }
 
@@ -79,7 +88,7 @@ pub trait Protocol: Send + Sync {
     }
 
     /// Recursive sub-protocol handlers (HTTP → WebSocket, …).
-    fn sub_handlers(&self) -> &[Arc<ProtocolHandler<Bytes>>] {
+    fn sub_handlers(&self) -> &[Arc<dyn Protocol>] {
         &[]
     }
 
@@ -118,8 +127,72 @@ pub trait Protocol: Send + Sync {
         }
     }
 
+    /// Protocol-specific processing of one connection (stream) or datagram.
+    ///
+    /// This is the only method a concrete struct must implement: the shared
+    /// [`run`](Self::run) wraps it with the handler-state record, the middleware
+    /// chain and sub-handler handoff resolution.
+    fn process<'a>(&'a self, ctx: &'a mut Context) -> BoxFuture<'a, Outcome>;
+
     /// Serve one connection (stream or datagram).
-    fn run<'a>(&'a self, ctx: &'a mut Context) -> BoxFuture<'a, Outcome>;
+    ///
+    /// Uniform machinery shared by every protocol: record the handler in the
+    /// connection's [`HandlerState`], run the middleware chain (a middleware
+    /// returning `false` ends the connection without invoking `process`), then
+    /// run [`process`](Self::process); an [`Outcome::Handoff`] descends into the
+    /// named sub-handler (which recurses through this same routine).
+    fn run<'a>(&'a self, ctx: &'a mut Context) -> BoxFuture<'a, Outcome> {
+        Box::pin(async move {
+            if let Some(state) = ctx.local.get_mut::<HandlerState>() {
+                state.enter(self.name());
+            }
+
+            for mw in self.middleware() {
+                let f: &Executor = &**mw;
+                if !f(ctx).await {
+                    return Outcome::Done;
+                }
+            }
+
+            // Nested dispatch: a top-level handler (TCP/UDP) owns every
+            // connection of its transport, then hands it down to the child
+            // that actually claims the detected protocol (TCP → HTTP →
+            // WebSocket, …). Ownership is decided exactly as at the server,
+            // by `is_mine` on the detection claim.
+            if let Some(claim) = ctx
+                .local
+                .get_ref::<DetectionState>()
+                .and_then(|s| s.claim().cloned())
+            {
+                if let Some(sub) = self
+                    .sub_handlers()
+                    .iter()
+                    .find(|h| h.is_mine(Some(&claim)))
+                {
+                    return sub.run(ctx).await;
+                }
+            }
+
+            match self.process(ctx).await {
+                Outcome::Handoff(name) => match self
+                    .sub_handlers()
+                    .iter()
+                    .find(|h| h.name() == name)
+                {
+                    Some(sub) => sub.run(ctx).await,
+                    None => {
+                        tracing::warn!(
+                            "[handler] `{}` handed off to unknown sub-handler `{}`",
+                            self.name(),
+                            name
+                        );
+                        Outcome::Done
+                    }
+                },
+                other => other,
+            }
+        })
+    }
 }
 
 /// The unified server. Protocol-agnostic by construction.
@@ -166,32 +239,43 @@ impl Server {
         }
     }
 
+    /// Create a self-contained server bound to `addr` with a fresh
+    /// [`GlobalContext`] (including a new paired session key), for examples and
+    /// tests that do not share a context with the rest of an application.
+    pub fn solo(addr: SocketAddr) -> Self {
+        let globals = Arc::new(crate::connection::global::GlobalContext::new(
+            addr,
+            Some(Arc::new(tokio::sync::Mutex::new(
+                crate::crypto::session_key_manager::PairedSessionKey::new(16),
+            ))),
+        ));
+        Self::at(addr, globals)
+    }
+
     /// Mount a protocol. This is the single entry point used by every protocol.
     pub fn push(mut self, protocol: Arc<dyn Protocol>) -> Self {
         self.mount(protocol);
         self
     }
 
-    /// Mount a protocol in place, registering its detector (if any) so
-    /// connections can be claimed for it.
+    /// Mount a protocol in place.
+    ///
+    /// Detectors are registered for the protocol **and, recursively, for every
+    /// sub-handler**, because the top level only ever mounts the transport
+    /// handlers ([`Tcp`](crate::protocols::tcp::Tcp) /
+    /// [`Udp`](crate::protocols::udp::Udp)); everything else (HTTP, WebSocket,
+    /// SOCKS, NAT, …) is nested beneath them and reached by handoff.
     pub fn mount(&mut self, protocol: Arc<dyn Protocol>) {
-        if let Some(detector) = protocol.detector() {
-            let name = detector.name().to_string();
-            if !self.registry.list().iter().any(|n| *n == name) {
-                if let Err(e) = self.registry.register_at(Position::Back, detector) {
-                    tracing::warn!("[Unified] protocol detector registration failed: {}", e);
-                }
-            }
+        self.register_detectors(&protocol);
+
+        if protocol.transport() == Transport::Datagram {
+            self.datagram = Some(protocol);
+            return;
         }
 
-        match protocol.transport() {
-            Transport::Datagram => {
-                self.datagram = Some(protocol);
-                return;
-            }
-            Transport::Stream => {}
-        }
-
+        // Keep the catch-all stream handler (TCP) last so a directly mounted
+        // claiming protocol still wins; a TCP carrying sub-handlers owns
+        // dispatch itself and hands down to its children.
         self.protocols.retain(|p| p.name() != protocol.name());
         if protocol.is_default() {
             self.protocols.push(protocol);
@@ -203,6 +287,51 @@ impl Server {
                 .unwrap_or(self.protocols.len());
             self.protocols.insert(pos, protocol);
         }
+    }
+
+    /// Register `protocol`'s detector (if any) and recurse into its children.
+    fn register_detectors(&mut self, protocol: &Arc<dyn Protocol>) {
+        if let Some(detector) = protocol.detector() {
+            let name = detector.name().to_string();
+            if !self.registry.list().iter().any(|n| *n == name) {
+                if let Err(e) = self.registry.register_at(Position::Back, detector) {
+                    tracing::warn!("[Unified] detector registration failed: {}", e);
+                }
+            }
+        }
+        for sub in protocol.sub_handlers() {
+            self.register_detectors(sub);
+        }
+    }
+
+    /// The top-level stream handler (TCP), which every stream connection is
+    /// dispatched to and which hands down to the claiming child.
+    fn stream_root(&self) -> Option<Arc<dyn Protocol>> {
+        self.protocols
+            .iter()
+            .find(|p| p.transport() == Transport::Stream && p.is_default())
+            .cloned()
+    }
+
+    /// Resolve whether the claiming protocol wants a buffered writer, looking
+    /// down the root's child tree.
+    fn resolve_buffered_writer(&self, claim: Option<&Claim>) -> bool {
+        fn search(p: &Arc<dyn Protocol>, claim: Option<&Claim>) -> Option<bool> {
+            for sub in p.sub_handlers() {
+                if !sub.is_default() && sub.is_mine(claim) {
+                    return Some(sub.buffered_writer());
+                }
+                if let Some(v) = search(sub, claim) {
+                    return Some(v);
+                }
+            }
+            None
+        }
+
+        let Some(root) = self.stream_root() else {
+            return false;
+        };
+        search(&root, claim).unwrap_or_else(|| root.buffered_writer())
     }
 
     /// Register a protocol detector at the back of the detection pipeline.
@@ -264,19 +393,23 @@ impl Server {
 
         let claim = state.claim().cloned();
 
-        // Dispatch: a plain loop. Whoever says `is_mine` handles it. No
-        // protocol knowledge lives here — each protocol decides for itself.
-        let mut chosen = None;
-        for protocol in &self.protocols {
-            if protocol.is_mine(claim.as_ref()) {
-                chosen = Some(protocol.clone());
-                break;
-            }
-        }
+        // Ownership is decided by `is_mine`. A top-level TCP carrying
+        // sub-handlers is the catch-all and hands the connection down to the
+        // child that claims the detected protocol; otherwise the claiming
+        // protocol mounted directly is dispatched.
+        let chosen = self
+            .protocols
+            .iter()
+            .find(|p| p.is_mine(claim.as_ref()))
+            .cloned();
 
         match chosen {
             Some(protocol) => {
-                let buf_writer = protocol.buffered_writer();
+                let buf_writer = if protocol.is_default() && !protocol.sub_handlers().is_empty() {
+                    self.resolve_buffered_writer(claim.as_ref())
+                } else {
+                    protocol.buffered_writer()
+                };
                 let mut ctx =
                     self.build_stream_ctx(socket, peer_addr, initial_data, buf_writer, Some(state));
                 protocol.run(&mut ctx).await;
@@ -384,64 +517,8 @@ impl Server {
         self.addr = addr;
         self.start().await
     }
-
-    pub async fn start_tcp<F, C>(&self) -> anyhow::Result<()>
-    where
-        F: crate::tcp::types::TCPFrame + Send + Sync + 'static,
-        C: crate::tcp::types::TCPCommand + Send + Sync + 'static,
-    {
-        let tcp_listener = TcpListener::bind(self.addr).await?;
-        tracing::info!("[Unified] TCP listening on {}", self.addr);
-
-        loop {
-            match tcp_listener.accept().await {
-                Ok((socket, peer_addr)) => {
-                    let srv = self.clone();
-                    tokio::spawn(async move {
-                        srv.handle_tcp_connection(socket, peer_addr).await;
-                    });
-                }
-                Err(e) => {
-                    tracing::warn!("[Unified] Accept error: {}", e);
-                }
-            }
-        }
-    }
-
-    pub async fn start_udp<F, C>(&self) -> anyhow::Result<()>
-    where
-        F: crate::tcp::types::Frame + Send + Sync + Clone + 'static,
-        C: crate::tcp::types::Command + Send + Sync + 'static,
-    {
-        let Some(proto) = self.datagram.clone() else {
-            anyhow::bail!("no datagram protocol mounted");
-        };
-
-        let sock = Arc::new(UdpSocket::bind(self.addr).await?);
-        tracing::info!("[Unified] UDP listening on {}", sock.local_addr()?);
-
-        let globals = self.globals.clone();
-        let mut buf = [0u8; 65535];
-        loop {
-            match sock.recv_from(&mut buf).await {
-                Ok((n, peer)) => {
-                    let data = buf[..n].to_vec();
-                    let proto = proto.clone();
-                    let globals = globals.clone();
-                    tokio::spawn(async move {
-                        let mut ctx = Context::new(None, None, globals, peer);
-                        ctx.set(data);
-                        ctx.local.set_value(HandlerState::new());
-                        proto.run(&mut ctx).await;
-                    });
-                }
-                Err(e) => {
-                    tracing::warn!("[Unified] UDP recv error: {}", e);
-                }
-            }
-        }
-    }
 }
+
 
 impl Clone for Server {
     fn clone(&self) -> Self {

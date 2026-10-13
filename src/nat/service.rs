@@ -84,6 +84,65 @@ pub fn nat_tcp_handler(service: NatRelayService) -> TCPHandler {
     })
 }
 
+/// NAT 中继协议（struct 形态，协议差异由结构的字段/方法表达）。
+pub struct Nat {
+    service: NatRelayService,
+    commands: crate::unified::handler::CommandRegistry<bytes::Bytes>,
+}
+
+impl Nat {
+    /// NAT 中继协议：持有共享登记表 [`NatRelayService`]，认领到连接即中继。
+    pub fn new(service: NatRelayService) -> Self {
+        Self {
+            service,
+            commands: crate::unified::handler::CommandRegistry::new(),
+        }
+    }
+
+    /// 注册协议命令处理器。
+    pub fn with_command<K: Into<crate::unified::handler::CommandKey>>(
+        mut self,
+        key: K,
+        handler: crate::unified::handler::CommandHandler<bytes::Bytes>,
+    ) -> Self {
+        self.commands.register(key, handler);
+        self
+    }
+
+    /// 处理一条被认领的 NAT 连接（struct 特有方法）。
+    pub async fn handle(&self, ctx: &mut Context) -> crate::unified::handler::Outcome {
+        let owned = crate::unified::handler::take_context(ctx);
+        nat_tcp_handler(self.service.clone())(owned);
+        crate::unified::handler::Outcome::Done
+    }
+
+    /// Box 以便注册。
+    pub fn shared(self) -> Arc<Self> {
+        Arc::new(self)
+    }
+}
+
+impl crate::unified::Protocol for Nat {
+    fn name(&self) -> &str {
+        NAT_PROTOCOL
+    }
+
+    fn detector(&self) -> Option<Arc<dyn ProtocolDetector>> {
+        Some(Arc::new(NatDetector))
+    }
+
+    fn commands(&self) -> &crate::unified::handler::CommandRegistry<bytes::Bytes> {
+        &self.commands
+    }
+
+    fn process<'a>(
+        &'a self,
+        ctx: &'a mut Context,
+    ) -> futures::future::BoxFuture<'a, crate::unified::handler::Outcome> {
+        Box::pin(async move { self.handle(ctx).await })
+    }
+}
+
 /// 在 unified server 上注册 NAT 服务（检测器 + handler）。
 pub trait UnifiedServerExt {
     fn enable_nat(self, service: NatRelayService) -> Self;
@@ -91,11 +150,6 @@ pub trait UnifiedServerExt {
 
 impl UnifiedServerExt for crate::unified::UnifiedServer {
     fn enable_nat(self, service: NatRelayService) -> Self {
-        if let Err(e) = self.registry.register(Arc::new(NatDetector)) {
-            tracing::warn!("[Unified] nat detector registration failed: {}", e);
-        }
-        let handler =
-            crate::protocols::tcp::from_handler(NAT_PROTOCOL, Some(nat_tcp_handler(service)));
-        self.push(handler)
+        self.push(Nat::new(service).shared())
     }
 }

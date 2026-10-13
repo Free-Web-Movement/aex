@@ -7,11 +7,9 @@
 
 use std::sync::Arc;
 
-use bytes::Bytes;
-
-use crate::protocols::http1::Http1Config;
+use crate::http::router::Router as HttpRouter;
+use crate::protocols::http1::{Http1, HttpHandler};
 use crate::proxy::ProxyAuthorizer;
-use crate::unified::handler::ProtocolHandler;
 
 /// Build the HTTP/1.1 protocol serving forward-proxy traffic (absolute-form
 /// requests / CONNECT) in addition to normal requests.
@@ -19,11 +17,9 @@ use crate::unified::handler::ProtocolHandler;
 /// The single `"http"` protocol and its one detector serve both modes, so no
 /// extra detector registration is needed.
 pub fn http_proxy(
-    cfg: Http1Config,
+    router: Option<Arc<HttpRouter>>,
+    handler: Option<HttpHandler>,
     authorizer: Option<ProxyAuthorizer>,
-) -> Arc<ProtocolHandler<Bytes>> {
-    let mut cfg = cfg;
-    cfg.http_proxy_enabled = true;
-    cfg.proxy_authorizer = authorizer;
-    crate::protocols::http1::protocol(cfg)
+) -> Arc<Http1> {
+    Http1::new(router, handler).with_proxy(authorizer).shared()
 }

@@ -1,10 +1,8 @@
 use aex::connection::context::Context;
 use aex::connection::global::GlobalContext;
 use aex::http::router::Router as HttpRouter;
-use aex::protocols::http1::{self, Http1Config};
-use aex::protocols::http2::{self, Http2Config};
-use aex::protocols::tcp::{self, TcpConfig};
 use aex::unified::UnifiedServer;
+use aex::{http, http2, tcp_raw};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -33,34 +31,28 @@ fn setup_unified_server(addr: SocketAddr, enable_http2: bool) -> (UnifiedServer,
     // Detection is opt-in since the pluggable pipeline: HTTP/2 first (exact
     // preface), then HTTP/1.x method prefixes.
     unified = unified
-        .push(http1::protocol(Http1Config {
-            router: Some(Arc::new(make_http_router())),
-            handler: None,
-            ..Default::default()
-        }))
-        .push(tcp::protocol(TcpConfig {
-            handler: Some(Arc::new(move |mut ctx| {
-                println!("[Test] TCP handler called");
-                let counter = counter_for_handler.clone();
-                tokio::spawn(async move {
-                    println!("[Test] TCP task spawned");
-                    let mut buf = [0u8; 1024];
-                    let reader = ctx.reader.as_mut().unwrap();
-                    match reader.read(&mut buf).await {
-                        Ok(n) => {
-                            println!("[Test] TCP read {} bytes", n);
-                            counter.fetch_add(1, Ordering::SeqCst);
-                        }
-                        Err(e) => {
-                            println!("[Test] TCP read error: {}", e);
-                        }
+        .push(http!(make_http_router()))
+        .push(tcp_raw!(move |mut ctx| {
+            println!("[Test] TCP handler called");
+            let counter = counter_for_handler.clone();
+            tokio::spawn(async move {
+                println!("[Test] TCP task spawned");
+                let mut buf = [0u8; 1024];
+                let reader = ctx.reader.as_mut().unwrap();
+                match reader.read(&mut buf).await {
+                    Ok(n) => {
+                        println!("[Test] TCP read {} bytes", n);
+                        counter.fetch_add(1, Ordering::SeqCst);
                     }
-                })
-            })),
+                    Err(e) => {
+                        println!("[Test] TCP read error: {}", e);
+                    }
+                }
+            })
         }));
 
     if enable_http2 {
-        unified = unified.push(http2::protocol(Http2Config::default()));
+        unified = unified.push(http2!());
     }
 
     (unified, tcp_counter)

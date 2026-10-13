@@ -1,7 +1,8 @@
 use aex::communicators::event::Event;
 use aex::connection::context::Context;
 use aex::http::router::Router as HttpRouter;
-use aex::server::Server;
+use aex::unified::Server;
+use aex::{http, tcp};
 use futures::FutureExt;
 use std::net::SocketAddr;
 use std::sync::{Arc, atomic::AtomicUsize, atomic::Ordering};
@@ -10,7 +11,6 @@ use tokio::time::{Duration, sleep, timeout};
 #[tokio::test]
 async fn test_server_http() {
     let addr: SocketAddr = "[::1]:0".parse().unwrap();
-    let server = Server::new(addr, None);
 
     let mut http_router = HttpRouter::default();
     http_router.get("/", |_ctx: &mut Context| {
@@ -22,7 +22,7 @@ async fn test_server_http() {
     let actual_addr = temp_listener.local_addr().unwrap();
     drop(temp_listener);
 
-    let server = Server::new(actual_addr, None).http(http_router);
+    let server = Server::solo(actual_addr).push(tcp!(http!(http_router)));
 
     tokio::spawn(async move {
         if let Err(e) = server.start().await {
@@ -43,7 +43,7 @@ async fn test_server_http() {
 #[tokio::test]
 async fn test_server_communication_bus() {
     let addr: SocketAddr = "[::1]:0".parse().unwrap();
-    let server = Server::new(addr, None);
+    let server = Server::solo(addr);
 
     let pipe_count = Arc::new(AtomicUsize::new(0));
     let spread_count = Arc::new(AtomicUsize::new(0));

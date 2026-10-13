@@ -105,10 +105,7 @@ async fn one_port_serves_website_and_http_proxy() {
     let upstream = spawn_upstream("UPSTREAM").await;
     let addr = free_addr();
     spawn_server(addr, |s| {
-        s.push(aex::protocols::proxy::http_proxy(
-            aex::protocols::http1::Http1Config::default(),
-            None,
-        ))
+        s.push(aex::protocols::proxy::http_proxy(None, None, None))
     });
     wait_listening(addr).await;
 
@@ -142,10 +139,7 @@ async fn connect_tunnel_relays_raw_bytes() {
     let upstream = spawn_upstream("TUNNELED").await;
     let addr = free_addr();
     spawn_server(addr, |s| {
-        s.push(aex::protocols::proxy::http_proxy(
-            aex::protocols::http1::Http1Config::default(),
-            None,
-        ))
+        s.push(aex::protocols::proxy::http_proxy(None, None, None))
     });
     wait_listening(addr).await;
 

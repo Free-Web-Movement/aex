@@ -1,7 +1,9 @@
 # 协议处理器（Protocol Handler）方案（终版）
 
-> 状态：**已实现**。
+> 状态：**已实现（struct 形态）**。
 > 统一 server 完全协议无关，全部具体协议收敛到 `src/protocols/`。
+> **协议差异由「每协议一个 struct」表达，不再有 `*Config` 配置层**；server 只
+> 接收一个整体 `Arc<dyn Protocol>`。
 > `cargo check --workspace --all-targets` 零错误；aex 全量 `cargo test` 通过
 > （含 `--features proxy`）。
 
@@ -24,7 +26,7 @@ aex 的 server 收敛为**一个协议无关的核心**，连接分派只有一�
 3. **传输（transport）** — `Stream`（走检测 + `is_mine`）或 `Datagram`（UDP，
    每个数据报直接 `run`）。
 
-数据报循环（`start`/`start_udp`）与流式分派共用同一个 `Context` 与同一个 `run`。
+数据报循环（由 `start` 在后台为 `Udp` 协议启动）与流式分派共用同一个 `Context` 与同一个 `run`。
 
 命令数据用**泛型占位** `C`，默认 `C = Bytes`；`Server` 本身**非泛型**，内部固定
 用通用实例化，业务命令类型后期由上层通过适配层特化。
@@ -41,14 +43,14 @@ aex/src
 │       └── mod.rs              ProtocolHandler<C=Bytes>（递归处理器 + 通用实现）
 └── protocols/                  具体协议（project-agnostic，统一用同一套 API）
     ├── classify.rs             ProtocolKind 后缀前缀分类（兼容旧调用方）
-    ├── http1.rs                Http11Detector + Http1Config + protocol()
-    ├── http2.rs                Http2Detector + Http2Config + protocol()
-    ├── websocket.rs            WebsocketConfig + protocol()（http 的子处理器）
-    ├── tcp.rs                  TcpConfig + protocol()（兜底）+ from_handler()
-    ├── udp.rs                  UdpConfig + protocol()（Datagram）
+    ├── http1.rs                Http11Detector + Http1（struct；内含 websocket 子协议）
+    ├── http2.rs                Http2Detector + Http2（struct）
+    ├── websocket.rs            Websocket（struct，http 的子处理器）
+    ├── tcp.rs                  Tcp（struct，兜底）+ from_handler()（自定义闭包协议）
+    ├── udp.rs                  Udp（struct，Datagram）
     └── #[cfg(feature="proxy")]
-        ├── socks.rs            protocol(authorizer)
-        └── proxy.rs            http_proxy(cfg, authorizer)
+        ├── socks.rs            Socks（struct）+ protocol(authorizer) 便捷
+        └── proxy.rs            http_proxy(router, handler, authorizer)
 ```
 
 - **`unified` 不依赖 `protocols`**：只有反向依赖（`protocols` 里的每个协议用
@@ -62,31 +64,45 @@ aex/src
 
 ```rust
 pub trait Protocol: Send + Sync {
-    fn name(&self) -> &str;                                    // 协议标签
+    fn name(&self) -> &str;                                    // 必选
     fn detector(&self) -> Option<Arc<dyn ProtocolDetector>>;   // 默认 None
+    fn router(&self) -> Option<Arc<HttpRouter>>;               // 默认 None
     fn middleware(&self) -> &[Arc<Executor>];                  // 默认 &[]
-    fn sub_handlers(&self) -> &[Arc<ProtocolHandler<Bytes>>];  // 默认 &[]
+    fn sub_handlers(&self) -> &[Arc<dyn Protocol>];            // 默认 &[]
     fn commands(&self) -> &CommandRegistry<Bytes>;             // 必选
     fn transport(&self) -> Transport;                          // 默认 Stream
     fn is_default(&self) -> bool;                              // 默认 false（兜底）
     fn buffered_writer(&self) -> bool;                         // 默认 false
     // 默认实现：default → true；否则按自身 detector.name 或 name 匹配 claim。
     fn is_mine(&self, claim: Option<&Claim>) -> bool;
-    fn run<'a>(&'a self, ctx: &'a mut Context) -> BoxFuture<'a, Outcome>;
+    // 唯一需要具体结构实现的方法：如何服务一条已被认领的连接/数据报。
+    fn process<'a>(&'a self, ctx: &'a mut Context) -> BoxFuture<'a, Outcome>;
+    // 统一机械：state record → middleware 链 → process → Handoff 查子协议递归。
+    fn run<'a>(&'a self, ctx: &'a mut Context) -> BoxFuture<'a, Outcome> { … }
 }
 ```
 
-`ProtocolHandler<C=Bytes>` 是**参照实现**（`impl Protocol for ProtocolHandler<Bytes>`），
-所以任何具体协议 = 一个 `ProtocolHandler`，天然实现 trait，无需再手写 `run`/`is_mine`。
+**trait 提供统一方法与机械**（路由、命令、中间件、子处理器、`run`），
+**结构提供协议特有数据与特有方法**（`Http1::new(router, handler)`、`Http2::new(handler)`、
+`Tcp::new(handler)`、各 struct 自己的 `pub async fn handle(&self, ctx)`）——
+协议差异由结构表达，而非 `*Config`。具体结构只实现 `process`（通常是
+`Box::pin(self.handle(ctx))`），其余全部走 trait 默认。
 
 ## 通用处理器：`unified::handler::ProtocolHandler`
+
+`ProtocolHandler<C=Bytes>` 现在**只服务于自定义闭包协议**（`tcp::from_handler`、
+SOCKS 的便捷构造）。内置协议都是各自的结构体（`Http1`/`Http2`/`Websocket`/`Tcp`/
+`Udp`/`Socks`/`Nat`），它们把 `process` 指向自己的 `handle`，共用 trait 默认的
+`run` 机械。`ProtocolHandler` 仍是 `impl Protocol for ProtocolHandler<Bytes>` 的
+参照实现。
 
 ```rust
 pub struct ProtocolHandler<C = Bytes> {
     name: String,
     detector: Option<Arc<dyn ProtocolDetector>>,
+    router: Option<Arc<HttpRouter>>,
     middleware: Vec<Arc<Executor>>,          // 与路由中间件同款，禁止 Next
-    sub_handlers: Vec<Arc<ProtocolHandler<C>>>,
+    sub_handlers: Vec<Arc<dyn Protocol>>,
     commands: CommandRegistry<C>,
     handler: Arc<dyn HandlerFn<C>>,
     buf_writer: bool,   // with_buffered_writer：http1=true（保留 BufWriter 行为）
@@ -95,11 +111,11 @@ pub struct ProtocolHandler<C = Bytes> {
 }
 ```
 
-`ProtocolHandler::run` 三步（子处理器递归走同一例程）：
+`Protocol::run`（trait 默认，所有协议共用，子处理器递归走同一例程）：
 
 1. 在 `ctx.local` 的 `HandlerState` 记录 `enter(name)`；
 2. 顺序跑 `middleware`，任一返回 `false` → `Outcome::Done`；
-3. 跑 `handler_fn`；得 `Outcome::Handoff(name)` → 查 `sub_handlers` 递归 `run`。
+3. 跑 `process(ctx)`；得 `Outcome::Handoff(name)` → 查 `sub_handlers` 递归 `run`。
 
 概念保留自首版方案：**state record**（`HandlerState`，随连接下传，含
 `path`/`started_at`/`bytes_in`/`bytes_out`/`commands`/`closed`/`scratch`）、
@@ -112,9 +128,8 @@ pub struct ProtocolHandler<C = Bytes> {
 
 ```rust
 Server::new(globals)                       // 只传 GlobalContext
-    .push(http1::protocol(cfg))            // 单一口，挂多少协议都行
-    .push(tcp::protocol(TcpConfig{..}))
-    .listen(addr).await?;                  // 地址在 listen 时给出
+    .push(tcp!(http!(router)))             // 顶层 TCP，HTTP 作为子处理器
+    .listen(addr).await?;
 ```
 
 - **`push` = 唯一挂载点**（`mount` 原地版）。挂载时：
@@ -126,9 +141,10 @@ Server::new(globals)                       // 只传 GlobalContext
   首个认领者 `run`。无认领 → 记录 warning。`detection(false)` 或空注册表时
   完全不 peek，流直接交兜底协议。
 - writer 是否 `BufWriter` 由 `protocol.buffered_writer()` 决定，Server 不问协议名。
-- 保留：`at(addr, globals)`（旧构造器短名）、`UnifiedServer = Server` 兼容别名、
-  `detector`/`detector_at`/`with_registry`/`detection`、`start`/`start_tcp`/
-  `start_udp`/`listen`、`Clone`。
+- 保留：`at(addr, globals)`（旧构造器短名）、`solo(addr)`、`UnifiedServer = Server`
+  兼容别名、`detector`/`detector_at`/`with_registry`/`detection`、`start`/`listen`、`Clone`。
+- **已删除**：`start_tcp`/`start_udp`（TCP/UDP 的收发循环由挂载的 `Tcp`/`Udp` 协议承载，
+  `start` 会为 `Udp` 在后台起循环）。
 - **故意移除**：`http_router`/`http_handler`/`tcp_handler`/`udp_handler`/
   `custom_handlers`/`enable_http2` 等旧字段与 `enable_*` 链式方法，以及
   硬编码 `match claim.protocol` 的 `handle_http11`/`handle_http2`/`dispatch_tcp`/
@@ -136,46 +152,48 @@ Server::new(globals)                       // 只传 GlobalContext
 
 ## 具体协议（`protocols/`，全部 project-agnostic）
 
-| 协议 | 产物 | 要点 |
+| 协议 | 产物（struct） | 要点 |
 |---|---|---|
-| http1 | `Http1Config{router, handler}` + `protocol(cfg)` | 自带 `Http11Detector`；绝对形式/CONNECT 反代（proxy feature）；**ws 升级 → `Handoff("websocket")`**；`with_buffered_writer(true)` |
-| http2 | `Http2Config{handler}` + `protocol(cfg)` | 自带 `Http2Detector`；用 `Reunited` 等价承接握手 I/O |
-| websocket | `WebsocketConfig{router}` + `protocol(cfg)` | http1 的递归子处理器，复刻 `is_ws → router.on_request → send_response/send_failure` |
-| tcp | `TcpConfig{handler}` + `protocol(cfg)`；`from_handler(name, handler)` | `protocol` 是 default 兜底；`from_handler` 生成带名自定义协议 |
-| udp | `UdpConfig{handler}` + `protocol(cfg)` | `with_datagram(true)`，走 Datagram 槽位 |
-| socks（proxy） | `protocol(authorizer)` | `from_handler("socks", …)` + `with_detector(SocksDetector)` |
-| proxy（proxy） | `http_proxy(cfg, authorizer)` | 自由函数，无旧 ProxyExt trait |
+| http1 | `Http1::new(router, handler)` | 自带 `Http11Detector`；`router()`/`sub_handlers()`；绝对形式/CONNECT 反代（proxy feature，`with_proxy(authorizer)`）；**ws 升级 → `Handoff("websocket")`**；`buffered_writer()=true` |
+| http2 | `Http2::new(handler)` | 自带 `Http2Detector`；用 `Reunited` 等价承接握手 I/O |
+| websocket | `Websocket::new(router)` | http1 的递归子处理器，复刻 `is_ws → router.on_request → send_response/send_failure` |
+| tcp | `Tcp::new(handler)`（兜底）；`from_handler(name, handler)` | `Tcp` 是 default 兜底；`from_handler` 生成带名自定义闭包协议 |
+| udp | `Udp::new(handler)` | `transport()=Datagram`，走 Datagram 槽位 |
+| socks（proxy） | `Socks::new(authorizer)`；便捷 `socks::protocol(authorizer)` | 自带 `SocksDetector`，持 `socks_tcp_handler` |
+| proxy（proxy） | `http_proxy(router, handler, authorizer)` | = `Http1::new(..).with_proxy(authorizer).shared()` |
+| nat | `Nat::new(service)`；便捷 `UnifiedServerExt::enable_nat(service)` | 自带 `NatDetector`，持共享 `NatRelayService` |
 | classify | `ProtocolKind::{Http11,Http2,TCP,UDP,Unknown}` | 前缀快速分类，兼容旧调用方；新代码优先走注册表流水线 |
 
-所有 `*Ext` trait（Http1Ext/Http2Ext/TcpExt/UdpExt/ProxyExt）**已删除**。旧的
-`handler/{http1,websocket,http2,tcp,udp}.rs` 逐步演进为 `protocols/` 下同名文件
-（早期版本先把 `src/unified/handler/` 作为协议宿，后按用户要求**协议全部移入
-`src/protocols/`**，`unified/handler/` 只剩 `ProtocolHandler` 机制本身）。
+所有 `*Ext` trait（Http1Ext/Http2Ext/TcpExt/UdpExt/ProxyExt）**已删除**；`*Config`
+（`Http1Config`/`Http2Config`/`TcpConfig`/`UdpConfig`/`WebsocketConfig`）与
+`protocol(cfg)` 构造器**已删除**，改由各协议的 struct 承载。旧的
+`handler/{http1,websocket,http2,tcp,udp}.rs` 已演进为 `protocols/` 下同名文件
+（`unified/handler/` 只剩 `ProtocolHandler` 机制本身）。
 
 ### 挂载示例
 
 ```rust
 use std::sync::Arc;
-use aex::protocols::{http1, http2, tcp, udp};
+use aex::{http, http2, tcp, udp};
 use aex::unified::Server;
 
-let mut cfg = http1::Http1Config::new();
-cfg.router = Some(Arc::new(router));
-
 Server::new(globals)
-    .push(http1::protocol(cfg))
-    .push(http2::protocol(http2::Http2Config::default()))
-    .push(tcp::protocol(tcp::TcpConfig::default()))   // 兜底，自动排最后
-    .push(udp::protocol(udp::UdpConfig::default()))   // 进 Datagram 槽位
+    .push(tcp!(http!(router), http2!()))  // 顶层 TCP 兜底，HTTP/1.1 + HTTP/2 作为子处理器
+    .push(udp!())                          // 兜底 UDP 数据报
     .listen(addr).await?;
 ```
+
+> 协议宏（`http!`/`http1!`/`http2!`/`ws!`/`tcp!`/`tcp_raw!`/`udp!`，见
+> `src/protocols/macros.rs`）等价于手写 `Http1::new(Some(Arc::new(router)), None).shared()`
+> 等，只是把 `Struct::new(..).shared()` 缩短，便于组合。
 
 有鉴权代理：
 
 ```rust
-// 共享同一 authorizer；http 名去重，站点 handler 并入 proxy 配置
+// 共享同一 authorizer；http 名去重，站点 handler 与 router 均可传入
 .push(aex::protocols::proxy::http_proxy(
-    http1::Http1Config { handler: Some(website), ..Default::default() },
+    None,
+    Some(website),
     Some(authorizer.clone()),
 ))
 .push(aex::protocols::socks::protocol(Some(authorizer)));

@@ -13,11 +13,10 @@
 //! ## Quick Example
 //!
 //! ```rust,ignore
-//! use aex::http::router::{NodeType, Router as HttpRouter};
-//! use aex::server::HTTPServer;
-//! use aex::tcp::types::{Command, RawCodec};
+//! use aex::http::router::Router as HttpRouter;
+//! use aex::unified::Server;
+//! use aex::{http, tcp};
 //! use std::net::SocketAddr;
-//! use std::sync::Arc;
 //!
 //! #[tokio::main]
 //! async fn main() -> anyhow::Result<()> {
@@ -26,9 +25,9 @@
 //!
 //!     router.get("/", |_| "Hello, World!");
 //!
-//!     HTTPServer::new(addr, None)
-//!         .http(router)
-//!         .start_with_protocols::<RawCodec, RawCodec>(Arc::new(|c| c.id()))
+//!     Server::solo(addr)
+//!         .push(tcp!(http!(router)))
+//!         .start()
 //!         .await?;
 //!     Ok(())
 //! }
@@ -60,7 +59,6 @@ pub mod nat;
 pub mod protocols;
 #[cfg(feature = "proxy")]
 pub mod proxy;
-pub mod server;
 pub mod storage;
 pub mod tcp;
 pub mod time;
@@ -68,7 +66,6 @@ pub mod udp;
 pub mod unified;
 
 pub use aex_macros::routes;
-pub use server::{HTTPServer, HttpVersions, Server};
 
 #[doc(hidden)]
 pub use futures::future::FutureExt;

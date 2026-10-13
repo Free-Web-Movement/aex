@@ -28,6 +28,7 @@ use bytes::Bytes;
 use futures::future::BoxFuture;
 
 use crate::connection::context::Context;
+use crate::http::router::Router as HttpRouter;
 use crate::http::types::Executor;
 use crate::unified::detect::{Claim, ProtocolDetector};
 use crate::unified::{Protocol, Transport};
@@ -269,12 +270,17 @@ where
     }
 }
 
-/// A recursive protocol handler node.
+/// A recursive protocol handler node, used for custom closure-based protocols.
+///
+/// Built-in protocols are their own structs implementing [`Protocol`]; this
+/// generic struct keeps the same shape for user-registered custom handlers
+/// (raw TCP, SOCKS relay wrappers, …) so they ride the same uniform machinery.
 pub struct ProtocolHandler<C = Bytes> {
     name: String,
     detector: Option<Arc<dyn ProtocolDetector>>,
+    router: Option<Arc<HttpRouter>>,
     middleware: Vec<Arc<Executor>>,
-    sub_handlers: Vec<Arc<ProtocolHandler<C>>>,
+    sub_handlers: Vec<Arc<dyn Protocol>>,
     commands: CommandRegistry<C>,
     handler: Arc<dyn HandlerFn<C>>,
     buf_writer: bool,
@@ -297,6 +303,7 @@ where
         Self {
             name: name.into(),
             detector: None,
+            router: None,
             middleware: Vec::new(),
             sub_handlers: Vec::new(),
             commands: CommandRegistry::new(),
@@ -376,13 +383,18 @@ where
         self.detector.as_ref()
     }
 
+    /// The router serving HTTP-style requests, if any.
+    pub fn router(&self) -> Option<&Arc<HttpRouter>> {
+        self.router.as_ref()
+    }
+
     /// The protocol middleware chain (same [`Executor`] format as the router).
     pub fn middleware(&self) -> &[Arc<Executor>] {
         &self.middleware
     }
 
     /// The recursive child handlers.
-    pub fn sub_handlers(&self) -> &[Arc<ProtocolHandler<C>>] {
+    pub fn sub_handlers(&self) -> &[Arc<dyn Protocol>] {
         &self.sub_handlers
     }
 
@@ -402,6 +414,12 @@ where
         self
     }
 
+    /// Attach a router for HTTP-style request routing.
+    pub fn with_router(mut self, router: Option<Arc<HttpRouter>>) -> Self {
+        self.router = router;
+        self
+    }
+
     /// Append one protocol middleware (an [`Executor`]).
     pub fn with_middleware(mut self, middleware: Arc<Executor>) -> Self {
         self.middleware.push(middleware);
@@ -409,7 +427,7 @@ where
     }
 
     /// Append a recursive sub-handler.
-    pub fn with_sub_handler(mut self, sub: Arc<ProtocolHandler<C>>) -> Self {
+    pub fn sub(mut self, sub: Arc<dyn Protocol>) -> Self {
         self.sub_handlers.push(sub);
         self
     }
@@ -421,48 +439,11 @@ where
     }
 
     /// Find a sub-handler by name.
-    pub fn find_sub_handler(&self, name: &str) -> Option<Arc<ProtocolHandler<C>>> {
+    pub fn find_sub_handler(&self, name: &str) -> Option<Arc<dyn Protocol>> {
         self.sub_handlers
             .iter()
-            .find(|h| h.name == name)
+            .find(|h| h.name() == name)
             .map(Arc::clone)
-    }
-
-    /// Run this handler over `ctx`:
-    ///
-    /// 1. record the handler in the connection's [`HandlerState`];
-    /// 2. run the middleware chain — a middleware returning `false` ends the
-    ///    connection without invoking the handler;
-    /// 3. invoke the handler; a [`Outcome::Handoff`] descends into the named
-    ///    sub-handler (which recurses through this same routine).
-    pub fn run<'a>(&'a self, ctx: &'a mut Context) -> BoxFuture<'a, Outcome> {
-        Box::pin(async move {
-            if let Some(state) = ctx.local.get_mut::<HandlerState>() {
-                state.enter(&self.name);
-            }
-
-            for mw in &self.middleware {
-                let f: &Executor = &**mw;
-                if !f(ctx).await {
-                    return Outcome::Done;
-                }
-            }
-
-            match self.handler.call(self, ctx).await {
-                Outcome::Handoff(name) => match self.find_sub_handler(&name) {
-                    Some(sub) => sub.run(ctx).await,
-                    None => {
-                        tracing::warn!(
-                            "[handler] `{}` handed off to unknown sub-handler `{}`",
-                            self.name,
-                            name
-                        );
-                        Outcome::Done
-                    }
-                },
-                other => other,
-            }
-        })
     }
 
     /// Convenience: box this handler for registration.
@@ -482,11 +463,15 @@ impl Protocol for ProtocolHandler<Bytes> {
         self.detector.clone()
     }
 
+    fn router(&self) -> Option<Arc<HttpRouter>> {
+        self.router.clone()
+    }
+
     fn middleware(&self) -> &[Arc<Executor>] {
         ProtocolHandler::middleware(self)
     }
 
-    fn sub_handlers(&self) -> &[Arc<ProtocolHandler<Bytes>>] {
+    fn sub_handlers(&self) -> &[Arc<dyn Protocol>] {
         ProtocolHandler::sub_handlers(self)
     }
 
@@ -514,7 +499,7 @@ impl Protocol for ProtocolHandler<Bytes> {
         ProtocolHandler::is_mine(self, claim)
     }
 
-    fn run<'a>(&'a self, ctx: &'a mut Context) -> BoxFuture<'a, Outcome> {
-        ProtocolHandler::run(self, ctx)
+    fn process<'a>(&'a self, ctx: &'a mut Context) -> BoxFuture<'a, Outcome> {
+        self.handler.call(self, ctx)
     }
 }

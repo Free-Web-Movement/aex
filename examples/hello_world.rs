@@ -1,7 +1,10 @@
 use aex::connection::context::Context;
 use aex::http::router::Router as HttpRouter;
-use aex::server::HTTPServer;
+use aex::protocols::http1::Http1;
+use aex::protocols::tcp::Tcp;
+use aex::unified::Server;
 use std::net::SocketAddr;
+use std::sync::Arc;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -10,6 +13,13 @@ async fn main() -> anyhow::Result<()> {
 
     router.get("/", |_: &mut Context| "Hello world!");
 
-    HTTPServer::new(addr, None).http(router).start().await?;
+    Server::solo(addr)
+        .push(
+            Tcp::new(None)
+                .sub(Http1::new(Some(Arc::new(router)), None).shared())
+                .shared(),
+        )
+        .start()
+        .await?;
     Ok(())
 }

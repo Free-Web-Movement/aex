@@ -102,12 +102,16 @@ async fn main() -> anyhow::Result<()> {
             }).boxed()
         })
     );
-    //启动 HTTPServer
+    //启动统一服务器（顶层 TCP + HTTP 子处理器）
     let ip = "0.0.0.0";
     let port = 8080;
     let addr: SocketAddr = format!("{}:{}", ip, port).parse()?;
-    let server = HTTPServer::new(addr, route);
-    server.run().await?;
+    let server = Server::solo(addr).push(
+        Tcp::new(None)
+            .sub(Http1::new(Some(Arc::new(route)), None).shared())
+            .shared(),
+    );
+    server.start().await?;
 }
 ```
 
@@ -124,9 +128,9 @@ use aex::{
     get,
     route,
     router::{ NodeType, Router },
-    server::HTTPServer,
-    types::{ BinaryHandler, HTTPContext, TextHandler },
-    websocket::WebSocket, // 👈 关键：TrieRouter
+    protocols::{ http1::Http1, tcp::Tcp },
+    unified::Server,
+    types::{ BinaryHandler, HTTPContext },
 };
 use futures::FutureExt;
 ```
@@ -150,8 +154,12 @@ async fn main() -> anyhow::Result<()> {
     let ip = "0.0.0.0";
     let port = 8080;
     let addr: SocketAddr = format!("{}:{}", ip, port).parse()?;
-    let server = HTTPServer::new(addr, route);
-    server.run().await?;
+    let server = Server::solo(addr).push(
+        Tcp::new(None)
+            .sub(Http1::new(Some(Arc::new(route)), None).shared())
+            .shared(),
+    );
+    server.start().await?;
 ```
 
 ---
@@ -521,9 +529,13 @@ route!(route, ws_params);
     let ip = "0.0.0.0";
     let port = 8080;
     let addr: SocketAddr = format!("{}:{}", ip, port).parse()?;
-    let server = HTTPServer::new(addr, route);
+    let server = Server::solo(addr).push(
+        Tcp::new(None)
+            .sub(Http1::new(Some(Arc::new(route)), None).shared())
+            .shared(),
+    );
 
-    server.run().await?;
+    server.start().await?;
 ```
 
 > 外部的main结构保持不变

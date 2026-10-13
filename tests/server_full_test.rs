@@ -1,10 +1,9 @@
-use aex::connection::context::{TypeMapExt, get_tcp_router};
-use aex::http::middlewares::websocket::WebSocket;
+use aex::connection::context::TypeMapExt;
 use aex::http::router::Router as HttpRouter;
-use aex::server::{HttpVersions, Server};
-use aex::tcp::router::Router as TcpRouter;
 use aex::tcp::types::{Codec, RawCodec};
 use aex::udp::router::Router as UdpRouter;
+use aex::unified::Server;
+use aex::{http, tcp};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -20,37 +19,15 @@ async fn free_addr() -> SocketAddr {
     a
 }
 
-#[test]
-fn http_versions_v1() {
-    let v = HttpVersions::v1();
-    assert!(!v.has_http2());
-    assert!(!v.has_http3());
-}
-#[test]
-fn http_versions_v1_v2() {
-    let v = HttpVersions::v1_v2();
-    assert!(v.has_http2());
-    assert!(!v.has_http3());
-}
-#[test]
-fn http_versions_v1_v2_v3() {
-    let v = HttpVersions::v1_v2_v3();
-    assert!(v.has_http2());
-    assert!(v.has_http3());
-}
-#[test]
-fn http_versions_default_is_empty() {
-    let v = HttpVersions::default();
-    assert!(!v.has_http2());
-    assert!(!v.has_http3());
+fn http_server(addr: SocketAddr, router: HttpRouter) -> Server {
+    Server::solo(addr).push(tcp!(http!(router)))
 }
 
 #[test]
 fn server_new_defaults() {
     let a = addr();
-    let server = Server::new(a, None);
+    let server = Server::solo(a);
     assert_eq!(server.addr, a);
-    assert!(!server.has_ws());
     assert!(
         server
             .globals
@@ -58,62 +35,6 @@ fn server_new_defaults() {
             .get_value::<Arc<HttpRouter>>()
             .is_none()
     );
-}
-
-#[test]
-fn server_ws_sets_handler() {
-    let server = Server::new(addr(), None).ws(WebSocket::new());
-    assert!(server.has_ws());
-}
-
-#[test]
-fn server_http_sets_router() {
-    let mut router = HttpRouter::default();
-    router.get("/", |_ctx: &mut aex::connection::context::Context| true);
-    let server = Server::new(addr(), None).http(router);
-    assert!(
-        server
-            .globals
-            .routers
-            .get_value::<Arc<HttpRouter>>()
-            .is_some()
-    );
-}
-
-#[test]
-fn server_http2_without_router_keeps_codec_unset() {
-    let server = Server::new(addr(), None).http2();
-    assert!(server.globals.h2_codec.get().is_none());
-}
-
-#[test]
-fn server_http2_after_http_sets_codec() {
-    let server = Server::new(addr(), None)
-        .http(HttpRouter::default())
-        .http2();
-    assert!(server.globals.h2_codec.get().is_some());
-}
-
-#[test]
-fn server_tcp_stores_router() {
-    let server = Server::new(addr(), None).tcp(TcpRouter::<RawCodec, RawCodec>::new());
-    assert!(get_tcp_router::<RawCodec, RawCodec>(&server.globals.routers).is_some());
-}
-
-#[test]
-fn server_udp_stores_router() {
-    use aex::connection::context::get_udp_router;
-    let server = Server::new(addr(), None).udp(UdpRouter::<RawCodec, RawCodec>::new());
-    assert!(get_udp_router::<RawCodec, RawCodec>(&server.globals.routers).is_some());
-}
-
-#[tokio::test]
-async fn server_start_udp_missing_router_errors() {
-    let a = free_addr().await;
-    let server = Server::new(a, None);
-    let token = tokio_util::sync::CancellationToken::new();
-    let res = server.start_udp::<RawCodec, RawCodec>(token).await;
-    assert!(res.is_err());
 }
 
 #[tokio::test]
@@ -124,7 +45,7 @@ async fn server_start_http_only_serves_route() {
         "/ping",
         |_ctx: &mut aex::connection::context::Context| "pong",
     );
-    let server = Server::new(a, None).http(router);
+    let server = http_server(a, router);
     let handle = tokio::spawn(async move { server.start().await });
 
     tokio::time::sleep(Duration::from_millis(200)).await;
@@ -135,26 +56,23 @@ async fn server_start_http_only_serves_route() {
 }
 
 #[tokio::test]
-async fn server_start_tcp_accepts_connection() {
+async fn server_start_accepts_connection() {
     use tokio::io::AsyncWriteExt;
     let a = free_addr().await;
-    let server = Server::new(a, None);
-    let token = tokio_util::sync::CancellationToken::new();
-    let token2 = token.clone();
+    let server = Server::solo(a).push(tcp!());
     let handle = tokio::spawn(async move {
-        let _ = server.start_tcp::<RawCodec, RawCodec>(token2).await;
+        let _ = server.start().await;
     });
 
     tokio::time::sleep(Duration::from_millis(200)).await;
     let mut conn = tokio::net::TcpStream::connect(a).await.unwrap();
     conn.write_all(b"\x00PING").await.unwrap();
     tokio::time::sleep(Duration::from_millis(200)).await;
-    token.cancel();
-    let _ = handle.await;
+    handle.abort();
 }
 
 #[tokio::test]
-async fn server_start_udp_dispatches_to_router() {
+async fn udp_router_dispatches_datagram() {
     let a = free_addr().await;
     let counter = Arc::new(AtomicUsize::new(0));
     let c = counter.clone();
@@ -168,10 +86,12 @@ async fn server_start_udp_dispatches_to_router() {
         }
     });
 
-    let server = Server::new(a, None).udp(udp);
-    let token = tokio_util::sync::CancellationToken::new();
+    let server = Server::solo(a);
+    let globals = server.globals.clone();
+    let udp = Arc::new(udp);
+    let sock = Arc::new(tokio::net::UdpSocket::bind(a).await.unwrap());
     let handle = tokio::spawn(async move {
-        let _ = server.start_udp::<RawCodec, RawCodec>(token).await;
+        let _ = udp.handle(globals, sock).await;
     });
 
     tokio::time::sleep(Duration::from_millis(200)).await;
@@ -192,7 +112,6 @@ async fn server_start_udp_dispatches_to_router() {
 
 #[tokio::test]
 async fn server_start_multi_protocol_with_tcp_and_udp() {
-    use aex::connection::context::get_udp_router;
     let a = free_addr().await;
     let counter = Arc::new(AtomicUsize::new(0));
     let c = counter.clone();
@@ -207,14 +126,17 @@ async fn server_start_multi_protocol_with_tcp_and_udp() {
         }
     });
 
-    // tcp + udp 同时配置，start() 走 start_multi_protocol
-    let server = Server::new(a, None)
-        .tcp(TcpRouter::<RawCodec, RawCodec>::new())
-        .udp(udp);
-    assert!(get_udp_router::<RawCodec, RawCodec>(&server.globals.routers).is_some());
-
-    let handle = tokio::spawn(async move {
+    // TCP 由统一 server 启动，UDP 由 router 在后台独立收包。
+    let server = Server::solo(a).push(tcp!());
+    let globals = server.globals.clone();
+    let tcp_handle = tokio::spawn(async move {
         let _ = server.start().await;
+    });
+
+    let udp = Arc::new(udp);
+    let sock = Arc::new(tokio::net::UdpSocket::bind(a).await.unwrap());
+    let udp_handle = tokio::spawn(async move {
+        let _ = udp.handle(globals, sock).await;
     });
 
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -232,5 +154,6 @@ async fn server_start_multi_protocol_with_tcp_and_udp() {
     .await
     .expect("udp handler never ran via start()");
     assert_eq!(counter.load(Ordering::SeqCst), 1);
-    handle.abort();
+    tcp_handle.abort();
+    udp_handle.abort();
 }

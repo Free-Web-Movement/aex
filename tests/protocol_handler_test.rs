@@ -157,7 +157,7 @@ async fn handoff_descends_into_named_sub_handler() {
                 Box::pin(async { Outcome::Handoff("websocket".to_string()) })
             },
         )
-        .with_sub_handler(child),
+        .sub(child),
     );
 
     let mut ctx = test_ctx();
@@ -401,7 +401,7 @@ async fn protocol_trait_delegates_whole_handler() {
             },
         )
         .with_middleware(exec(mw_ran.clone(), true))
-        .with_sub_handler(child)
+        .sub(child)
         .with_command(
             "k",
             Arc::new(

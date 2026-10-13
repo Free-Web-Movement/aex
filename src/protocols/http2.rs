@@ -20,119 +20,155 @@ use crate::http::protocol::method::HttpMethod;
 use crate::http::protocol::version::HttpVersion;
 use crate::protocols::classify::H2_CONNECTION_PREFACE;
 use crate::unified::detect::{DetectionState, ProtocolDetector, Verdict};
-use crate::unified::handler::{Outcome, ProtocolHandler};
+use crate::unified::handler::{CommandHandler, CommandKey, CommandRegistry, Outcome};
+use crate::unified::{Protocol, Transport};
 
 /// HTTP/2 request handler.
 pub type Http2Handler =
     Arc<dyn Fn(&mut Context) -> futures::future::BoxFuture<'static, bool> + Send + Sync>;
 
-/// Configuration for the HTTP/2 handler.
-#[derive(Clone, Default)]
-pub struct Http2Config {
-    /// The request handler invoked for every HTTP/2 request stream.
-    pub handler: Option<Http2Handler>,
+/// HTTP/2 protocol: claims connections via the connection preface and serves
+/// each request stream through its handler.
+pub struct Http2 {
+    handler: Option<Http2Handler>,
+    commands: CommandRegistry<Bytes>,
 }
 
-/// Build the HTTP/2 [`ProtocolHandler`].
-pub fn protocol(cfg: Http2Config) -> Arc<ProtocolHandler<Bytes>> {
-    let http2 = ProtocolHandler::new(
-        "http2",
-        move |_handler: &ProtocolHandler<Bytes>, ctx: &mut Context| {
-            let cfg = cfg.clone();
-            Box::pin(async move { handle(&cfg, ctx).await })
-        },
-    )
-    .with_detector(Arc::new(Http2Detector));
-    Arc::new(http2)
-}
-
-/// Serve one HTTP/2 connection.
-pub async fn handle(cfg: &Http2Config, ctx: &mut Context) -> Outcome {
-    let io = Reunited {
-        reader: ctx.reader.take(),
-        writer: ctx.writer.take(),
-    };
-
-    let mut conn = match h2::server::handshake(io).await {
-        Ok(c) => c,
-        Err(e) => {
-            tracing::warn!("[H2] handshake failed: {}", e);
-            return Outcome::Done;
+impl Http2 {
+    /// The HTTP/2 protocol. `handler` is invoked for every HTTP/2 request
+    /// stream; `None` still answers requests with an empty response.
+    pub fn new(handler: Option<Http2Handler>) -> Self {
+        Self {
+            handler,
+            commands: CommandRegistry::new(),
         }
-    };
+    }
 
-    let globals = ctx.global.clone();
-    let peer_addr = ctx.addr;
+    /// Register a protocol command handler.
+    pub fn with_command<K: Into<CommandKey>>(
+        mut self,
+        key: K,
+        handler: CommandHandler<Bytes>,
+    ) -> Self {
+        self.commands.register(key, handler);
+        self
+    }
 
-    loop {
-        tokio::select! {
-            frame = conn.accept() => {
-                match frame {
-                    Some(Ok((request, mut responder))) => {
-                        let path = request.uri().path().to_string();
-                        let method_str = request.method().as_str();
-                        let http_method = HttpMethod::from_str(method_str).unwrap_or(HttpMethod::GET);
+    /// Serve one HTTP/2 connection (struct-specific processing).
+    pub async fn handle(&self, ctx: &mut Context) -> Outcome {
+        let io = Reunited {
+            reader: ctx.reader.take(),
+            writer: ctx.writer.take(),
+        };
 
-                        let mut meta = HttpMetadata::default();
-                        meta.method = http_method;
-                        meta.path = path.clone();
-                        meta.version = HttpVersion::Http20;
+        let mut conn = match h2::server::handshake(io).await {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::warn!("[H2] handshake failed: {}", e);
+                return Outcome::Done;
+            }
+        };
 
-                        for (name, value) in request.headers() {
-                            if let Some(header_key) = HeaderKey::from_str(name.as_str()) {
-                                if let Ok(val) = value.to_str() {
-                                    meta.headers.insert(header_key, val.to_string());
+        let globals = ctx.global.clone();
+        let peer_addr = ctx.addr;
+
+        loop {
+            tokio::select! {
+                frame = conn.accept() => {
+                    match frame {
+                        Some(Ok((request, mut responder))) => {
+                            let path = request.uri().path().to_string();
+                            let method_str = request.method().as_str();
+                            let http_method = HttpMethod::from_str(method_str).unwrap_or(HttpMethod::GET);
+
+                            let mut meta = HttpMetadata::default();
+                            meta.method = http_method;
+                            meta.path = path.clone();
+                            meta.version = HttpVersion::Http20;
+
+                            for (name, value) in request.headers() {
+                                if let Some(header_key) = HeaderKey::from_str(name.as_str()) {
+                                    if let Ok(val) = value.to_str() {
+                                        meta.headers.insert(header_key, val.to_string());
+                                    }
+                                }
+                            }
+
+                            let is_ws = WebSocket::check(http_method, &meta.headers);
+                            if is_ws {
+                                meta.is_websocket = true;
+                            }
+
+                            let mut stream_ctx = Context::new(None, None, globals.clone(), peer_addr);
+                            stream_ctx.set(meta);
+
+                            if let Some(h) = &self.handler {
+                                h(&mut stream_ctx).await;
+                            } else {
+                                tracing::warn!("[H2] No HTTP/2 handler registered");
+                            }
+
+                            let meta = stream_ctx.local.get_ref::<HttpMetadata>();
+                            let status = if let Some(m) = meta {
+                                m.status.to_http_status()
+                            } else {
+                                http::StatusCode::OK
+                            };
+                            let mut body_str = String::new();
+                            if let Some(m) = meta {
+                                body_str = String::from_utf8_lossy(&m.body).to_string();
+                            }
+
+                            let resp_builder = http::Response::builder().status(status);
+
+                            match resp_builder.body(()) {
+                                Ok(resp) => {
+                                    if let Ok(mut send_stream) = responder.send_response(resp, false) {
+                                        let _ = send_stream.send_data(Bytes::from(body_str), true);
+                                    }
+                                }
+                                Err(e) => {
+                                    tracing::warn!("[H2] build response failed: {}", e);
                                 }
                             }
                         }
-
-                        let is_ws = WebSocket::check(http_method, &meta.headers);
-                        if is_ws {
-                            meta.is_websocket = true;
+                        Some(Err(e)) => {
+                            tracing::warn!("[H2] frame error: {}", e);
                         }
-
-                        let mut stream_ctx = Context::new(None, None, globals.clone(), peer_addr);
-                        stream_ctx.set(meta);
-
-                        if let Some(h) = &cfg.handler {
-                            h(&mut stream_ctx).await;
-                        } else {
-                            tracing::warn!("[H2] No HTTP/2 handler registered");
-                        }
-
-                        let meta = stream_ctx.local.get_ref::<HttpMetadata>();
-                        let status = if let Some(m) = meta {
-                            m.status.to_http_status()
-                        } else {
-                            http::StatusCode::OK
-                        };
-                        let mut body_str = String::new();
-                        if let Some(m) = meta {
-                            body_str = String::from_utf8_lossy(&m.body).to_string();
-                        }
-
-                        let resp_builder = http::Response::builder().status(status);
-
-                        match resp_builder.body(()) {
-                            Ok(resp) => {
-                                if let Ok(mut send_stream) = responder.send_response(resp, false) {
-                                    let _ = send_stream.send_data(Bytes::from(body_str), true);
-                                }
-                            }
-                            Err(e) => {
-                                tracing::warn!("[H2] build response failed: {}", e);
-                            }
-                        }
+                        None => break,
                     }
-                    Some(Err(e)) => {
-                        tracing::warn!("[H2] frame error: {}", e);
-                    }
-                    None => break,
                 }
             }
         }
+        Outcome::Done
     }
-    Outcome::Done
+
+    /// Box this protocol for registration.
+    pub fn shared(self) -> Arc<Self> {
+        Arc::new(self)
+    }
+}
+
+impl Protocol for Http2 {
+    fn name(&self) -> &str {
+        "http2"
+    }
+
+    fn detector(&self) -> Option<Arc<dyn ProtocolDetector>> {
+        Some(Arc::new(Http2Detector))
+    }
+
+    fn commands(&self) -> &CommandRegistry<Bytes> {
+        &self.commands
+    }
+
+    fn transport(&self) -> Transport {
+        Transport::Stream
+    }
+
+    fn process<'a>(&'a self, ctx: &'a mut Context) -> futures::future::BoxFuture<'a, Outcome> {
+        Box::pin(async move { self.handle(ctx).await })
+    }
 }
 
 /// Detector for the HTTP/2 connection preface.

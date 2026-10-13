@@ -285,15 +285,13 @@ async fn tls_sniff_and_termination_e2e() {
                     })
                 })),
             ))
-            .push(tcp::protocol(tcp::TcpConfig {
-                handler: Some(Arc::new(|ctx: Context| {
-                    tokio::spawn(async move {
-                        let mut ctx = ctx;
-                        if let Some(w) = ctx.writer.as_mut() {
-                            let _ = w.write_all(b"plain\n").await;
-                        }
-                    })
-                })),
+            .push(aex::tcp_raw!(|ctx: Context| {
+                tokio::spawn(async move {
+                    let mut ctx = ctx;
+                    if let Some(w) = ctx.writer.as_mut() {
+                        let _ = w.write_all(b"plain\n").await;
+                    }
+                })
             }))
     });
     wait_listening(addr).await;

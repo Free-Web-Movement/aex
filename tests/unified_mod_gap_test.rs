@@ -5,13 +5,13 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use aex::connection::context::Context;
 use aex::connection::global::GlobalContext;
 use aex::protocols::classify::ProtocolKind;
-use aex::protocols::http1::{Http1Config, Http11Detector};
-use aex::protocols::http2::{Http2Config, Http2Detector};
-use aex::protocols::tcp::{TcpConfig, from_handler};
-use aex::protocols::udp::UdpConfig;
+use aex::protocols::http1::Http11Detector;
+use aex::protocols::http2::Http2Detector;
+use aex::protocols::tcp::from_handler;
 use aex::unified::{
     DetectionState, DetectorRegistry, Position, ProtocolDetector, UnifiedServer, Verdict,
 };
+use aex::{http2, tcp_raw, udp};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::time::{Duration, sleep};
@@ -92,7 +92,7 @@ fn test_unified_builder_methods() {
             "extra",
             Some(Arc::new(|_ctx: Context| tokio::spawn(async {}))),
         ))
-        .push(aex::protocols::udp::protocol(UdpConfig::default()))
+        .push(udp!())
         .detection(false);
 
     assert!(!server.detect_enabled);
@@ -127,13 +127,11 @@ async fn test_detection_disabled_skips_peek() {
     let server = UnifiedServer::at(addr, Arc::new(GlobalContext::new(addr, None)))
         .detector(Arc::new(Http11Detector))
         .detection(false)
-        .push(aex::protocols::tcp::protocol(TcpConfig {
-            handler: Some(Arc::new(move |_ctx| {
-                let h = h.clone();
-                tokio::spawn(async move {
-                    h.fetch_add(1, Ordering::SeqCst);
-                })
-            })),
+        .push(tcp_raw!(move |_ctx| {
+            let h = h.clone();
+            tokio::spawn(async move {
+                h.fetch_add(1, Ordering::SeqCst);
+            })
         }));
 
     tokio::spawn(async move {
@@ -159,13 +157,11 @@ async fn test_claim_without_custom_handler_falls_back_to_tcp() {
 
     let server = UnifiedServer::at(addr, Arc::new(GlobalContext::new(addr, None)))
         .detector(Arc::new(Claimer))
-        .push(aex::protocols::tcp::protocol(TcpConfig {
-            handler: Some(Arc::new(move |_ctx| {
-                let h = h.clone();
-                tokio::spawn(async move {
-                    h.fetch_add(1, Ordering::SeqCst);
-                })
-            })),
+        .push(tcp_raw!(move |_ctx| {
+            let h = h.clone();
+            tokio::spawn(async move {
+                h.fetch_add(1, Ordering::SeqCst);
+            })
         }));
 
     tokio::spawn(async move {
@@ -189,13 +185,11 @@ async fn test_http2_preface_without_enable_falls_back_to_tcp() {
 
     let server = UnifiedServer::at(addr, Arc::new(GlobalContext::new(addr, None)))
         .detector(Arc::new(Http2Detector))
-        .push(aex::protocols::tcp::protocol(TcpConfig {
-            handler: Some(Arc::new(move |_ctx| {
-                let h = h.clone();
-                tokio::spawn(async move {
-                    h.fetch_add(1, Ordering::SeqCst);
-                })
-            })),
+        .push(tcp_raw!(move |_ctx| {
+            let h = h.clone();
+            tokio::spawn(async move {
+                h.fetch_add(1, Ordering::SeqCst);
+            })
         }));
 
     tokio::spawn(async move {
@@ -259,7 +253,7 @@ async fn test_http_request_with_no_handler_returns_error() {
     let addr = free_addr().await;
 
     let server = UnifiedServer::at(addr, Arc::new(GlobalContext::new(addr, None)))
-        .push(aex::protocols::http1::protocol(Http1Config::new()));
+        .push(aex::http!());
 
     tokio::spawn(async move {
         server.start().await.ok();
@@ -282,19 +276,17 @@ async fn test_udp_handler_receives_datagram() {
     let hits = Arc::new(AtomicUsize::new(0));
     let h = hits.clone();
 
-    let server = UnifiedServer::at(addr, Arc::new(GlobalContext::new(addr, None))).push(
-        aex::protocols::udp::protocol(UdpConfig {
-            handler: Some(Arc::new(move |ctx| {
-                let h = h.clone();
-                tokio::spawn(async move {
-                    let data: Vec<u8> = ctx.get().unwrap_or_default();
-                    if data == b"ping" {
-                        h.fetch_add(1, Ordering::SeqCst);
-                    }
-                })
-            })),
-        }),
-    );
+    let server = UnifiedServer::at(addr, Arc::new(GlobalContext::new(addr, None))).push(udp!(
+        move |ctx| {
+            let h = h.clone();
+            tokio::spawn(async move {
+                let data: Vec<u8> = ctx.get().unwrap_or_default();
+                if data == b"ping" {
+                    h.fetch_add(1, Ordering::SeqCst);
+                }
+            })
+        }
+    ));
 
     tokio::spawn(async move {
         server.start().await.ok();
@@ -316,19 +308,17 @@ async fn test_http2_handler_receives_request() {
     let hits = Arc::new(AtomicUsize::new(0));
     let h = hits.clone();
 
-    let server = UnifiedServer::at(addr, Arc::new(GlobalContext::new(addr, None))).push(
-        aex::protocols::http2::protocol(Http2Config {
-            handler: Some(Arc::new(move |ctx: &mut Context| {
-                let h = h.clone();
-                let meta = ctx.local.get_ref::<aex::http::meta::HttpMetadata>();
-                let _path = meta.map(|m| m.path.clone()).unwrap_or_default();
-                Box::pin(async move {
-                    h.fetch_add(1, Ordering::SeqCst);
-                    true
-                })
-            })),
-        }),
-    );
+    let server = UnifiedServer::at(addr, Arc::new(GlobalContext::new(addr, None))).push(http2!(
+        move |ctx: &mut Context| {
+            let h = h.clone();
+            let meta = ctx.local.get_ref::<aex::http::meta::HttpMetadata>();
+            let _path = meta.map(|m| m.path.clone()).unwrap_or_default();
+            Box::pin(async move {
+                h.fetch_add(1, Ordering::SeqCst);
+                true
+            })
+        }
+    ));
 
     tokio::spawn(async move {
         server.start().await.ok();

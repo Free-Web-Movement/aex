@@ -1,6 +1,4 @@
 use aex::http2::H2Codec;
-use aex::server::Server;
-use std::net::SocketAddr;
 use std::sync::Arc;
 
 use aex::connection::global::GlobalContext;

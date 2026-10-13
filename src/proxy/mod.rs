@@ -14,9 +14,11 @@
 //! TLS ClientHello                       detector claim → custom handler
 //! ```
 //!
-//! Proxies are opt-in (`UnifiedServer::enable_http_proxy` /
-//! `enable_socks_proxy`): an unintentionally open relay is a liability, so
-//! nothing is exposed implicitly. An optional authenticator gates both.
+//! Proxies are opt-in: an unintentionally open relay is a liability, so
+//! nothing is exposed implicitly. Mount them as protocols on the unified
+//! server ([`crate::protocols::proxy::http_proxy`] /
+//! [`crate::protocols::socks::protocol`]); an optional authenticator gates
+//! both.
 
 pub mod http_proxy;
 pub mod socks;

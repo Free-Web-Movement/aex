@@ -21,17 +21,18 @@ cargo add tokio --features full
 
 ```rust
 use aex::http::router::Router as HttpRouter;
-use aex::server::HTTPServer;
-use aex::_sync;
+use aex::unified::Server;
+use aex::{_sync, http, tcp};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    let addr: SocketAddr = "0.0.0.0:8080".parse()?;
     let mut router = HttpRouter::default();
-    // 同步闭包：`_sync!` 保留免标注写法 `|_| "OK"`（与 `_async!` 同为 Arc<Executor>）
-    router.get("/", _sync!(|_| "Hello, World!"));
 
-    HTTPServer::new("0.0.0.0:8080".parse()?, None)
-        .http(router)
+    router.get("/", _sync!(|_| "OK"));
+
+    Server::solo(addr)
+        .push(tcp!(http!(router)))
         .start()
         .await?;
     Ok(())
@@ -42,11 +43,12 @@ async fn main() -> anyhow::Result<()> {
 
 ```rust
 use aex::http::router::Router as HttpRouter;
-use aex::server::HTTPServer;
-use aex::_async;
+use aex::unified::Server;
+use aex::{_async, http, tcp};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    let addr: SocketAddr = "0.0.0.0:8080".parse()?;
     let mut router = HttpRouter::default();
     // 异步闭包：`_async!` 内部支持 await，同样免标注
     router.get("/", _async!(|ctx| {
@@ -55,8 +57,8 @@ async fn main() -> anyhow::Result<()> {
         true
     }));
 
-    HTTPServer::new("0.0.0.0:8080".parse()?, None)
-        .http(router)
+    Server::solo(addr)
+        .push(tcp!(http!(router)))
         .start()
         .await?;
     Ok(())
@@ -271,12 +273,19 @@ aex = { version = "0.1", features = ["proxy"] }
 ```
 
 ```rust
-let server = UnifiedServer::new(addr, globals)
-    .enable_http_proxy()   // 自动挂载 Http11Detector，origin-form 仍走网站
-    .enable_socks_proxy()  // 自动注册 SocksDetector 与内部 handler
-    .proxy_authenticator(Arc::new(|u, p| u == "alice" && p == "secret"))
-    // .enable_proxies()    // 或一次性开启两个
-    .http_handler(/* 网站业务 */);
+use aex::connection::global::GlobalContext;
+use aex::protocols::{proxy, socks};
+use aex::proxy::ProxyAuthorizer;
+use aex::unified::UnifiedServer;
+use std::sync::Arc;
+
+let authorizer: ProxyAuthorizer = Arc::new(|user, pass| user == "alice" && pass == "secret");
+
+let server = UnifiedServer::at(addr, Arc::new(GlobalContext::new(addr, None)))
+    // 同一个 HTTP/1.1 协议既服务网站（origin-form），也服务 HTTP 正向代理
+    // （absolute-form / CONNECT），受同一套凭据约束。
+    .push(proxy::http_proxy(None, Some(website), Some(authorizer.clone())))
+    .push(socks::protocol(Some(authorizer)));
 server.start().await?;
 ```
 
@@ -288,38 +297,106 @@ server.start().await?;
 ### 统一服务器 (UnifiedServer)
 
 ```rust
-use aex::unified::{UnifiedServer, Protocol};
 use aex::http::router::Router as HttpRouter;
+use aex::unified::UnifiedServer;
+use aex::{http, tcp_raw, udp, _async};
 use std::net::SocketAddr;
-use std::sync::Arc;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let addr: SocketAddr = "0.0.0.0:8080".parse()?;
-    let globals = Arc::new(GlobalContext::new(addr, None));
-    
+
     // HTTP 路由
     let mut http_router = HttpRouter::default();
     http_router.get("/", _async!(|ctx| { ctx.text("Hello from unified server!"); true }));
-    
-    // 创建统一服务器
-    let server = UnifiedServer::new(addr, globals)
-        .http_router(http_router)
-        .http_handler(my_http_handler)
-        .enable_http2()
-        .http2_handler(my_http2_handler)
-        .tcp_handler(Arc::new(|ctx| {
-            tokio::spawn(handle_tcp_connection(ctx));
-        }))
-        .udp_handler(Arc::new(|ctx| {
-            tokio::spawn(handle_udp_packet(ctx));
-        }));
-    
+
+    // 创建统一服务器：顶层只挂 TCP / UDP，其余协议作为子处理器
+    let server = UnifiedServer::solo(addr)
+        .push(tcp_raw!(
+            |ctx| tokio::spawn(handle_tcp_connection(ctx)),
+            http!(http_router)
+        ))
+        .push(udp!(|ctx| tokio::spawn(handle_udp_packet(ctx))));
+
     // 启动服务器 - 所有协议共享同一端口
     server.start().await?;
     Ok(())
 }
 ```
+### 服务器启动模式
+
+统一服务器的生命周期分三步：**构造 → 挂载协议 → 启动**。
+
+#### 1. 构造：共享还是独立上下文
+
+`GlobalContext` 承载跨连接的共享状态（连接管理器、事件总线、`PairedSessionKey`、业务注册的数据等）。
+
+| 构造器 | 上下文 | 地址 | 用途 |
+|---|---|---|---|
+| `Server::at(addr, globals)` | **复用**传入的 `Arc<GlobalContext>` | 绑定 `addr` | 生产：与其他组件共享同一份全局状态 |
+| `Server::new(globals)` | **复用**传入的 `GlobalContext` | 未绑定（留给 `listen`） | 与 `at` 等价，链式结尾用 `.listen(addr)` |
+| `Server::solo(addr)` | **新建**独立 `GlobalContext`（含新 `PairedSessionKey`） | 绑定 `addr` | examples / tests：自成一体、不共享全局状态；等价旧 `Server::new(addr, None)` |
+
+**同一进程内要共享状态的服务器，必须用 `at` / `new` 传入同一个 `Arc<GlobalContext>`**；
+只有“这台服务器不跟外界共享任何状态”时才用 `solo`。多台服务器各自 `solo`
+会得到**互相隔离**的连接表、事件总线与 session key。
+
+#### 2. 挂载：顶层挂 TCP / UDP（其它作为子处理器）
+
+`push(protocol)`（原地版 `mount`）是唯一挂载入口。**推荐顶层挂 `Tcp` 兜底 + `Udp`**，
+HTTP / HTTP/2 / WebSocket / 代理等作为 `Tcp` 的**子处理器**；只服务某一种流协议时，
+也可把它直接 `push` 到顶层（此时没有非该协议的兜底）：
+
+```rust
+use aex::{http, tcp, udp};
+
+Server::at(addr, globals)
+    .push(tcp!(http!(router)))   // 顶层 TCP，HTTP 作为其子处理器
+    .push(udp!());               // 数据报协议
+```
+
+- `Tcp` 是流式兜底：检测层认领后，把连接交给能处理该协议的**子处理器**（HTTP → WebSocket）。
+- `Udp` 进数据报槽位；`start()` 会在后台为它起一个 UDP 接收循环。
+- 带 `detector` 的协议挂载时自动把探测器登记进检测目录，通常无需手动 `.detector(...)`。
+
+#### 协议宏（简化书写）
+
+每个内置协议都有同名宏，展开为 `Struct::new(..).shared()`，可组合：
+
+| 宏 | 展开 / 说明 |
+|---|---|
+| `http!(router)` / `http1!(router)` | HTTP/1.1，默认带一个用同一 router 构建的 WebSocket 子处理器（`http1!` 为别名） |
+| `http!(router, ws!(ws_router))` | 用指定 WebSocket 子处理器替换默认（WebSocket 只经 HTTP 升级触达，故作为 `http!` 的参数传入） |
+| `http!(router, handler: h)` | 显式 handler 优先于 router |
+| `http2!()` / `http2!(handler)` | HTTP/2 |
+| `ws!(router)` | 构造 WebSocket 协议，作为 `http!` 的参数使用 |
+| `tcp!(sub, …)` | 顶层 TCP，挂若干子处理器；`tcp!()` 为纯兜底 |
+| `tcp_raw!(handler, sub, …)` | 带原始连接 handler 的 TCP |
+| `udp!()` / `udp!(handler)` | UDP 数据报协议 |
+
+```rust
+use aex::{http, http2, tcp, udp};
+
+Server::solo(addr)
+    .push(tcp!(http!(router), http2!()))  // 一个 TCP 兜底，下挂 HTTP/1.1 + HTTP/2
+    .push(udp!(|ctx| tokio::spawn(handle_ctx(ctx))))
+    .start()
+    .await?;
+
+// WebSocket 通过 HTTP 升级触达，因此传给 http!（而非单独挂载）
+Server::solo(addr).push(http!(router, ws!(ws_router))).start().await?;
+```
+
+#### 3. 启动：start / listen
+
+| 方法 | 行为 |
+|---|---|
+| `.start().await` | 绑定 `self.addr`，跑 TCP accept 循环；**若挂了 `Udp` 协议，同时在后台 `spawn` 一个 UDP 接收循环**。阻塞不返回。 |
+| `.listen(addr).await` | 先把地址设为 `addr` 再执行 `start()`；`Server::new(gctx).push(...)` 的顺手收尾。 |
+
+`start()` 对 UDP 用 `tokio::spawn`，因此 TCP 主循环与 UDP 循环在**同一进程内并发**，
+共用同一个端口号（TCP / UDP 端口彼此独立）。TCP 与 UDP 的协议处理完全由各自挂载的
+协议处理器（`Tcp` / `Udp`）承担，Server 不再暴露单独的 `start_tcp` / `start_udp` 入口。
 
 ### 协议检测器体系（DetectorRegistry）
 
@@ -328,8 +405,9 @@ async fn main() -> anyhow::Result<()> {
 按需手动添加，顺序即优先级：
 
 ```rust
+use aex::protocols::{http1::Http11Detector, http2::Http2Detector};
 use aex::unified::{
-    DetectorMode, DetectorRegistry, Http11Detector, Http2Detector, Position,
+    DetectorMode, DetectorRegistry, Position,
     ProtocolDetector, DetectionState, Verdict,
 };
 
@@ -351,11 +429,11 @@ impl ProtocolDetector for TrojanDetector {
     }
 }
 
-let server = UnifiedServer::new(addr, globals)
+let server = UnifiedServer::new(Arc::new(GlobalContext::new(addr, None)))
     .detector(Arc::new(TrojanDetector))          // 排在队首，先于 HTTP 判定
-    .detector(Arc::new(Http2Detector))           // 内置组件同样手动挂载
+    .detector(Arc::new(Http2Detector))           // 内置组件同样可手动挂载
     .detector_at(Position::Front, Arc::new(Http11Detector))  // 指定插入位置
-    .custom_handler("trojan", Arc::new(|ctx| tokio::spawn(async move { /* ... */ })));
+    .push(trojan_protocol);                      // 认领后的处理由挂载的 Protocol 负责
 ```
 
 核心语义：
@@ -418,25 +496,14 @@ pub type TCPHandler = Arc<dyn Fn(Context) -> JoinHandle<()> + Send + Sync>;
 pub type UDPHandler = Arc<dyn Fn(Context) -> JoinHandle<()> + Send + Sync>;
 ```
 
-### 泛型方法
-
-TCP/UDP 可以使用不同的 frame/command 对，通过 `start_tcp::<F, C>()` / `start_udp::<F, C>()` 方法：
-
-```rust
-// TCP 使用 MyFrame, MyCommand
-server.start_tcp::<MyFrame, MyCommand>().await?;
-
-// UDP 使用 OtherFrame, OtherCommand  
-server.start_udp::<OtherFrame, OtherCommand>().await?;
-```
-
 ---
 
 ## HTTP 快速开始
 
 ### 构建一个 Web 服务器
 
-三步走：**建 Router → 注册路由 → 交给 HTTPServer 启动**。
+三步走：**建 Router → 注册路由 → 交给统一服务器（`Server`）启动**。
+顶层只挂 TCP/UDP；HTTP 作为 TCP 的子处理器加载。
 
 Handler 有两种形态，都是 `Arc<Executor>`，`IntoExecutor` trait 统一接受，可混用：
 - **同步** `_sync!(|ctx| R)`（别名 `now!`）：免标注，不能 `await`；效果等价于直接传 `|ctx: &mut Context| R`；
@@ -446,8 +513,8 @@ Handler 有两种形态，都是 `Arc<Executor>`，`IntoExecutor` trait 统一�
 
 ```rust
 use aex::http::router::{NodeType, Router as HttpRouter};
-use aex::server::HTTPServer;
-use aex::_sync;
+use aex::unified::Server;
+use aex::{_sync, http, tcp};
 use std::net::SocketAddr;
 
 #[tokio::main]
@@ -457,16 +524,16 @@ async fn main() -> anyhow::Result<()> {
 
     router.get("/", _sync!(|_| "Hello, World!"));
 
-    HTTPServer::new(addr, None)
-        .http(router)
+    Server::solo(addr)
+        .push(tcp!(http!(router)))
         .start()
         .await?;
     Ok(())
 }
 ```
 
-需要 HTTP/2、WebSocket、TCP、UDP 共用同一端口时，用 [统一服务器 (UnifiedServer)](#统一服务器-unifiedserver)
-的 `HTTPServer::new(addr, None).http(router).http2().start()` 形式，注册方式完全不变。
+需要 HTTP/2、WebSocket、TCP、UDP 共用同一端口时，把更多协议作为 TCP 的子处理器挂上，
+例如 HTTP/2：`tcp!(http!(router), http2!())`。
 
 ### HTTP 路由详解
 
@@ -583,15 +650,13 @@ router.push(User { name: "aex".into(), db: "...".into() });
 HTTP/2 与 HTTP/1.1 共用同一个 router：
 
 ```rust
-use aex::server::HTTPServer;
+use aex::{http, http2, tcp};
 use aex::http::router::{NodeType, Router as HttpRouter};
-use aex::tcp::types::RawCodec;
+use aex::unified::Server;
 use std::net::SocketAddr;
-use std::sync::Arc;
 
-HTTPServer::new(addr, None)
-    .http(router)    // HTTP/1.1
-    .http2()         // HTTP/2 (使用同一个 router)
+Server::solo(addr)
+    .push(tcp!(http!(router), http2!())) // HTTP/1.1 + HTTP/2 共用同一 router
     .start()
     .await?;
 ```
@@ -890,17 +955,16 @@ router.get_with("/x", [_sync!(|_| true), rate_limiter], |_ctx: &mut Context| tru
 
 | 方法 | 说明 |
 |------|------|
-| `.http_router(router)` | 设置 HTTP 路由 |
-| `.http_handler(handler)` | 设置 HTTP 处理器 |
-| `.enable_http2()` | 启用 HTTP/2 支持 |
-| `.http2_handler(handler)` | 设置 HTTP/2 处理器 |
-| `.tcp_handler(handler)` | 设置 TCP 处理器 |
-| `.udp_handler(handler)` | 设置 UDP 处理器 |
+| `.new(globals)` / `.at(addr, globals)` / `.solo(addr)` | 构造（共享上下文 / 指定地址+上下文 / 独立上下文） |
+| `.push(protocol)` | 挂载一个实现了 `Protocol` 的协议（HTTP / HTTP2 / WebSocket / TCP / UDP / 自定义） |
+| `.mount(protocol)` | 同 `push`，以 `&mut self` 形式挂载 |
 | `.detector(d)` / `.detector_at(pos, d)` | 注册协议检测器（队尾 / 指定位置） |
-| `.custom_handler(protocol, handler)` | 为自定义协议注册专属处理器 |
 | `.with_registry(registry)` | 共享外部管理的检测器目录（运行时增删） |
-| `.detection(bool)` | 开关检测阶段；关闭后连接直接进 TCP handler，不嗅探 |
+| `.detection(bool)` | 开关检测阶段；关闭后连接直接进默认 TCP 处理器，不嗅探 |
 | `.start()` | 启动统一服务器 |
+
+> 推荐的顶层处理器是 `Tcp`（流）与 `Udp`（数据报）；HTTP、HTTP/2、WebSocket 等通常作为
+> `Tcp` 的子处理器（用宏写作 `tcp!(http!(router))`）。只服务流协议时也可直接 `push(http!(router))`。
 
 > 连接属性：统一服务器在分发前把 `ConnectionFd`（原始文件描述符）写入 ctx，
 > split 后的读写半部仍可做 fd 级操作（如 NAT 场景的 `SO_ORIGINAL_DST` 原目的地址查询）。

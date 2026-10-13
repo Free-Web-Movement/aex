@@ -8,6 +8,7 @@
 
 pub mod classify;
 pub mod http1;
+mod macros;
 pub mod http2;
 #[cfg(feature = "proxy")]
 pub mod socks;

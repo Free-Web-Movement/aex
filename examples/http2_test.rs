@@ -1,7 +1,11 @@
 use aex::connection::context::Context;
 use aex::http::router::Router as HttpRouter;
-use aex::server::Server;
+use aex::protocols::http1::Http1;
+use aex::protocols::http2::Http2;
+use aex::protocols::tcp::Tcp;
+use aex::unified::Server;
 use std::net::SocketAddr;
+use std::sync::Arc;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -21,6 +25,14 @@ async fn main() -> anyhow::Result<()> {
     println!("Starting HTTP/2 server on {}", addr);
     println!("Use: curl --http2 http://localhost:8080/");
 
-    Server::new(addr, None).http(router).http2().start().await?;
+    Server::solo(addr)
+        .push(
+            Tcp::new(None)
+                .sub(Http1::new(Some(Arc::new(router)), None).shared())
+                .sub(Http2::new(None).shared())
+                .shared(),
+        )
+        .start()
+        .await?;
     Ok(())
 }

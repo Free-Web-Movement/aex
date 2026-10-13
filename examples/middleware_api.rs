@@ -3,7 +3,9 @@ use aex::http::meta::HttpMetadata;
 use aex::http::protocol::header::HeaderKey;
 use aex::http::router::Router as HttpRouter;
 use aex::http::types::{Executor, IntoExecutor};
-use aex::server::HTTPServer;
+use aex::protocols::http1::Http1;
+use aex::protocols::tcp::Tcp;
+use aex::unified::Server;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
@@ -93,6 +95,13 @@ async fn main() -> anyhow::Result<()> {
         addr
     );
 
-    HTTPServer::new(addr, None).http(router).start().await?;
+    Server::solo(addr)
+        .push(
+            Tcp::new(None)
+                .sub(Http1::new(Some(std::sync::Arc::new(router)), None).shared())
+                .shared(),
+        )
+        .start()
+        .await?;
     Ok(())
 }

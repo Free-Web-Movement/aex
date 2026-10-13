@@ -18,7 +18,7 @@ use tokio::io::AsyncWriteExt;
 
 use aex::connection::context::Context;
 use aex::connection::global::GlobalContext;
-use aex::protocols::tcp;
+use aex::protocols::tcp::{self, Tcp};
 use aex::unified::UnifiedServer;
 use aex::unified::detect::DetectionState;
 
@@ -44,8 +44,7 @@ async fn main() -> anyhow::Result<()> {
             "tls",
             Some(Arc::new(|ctx: Context| tokio::spawn(sni_echo(ctx)))),
         ))
-        .push(tcp::protocol(tcp::TcpConfig {
-            handler: Some(Arc::new(|ctx: Context| {
+        .push(Tcp::new(Some(Arc::new(|ctx: Context| {
                 tokio::spawn(async move {
                     let mut ctx = ctx;
                     // Non-TLS traffic lands here.
@@ -53,8 +52,7 @@ async fn main() -> anyhow::Result<()> {
                         let _ = w.write_all(b"plain tcp\n").await;
                     }
                 })
-            })),
-        }));
+            }))).shared());
 
     eprintln!("detector_tls listening on {addr}");
     server.start().await

@@ -1,6 +1,6 @@
 // Unit tests for the unified protocol server (`aex::unified::Server`): the
 // Protocol trait defaults, mount/detector registration edge warnings, the
-// detection-phase EOF path, the listen/start_tcp/start_udp entry points, and
+// detection-phase EOF path, the listen/start entry points, and
 // per-protocol edge cases (HTTP/1 parse failure, HTTP/2 handshake failure and
 // no-handler path, TCP/UDP with no handler, NAT detector).
 
@@ -13,16 +13,16 @@ use aex::connection::context::Context;
 use aex::connection::global::GlobalContext;
 use aex::nat::UnifiedServerExt as _;
 use aex::protocols::classify::H2_CONNECTION_PREFACE;
-use aex::protocols::http1::{Http1Config, Http11Detector};
-use aex::protocols::http2::{Http2Config, Http2Detector};
-use aex::protocols::tcp::{TcpConfig, from_handler};
-use aex::protocols::udp::UdpConfig;
+use aex::protocols::http1::Http11Detector;
+use aex::protocols::http2::{Http2, Http2Detector};
+use aex::protocols::tcp::from_handler;
 use aex::tcp::types::RawCodec;
 use aex::unified::handler::{CommandRegistry, Outcome};
 use aex::unified::{
     Claim, DetectionState, DetectorMode, Protocol, ProtocolDetector, Transport, UnifiedServer,
     Verdict,
 };
+use aex::{http2, tcp, tcp_raw, udp};
 use futures::future::BoxFuture;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream, UdpSocket};
@@ -53,7 +53,7 @@ impl Protocol for Bare {
     fn commands(&self) -> &CommandRegistry<Bytes> {
         &self.cmds
     }
-    fn run<'a>(&'a self, _ctx: &'a mut Context) -> BoxFuture<'a, Outcome> {
+    fn process<'a>(&'a self, _ctx: &'a mut Context) -> BoxFuture<'a, Outcome> {
         Box::pin(async { Outcome::Done })
     }
 }
@@ -78,7 +78,7 @@ impl Protocol for BareDefault {
     fn is_default(&self) -> bool {
         true
     }
-    fn run<'a>(&'a self, _ctx: &'a mut Context) -> BoxFuture<'a, Outcome> {
+    fn process<'a>(&'a self, _ctx: &'a mut Context) -> BoxFuture<'a, Outcome> {
         Box::pin(async { Outcome::Done })
     }
 }
@@ -120,7 +120,7 @@ impl Protocol for BareDect {
     fn detector(&self) -> Option<Arc<dyn ProtocolDetector>> {
         Some(Arc::new(Claimer))
     }
-    fn run<'a>(&'a self, _ctx: &'a mut Context) -> BoxFuture<'a, Outcome> {
+    fn process<'a>(&'a self, _ctx: &'a mut Context) -> BoxFuture<'a, Outcome> {
         Box::pin(async { Outcome::Done })
     }
 }
@@ -198,7 +198,7 @@ fn mount_conflicting_detector_registration_is_logged() {
     let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
     let server = UnifiedServer::at(addr, gctx(addr))
         .detector(Arc::new(ConflictHttp11))
-        .push(aex::protocols::http1::protocol(Http1Config::new()));
+        .push(aex::http!());
 
     // Auto-registration of the http1 detector conflicts with the manual one,
     // so it is rejected; the protocol itself is still mounted.
@@ -246,35 +246,23 @@ async fn partial_peek_then_eof_finishes_detection() {
 }
 
 #[tokio::test]
-async fn start_udp_requires_datagram_protocol() {
-    let addr = free_addr().await;
-    let server = UnifiedServer::at(addr, gctx(addr));
-    let err = server.start_udp::<RawCodec, RawCodec>().await.unwrap_err();
-    assert!(err.to_string().contains("no datagram protocol"));
-}
-
-#[tokio::test]
-async fn start_udp_serves_datagrams() {
+async fn udp_datagram_served_via_start() {
     let addr = free_addr().await;
     let hits = Arc::new(AtomicUsize::new(0));
     let h = hits.clone();
 
-    let server = UnifiedServer::at(addr, gctx(addr)).push(aex::protocols::udp::protocol(
-        UdpConfig {
-            handler: Some(Arc::new(move |ctx| {
-                let h = h.clone();
-                tokio::spawn(async move {
-                    let data: Vec<u8> = ctx.get().unwrap_or_default();
-                    if data == b"ping" {
-                        h.fetch_add(1, Ordering::SeqCst);
-                    }
-                })
-            })),
-        },
-    ));
+    let server = UnifiedServer::at(addr, gctx(addr)).push(udp!(move |ctx| {
+        let h = h.clone();
+        tokio::spawn(async move {
+            let data: Vec<u8> = ctx.get().unwrap_or_default();
+            if data == b"ping" {
+                h.fetch_add(1, Ordering::SeqCst);
+            }
+        })
+    }));
 
     tokio::spawn(async move {
-        server.start_udp::<RawCodec, RawCodec>().await.ok();
+        server.start().await.ok();
     });
     sleep(Duration::from_millis(100)).await;
 
@@ -291,24 +279,20 @@ async fn start_udp_serves_datagrams() {
 }
 
 #[tokio::test]
-async fn start_tcp_serves_connections() {
+async fn tcp_connection_served_via_start() {
     let addr = free_addr().await;
     let hits = Arc::new(AtomicUsize::new(0));
     let h = hits.clone();
 
-    let server = UnifiedServer::at(addr, gctx(addr)).push(aex::protocols::tcp::protocol(
-        TcpConfig {
-            handler: Some(Arc::new(move |_ctx| {
-                let h = h.clone();
-                tokio::spawn(async move {
-                    h.fetch_add(1, Ordering::SeqCst);
-                })
-            })),
-        },
-    ));
+    let server = UnifiedServer::at(addr, gctx(addr)).push(tcp_raw!(move |_ctx| {
+        let h = h.clone();
+        tokio::spawn(async move {
+            h.fetch_add(1, Ordering::SeqCst);
+        })
+    }));
 
     tokio::spawn(async move {
-        server.start_tcp::<RawCodec, RawCodec>().await.ok();
+        server.start().await.ok();
     });
     sleep(Duration::from_millis(100)).await;
 
@@ -327,16 +311,12 @@ async fn listen_binds_provided_addr_and_serves() {
     let hits = Arc::new(AtomicUsize::new(0));
     let h = hits.clone();
 
-    let server = UnifiedServer::at(boot_addr, gctx(boot_addr)).push(
-        aex::protocols::tcp::protocol(TcpConfig {
-            handler: Some(Arc::new(move |_ctx| {
-                let h = h.clone();
-                tokio::spawn(async move {
-                    h.fetch_add(1, Ordering::SeqCst);
-                })
-            })),
-        }),
-    );
+    let server = UnifiedServer::at(boot_addr, gctx(boot_addr)).push(tcp_raw!(move |_ctx| {
+        let h = h.clone();
+        tokio::spawn(async move {
+            h.fetch_add(1, Ordering::SeqCst);
+        })
+    }));
 
     tokio::spawn(async move {
         server.listen(serve_addr).await.ok();
@@ -355,7 +335,7 @@ async fn listen_binds_provided_addr_and_serves() {
 async fn tcp_protocol_without_handler_drops_connection() {
     let addr = free_addr().await;
     let server = UnifiedServer::at(addr, gctx(addr))
-        .push(aex::protocols::tcp::protocol(TcpConfig::default()));
+        .push(tcp!());
 
     tokio::spawn(async move {
         server.start().await.ok();
@@ -372,7 +352,7 @@ async fn tcp_protocol_without_handler_drops_connection() {
 async fn udp_protocol_without_handler_drops_datagram() {
     let addr = free_addr().await;
     let server = UnifiedServer::at(addr, gctx(addr))
-        .push(aex::protocols::udp::protocol(UdpConfig::default()));
+        .push(udp!());
 
     tokio::spawn(async move {
         server.start().await.ok();
@@ -388,7 +368,7 @@ async fn udp_protocol_without_handler_drops_datagram() {
 async fn http1_malformed_request_line_is_dropped() {
     let addr = free_addr().await;
     let server = UnifiedServer::at(addr, gctx(addr))
-        .push(aex::protocols::http1::protocol(Http1Config::new()));
+        .push(aex::http!());
 
     tokio::spawn(async move {
         server.start().await.ok();
@@ -471,7 +451,7 @@ async fn http2_handshake_failure_returns_done() {
     let globals = gctx(addr);
     let mut ctx = Context::new(Some(reader), Some(writer), globals, addr);
     drop(rd);
-    let outcome = aex::protocols::http2::handle(&Http2Config::default(), &mut ctx).await;
+    let outcome = Http2::new(None).handle(&mut ctx).await;
     assert_eq!(outcome, Outcome::Done);
 }
 
@@ -481,7 +461,7 @@ async fn http2_no_handler_returns_ok() {
 
     let addr = free_addr().await;
     let server = UnifiedServer::at(addr, gctx(addr))
-        .push(aex::protocols::http2::protocol(Http2Config::default()));
+        .push(http2!());
 
     tokio::spawn(async move {
         server.start().await.ok();
@@ -529,7 +509,7 @@ fn nat_detector_max_need_and_magic() {
 async fn http1_websocket_upgrade_without_router_returns_error() {
     let addr = free_addr().await;
     let server = UnifiedServer::at(addr, gctx(addr))
-        .push(aex::protocols::http1::protocol(Http1Config::new()));
+        .push(aex::http!());
 
     tokio::spawn(async move {
         server.start().await.ok();
