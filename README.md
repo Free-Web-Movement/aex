@@ -271,7 +271,7 @@ For complete HTTP routing, middleware, HTTP/2, and WebSocket usage, see [HTTP Qu
 
 ## Version
 
-Current version: **0.1.23**
+Current version: **0.1.22**
 
 - For dependency configuration, see [Get Started](#get-started) above.
 
