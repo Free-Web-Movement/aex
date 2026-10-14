@@ -4,7 +4,6 @@ use chacha20poly1305::{
     aead::{Aead, KeyInit},
 };
 use chrono::{DateTime, Utc};
-use rand_core::TryRngCore;
 use x25519_dalek::{EphemeralSecret, PublicKey};
 
 use crate::time::SystemTime;
@@ -56,7 +55,7 @@ impl SessionKey {
         let cipher = XChaCha20Poly1305::new(&key.into());
 
         let mut nonce_bytes = [0u8; 24];
-        rand_core::OsRng.try_fill_bytes(&mut nonce_bytes).expect("OS RNG");
+        getrandom::fill(&mut nonce_bytes).expect("OS RNG");
 
         let nonce = XNonce::try_from(nonce_bytes.as_slice()).expect("24-byte nonce");
         let ct = cipher

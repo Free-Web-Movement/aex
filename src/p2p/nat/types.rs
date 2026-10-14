@@ -72,7 +72,7 @@ pub fn frame_len_from_header(head_buf: &[u8]) -> NatResult<usize> {
 }
 
 /// 穿透协议帧类型。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, bincode::Encode, bincode::Decode)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, bincode_next::Encode, bincode_next::Decode)]
 pub enum NatFrameType {
     /// 注册：内网节点向公网节点登记自己（携带节点身份）。
     Register,
@@ -97,7 +97,7 @@ pub enum NatFrameType {
 }
 
 /// 穿透协议帧。
-#[derive(Debug, Clone, bincode::Encode, bincode::Decode)]
+#[derive(Debug, Clone, bincode_next::Encode, bincode_next::Decode)]
 pub struct NatFrame {
     pub frame_type: NatFrameType,
     /// 源节点身份（node_id / 钱包地址字符串）。
@@ -203,8 +203,8 @@ impl NatFrame {
 
     /// 在线对端列表广播（payload = bincode 编码的 `Vec<(node_id, public_addr)>`）。
     pub fn peers(src: &str, peers: &[(String, String)]) -> Self {
-        let payload =
-            bincode::encode_to_vec(peers, bincode::config::standard()).unwrap_or_default();
+        let payload = bincode_next::encode_to_vec(peers, bincode_next::config::standard())
+            .unwrap_or_default();
         Self {
             frame_type: NatFrameType::Peers,
             src: src.to_string(),
@@ -217,7 +217,7 @@ impl NatFrame {
 
     /// 编码为纯 body（bincode，不含魔数/长度前缀）。
     pub fn encode(&self) -> NatResult<Vec<u8>> {
-        bincode::encode_to_vec(self, bincode::config::standard())
+        bincode_next::encode_to_vec(self, bincode_next::config::standard())
             .map_err(|e| NatError::Protocol(format!("encode failed: {e}")))
     }
 
@@ -249,7 +249,7 @@ impl NatFrame {
         } else {
             bytes
         };
-        bincode::decode_from_slice(body, bincode::config::standard())
+        bincode_next::decode_from_slice(body, bincode_next::config::standard())
             .map(|(frame, _)| frame)
             .map_err(|e| NatError::Protocol(format!("decode failed: {e}")))
     }

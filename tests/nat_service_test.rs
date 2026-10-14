@@ -82,7 +82,7 @@ fn nat_frame_punch_hint_carries_peer_addr() {
 fn nat_frame_decode_without_magic_still_works() {
     // 兼容无魔数的裸 bincode 帧（旧格式）。
     let frame = NatFrame::keep_alive("node_a");
-    let body = bincode::encode_to_vec(&frame, bincode::config::standard()).unwrap();
+    let body = bincode_next::encode_to_vec(&frame, bincode_next::config::standard()).unwrap();
     let decoded = NatFrame::decode(&body).unwrap();
     assert_eq!(decoded.frame_type, NatFrameType::KeepAlive);
     assert_eq!(decoded.src, "node_a");

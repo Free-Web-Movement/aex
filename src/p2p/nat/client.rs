@@ -337,9 +337,9 @@ impl NatTunnelClient {
                     if self.stream_tx.lock().await.is_none() {
                         continue;
                     }
-                    if let Ok(peers) = bincode::decode_from_slice::<Vec<(String, String)>, _>(
+                    if let Ok(peers) = bincode_next::decode_from_slice::<Vec<(String, String)>, _>(
                         &frame.payload,
-                        bincode::config::standard(),
+                        bincode_next::config::standard(),
                     ) {
                         let (list, _) = peers;
                         for (peer_id, _public) in list {

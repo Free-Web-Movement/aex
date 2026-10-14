@@ -559,7 +559,8 @@ fn frame_peers_payload_decodes_to_list() {
     let frame = NatFrame::peers("node_a", &list);
     let decoded = NatFrame::decode(&frame.encode_wire().unwrap()).unwrap();
     let (round, _): (Vec<(String, String)>, usize) =
-        bincode::decode_from_slice(&decoded.payload, bincode::config::standard()).unwrap();
+        bincode_next::decode_from_slice(&decoded.payload, bincode_next::config::standard())
+            .unwrap();
     assert_eq!(round, list);
 }
 

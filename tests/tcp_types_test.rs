@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
     use aex::tcp::types::{Codec, Command, Frame, RawCodec, frame_config};
-    use bincode::{Decode, Encode, decode_from_slice, encode_to_vec};
+    use bincode_next::{Decode, Encode, decode_from_slice, encode_to_vec};
     use serde::{Deserialize, Serialize};
 
     // 为测试创建一个简单的自定义 Command
@@ -90,17 +90,17 @@ mod tests {
             }
         }
         impl Encode for DummyCmd {
-            fn encode<E: bincode::enc::Encoder>(
+            fn encode<E: bincode_next::enc::Encoder>(
                 &self,
                 _: &mut E,
-            ) -> std::result::Result<(), bincode::error::EncodeError> {
+            ) -> std::result::Result<(), bincode_next::error::EncodeError> {
                 Ok(())
             }
         }
         impl Decode<()> for DummyCmd {
-            fn decode<D: bincode::de::Decoder<Context = ()>>(
+            fn decode<D: bincode_next::de::Decoder<Context = ()>>(
                 _: &mut D,
-            ) -> std::result::Result<Self, bincode::error::DecodeError> {
+            ) -> std::result::Result<Self, bincode_next::error::DecodeError> {
                 Ok(DummyCmd(vec![0]))
             }
         }

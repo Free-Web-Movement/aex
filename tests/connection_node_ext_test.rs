@@ -153,9 +153,9 @@ mod tests {
     #[test]
     fn test_node_bincode_round_trip() {
         let node = Node::from_addr("1.1.1.1:8080".parse().unwrap(), Some(5), Some(vec![7; 32]));
-        let bytes = bincode::encode_to_vec(&node, aex::tcp::types::frame_config()).unwrap();
+        let bytes = bincode_next::encode_to_vec(&node, aex::tcp::types::frame_config()).unwrap();
         let (decoded, len): (Node, usize) =
-            bincode::decode_from_slice(&bytes, aex::tcp::types::frame_config()).unwrap();
+            bincode_next::decode_from_slice(&bytes, aex::tcp::types::frame_config()).unwrap();
         assert_eq!(decoded, node);
         assert_eq!(len, bytes.len());
     }

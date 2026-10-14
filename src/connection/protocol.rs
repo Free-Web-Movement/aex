@@ -1,4 +1,4 @@
-use bincode::{Decode, Encode};
+use bincode_next::{Decode, Encode};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, Encode, Decode)]

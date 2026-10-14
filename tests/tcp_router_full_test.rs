@@ -10,14 +10,14 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::io::{AsyncWriteExt, BufReader};
 use tokio::sync::Mutex;
 
-#[derive(Debug, Clone, Serialize, Deserialize, bincode::Encode, bincode::Decode)]
+#[derive(Debug, Clone, Serialize, Deserialize, bincode_next::Encode, bincode_next::Decode)]
 struct TestFrame {
     valid: bool,
     cmd_data: Option<Vec<u8>>,
 }
 impl Codec for TestFrame {}
 
-#[derive(Debug, Clone, Serialize, Deserialize, bincode::Encode, bincode::Decode)]
+#[derive(Debug, Clone, Serialize, Deserialize, bincode_next::Encode, bincode_next::Decode)]
 struct TestCommand {
     key: u32,
     data: Vec<u8>,

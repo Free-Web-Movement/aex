@@ -2,10 +2,10 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 use crate::constants::tcp::MAX_FRAME_SIZE;
-use bincode::{Decode, Encode, config, decode_from_slice, encode_to_vec};
+use bincode_next::{Decode, Encode, config, decode_from_slice, encode_to_vec};
 
 #[inline]
-pub fn frame_config() -> impl bincode::config::Config {
+pub fn frame_config() -> impl bincode_next::config::Config<Mode = config::FingerprintDisabled> {
     config::standard()
         .with_fixed_int_encoding()
         .with_big_endian()

@@ -5,7 +5,7 @@ use std::{
 };
 
 use crate::connection::{protocol::Protocol, scope::NetworkScope};
-use bincode::{Decode, Encode};
+use bincode_next::{Decode, Encode};
 use serde::{Deserialize, Serialize};
 
 //

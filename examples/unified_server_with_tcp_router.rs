@@ -13,7 +13,9 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-#[derive(Debug, Clone, bincode::Encode, bincode::Decode, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, bincode_next::Encode, bincode_next::Decode, serde::Serialize, serde::Deserialize,
+)]
 pub struct MyFrame {
     pub id: u32,
     pub data: Vec<u8>,
@@ -32,7 +34,9 @@ impl Frame for MyFrame {
     }
 }
 
-#[derive(Debug, Clone, bincode::Encode, bincode::Decode, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, bincode_next::Encode, bincode_next::Decode, serde::Serialize, serde::Deserialize,
+)]
 pub struct MyCommand {
     pub id: u32,
     pub data: Vec<u8>,

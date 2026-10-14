@@ -1,7 +1,7 @@
 #[macro_export]
 macro_rules! frame {
     ($name:ident { $($field:vis $fname:ident : $fty:ty),* $(,)? }) => {
-        #[derive(serde::Serialize, serde::Deserialize, bincode::Encode, bincode::Decode, Debug)]
+        #[derive(serde::Serialize, serde::Deserialize, bincode_next::Encode, bincode_next::Decode, Debug)]
         pub struct $name {
             pub version: u16,
             pub length: u32,
@@ -20,7 +20,7 @@ macro_rules! frame {
 #[macro_export]
 macro_rules! command {
     ($name:ident { $($field:vis $fname:ident : $fty:ty),* $(,)? }) => {
-        #[derive(serde::Serialize, serde::Deserialize, bincode::Encode, bincode::Decode, Debug)]
+        #[derive(serde::Serialize, serde::Deserialize, bincode_next::Encode, bincode_next::Decode, Debug)]
         pub struct $name {
             pub _id: u32, // 内部存储 ID
             pub version: u16,

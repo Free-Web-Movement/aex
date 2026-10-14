@@ -5,7 +5,7 @@ use crate::{
     http::middlewares::websocket::WebSocket,
     tcp::types::{Codec, Command, Frame},
 };
-use bincode::{Decode, Encode};
+use bincode_next::{Decode, Encode};
 use bytes::{BufMut, BytesMut};
 use futures::future::BoxFuture;
 use serde::{Deserialize, Serialize};
