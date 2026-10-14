@@ -1,10 +1,10 @@
 use anyhow::{Result, anyhow};
 use chacha20poly1305::{
     XChaCha20Poly1305, XNonce,
-    aead::{Aead, KeyInit, rand_core},
+    aead::{Aead, KeyInit},
 };
 use chrono::{DateTime, Utc};
-use rand_core::{OsRng, RngCore};
+use rand_core::TryRngCore;
 use x25519_dalek::{EphemeralSecret, PublicKey};
 
 use crate::time::SystemTime;
@@ -19,8 +19,7 @@ pub struct SessionKey {
 
 impl SessionKey {
     pub fn new() -> Self {
-        let mut rng = OsRng;
-        let secret = EphemeralSecret::random_from_rng(&mut rng);
+        let secret = EphemeralSecret::random();
         let public = PublicKey::from(&secret);
 
         Self {
@@ -57,11 +56,11 @@ impl SessionKey {
         let cipher = XChaCha20Poly1305::new(&key.into());
 
         let mut nonce_bytes = [0u8; 24];
-        OsRng.fill_bytes(&mut nonce_bytes);
+        rand_core::OsRng.try_fill_bytes(&mut nonce_bytes).expect("OS RNG");
 
-        let nonce = XNonce::from_slice(&nonce_bytes);
+        let nonce = XNonce::try_from(nonce_bytes.as_slice()).expect("24-byte nonce");
         let ct = cipher
-            .encrypt(nonce, plaintext)
+            .encrypt(&nonce, plaintext)
             .map_err(|_| anyhow!("encrypt failed"))?;
 
         Ok([nonce_bytes.to_vec(), ct].concat())
@@ -77,9 +76,9 @@ impl SessionKey {
         let (nonce_bytes, ct) = data.split_at(24);
         let cipher = XChaCha20Poly1305::new(&key.into());
 
-        let nonce = XNonce::from_slice(nonce_bytes);
+        let nonce = XNonce::try_from(nonce_bytes).expect("24-byte nonce");
         cipher
-            .decrypt(nonce, ct)
+            .decrypt(&nonce, ct)
             .map_err(|_| anyhow!("decrypt failed"))
     }
 

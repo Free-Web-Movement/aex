@@ -4,7 +4,7 @@ use anyhow::Ok;
 use anyhow::Result;
 use anyhow::anyhow;
 use async_lock::{Mutex, RwLock};
-use chacha20poly1305::aead::{OsRng, rand_core::RngCore};
+use rand_core::TryRngCore;
 use x25519_dalek::PublicKey;
 
 use crate::{crypto::zero_trust_session_key::SessionKey, time::SystemTime};
@@ -26,7 +26,7 @@ impl PairedSessionKey {
 
     pub async fn create(&self, is_main: bool) -> (Vec<u8>, PublicKey) {
         let mut session_id = vec![0u8; self.length];
-        OsRng.fill_bytes(&mut session_id);
+        rand_core::OsRng.try_fill_bytes(&mut session_id).expect("OS RNG");
 
         let session_key = SessionKey::new();
         let ephemeral_public = session_key.ephemeral_public.clone();

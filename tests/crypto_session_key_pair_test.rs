@@ -2,14 +2,13 @@
 mod tests {
     use aex::crypto::session_key_manager::PairedSessionKey;
     use anyhow::Result;
-    use chacha20poly1305::aead::OsRng;
     use std::time::Duration;
     use tokio::time::sleep;
     use x25519_dalek::{EphemeralSecret, PublicKey, StaticSecret};
 
     // 辅助函数：生成一个随机的 PublicKey
     fn generate_peer_public() -> PublicKey {
-        let secret = StaticSecret::random_from_rng(OsRng);
+        let secret = StaticSecret::random();
         PublicKey::from(&secret)
     }
 
@@ -96,7 +95,7 @@ mod tests {
         let manager = PairedSessionKey::new(16);
 
         // 模拟客户端生成的临时公钥
-        let client_secret = EphemeralSecret::random_from_rng(OsRng);
+        let client_secret = EphemeralSecret::random();
         let client_pub = PublicKey::from(&client_secret);
         let client_pub_bytes = client_pub.as_bytes().to_vec();
 
@@ -181,7 +180,7 @@ mod tests {
         }
 
         // 2. 模拟客户端响应：客户端收到 server_pub，生成自己的公钥 client_pub 并发回
-        let client_secret = EphemeralSecret::random_from_rng(OsRng);
+        let client_secret = EphemeralSecret::random();
         let client_pub = PublicKey::from(&client_secret);
         let client_pub_bytes = client_pub.as_bytes();
 

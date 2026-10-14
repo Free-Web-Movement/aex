@@ -60,6 +60,22 @@
   端口、映射地址等均为运行时参数，由调用方提供，不写死在代码里。
 - **公网 IP 不写死在代码里**：一律由调用方/CLI 传入（公网 IP 是临时的）。
 
+## 发布流程（每次发新版本必须严格按序执行，不得跳步）
+
+1. **测试全部通过**：`cargo test -p aex --features proxy` 全绿。
+2. **覆盖率不降低**：跑 `cargo llvm-cov --all-features --summary-only`，行覆盖率不得低于上一版本。
+3. **依赖全部更新到最新**：检查 `Cargo.toml` 的每个依赖（含 dev-deps），把能升的升到最新；
+   注意甄别**占位/捣乱版本**（例如 bincode `3.0.0` 只含 `compile_error!`，要跳过，用真实最新）。
+   更新完成后，**版本号 +0.0.1**（patch）。
+4. **`cargo publish` 成功**：`cargo publish` 必须真正上传成功（crates.io 返回 Published）。
+   若因 git 依赖报 “all dependencies must have a version requirement”，给该依赖同时补 `version`
+   （发布时 git 会被剥离、用注册表版本）。
+5. **推送到远程**：`git push origin main`。
+6. **打 tag 并发布 release**：`git tag -a vX.Y.Z`、`git push origin vX.Y.Z`、
+   `gh release create vX.Y.Z --title ... --notes ...`。
+
+> 严禁在 `cargo publish` 成功之前 push / 打 tag。
+
 ## 参考
 
 - 测试范式：`aex/tests/` 下既有测试（`tcp_listener_test.rs`、`proxy_*_test.rs`、
