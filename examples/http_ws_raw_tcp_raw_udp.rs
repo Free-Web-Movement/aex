@@ -14,7 +14,7 @@ use aex::http::types::Executor;
 use aex::protocols::http1::Http1;
 use aex::protocols::http2::Http2;
 use aex::protocols::tcp::Tcp;
-use aex::unified::Server;
+use aex::server::Server;
 use anyhow::Result;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -58,15 +58,14 @@ async fn main() -> Result<()> {
     http.get("/ws", |_ctx: &mut Context| true)
         .middleware(setup_ws());
 
-    let srv = Server::solo(addr)
-        .push(
-            Tcp::new(None)
-                .sub(Http1::new(Some(std::sync::Arc::new(http)), None).shared())
-                .sub(Http2::new(None).shared())
-                .shared(),
-        );
+    let srv = Server::default().push(
+        Tcp::new(None)
+            .sub(Http1::new(Some(std::sync::Arc::new(http)), None).shared())
+            .sub(Http2::new(None, None).shared())
+            .shared(),
+    );
     tokio::spawn(async move {
-        let _ = srv.start().await;
+        let _ = srv.start(addr).await;
     });
 
     // Raw TCP

@@ -1,6 +1,6 @@
 //! TLS SNI/ALPN routing demo.
 //!
-//! Registers [`TlsDetector`] on a UnifiedServer; every TLS connection is
+//! Registers [`TlsDetector`] on a Server; every TLS connection is
 //! routed by its ClientHello names, everything else falls back to the plain
 //! TCP handler.
 //!
@@ -18,9 +18,9 @@ use tokio::io::AsyncWriteExt;
 
 use aex::connection::context::Context;
 use aex::connection::global::GlobalContext;
+use aex::detect::DetectionState;
 use aex::protocols::tcp::{self, Tcp};
-use aex::unified::UnifiedServer;
-use aex::unified::detect::DetectionState;
+use aex::server::Server;
 
 async fn sni_echo(mut ctx: Context) {
     let hello = ctx
@@ -38,13 +38,14 @@ async fn sni_echo(mut ctx: Context) {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let addr: SocketAddr = "127.0.0.1:9443".parse()?;
-    let server = UnifiedServer::at(addr, Arc::new(GlobalContext::new(addr, None)))
+    let server = Server::new(Arc::new(GlobalContext::new(addr, None)))
         .detector(Arc::new(TlsDetector))
         .push(tcp::from_handler(
             "tls",
             Some(Arc::new(|ctx: Context| tokio::spawn(sni_echo(ctx)))),
         ))
-        .push(Tcp::new(Some(Arc::new(|ctx: Context| {
+        .push(
+            Tcp::new(Some(Arc::new(|ctx: Context| {
                 tokio::spawn(async move {
                     let mut ctx = ctx;
                     // Non-TLS traffic lands here.
@@ -52,8 +53,10 @@ async fn main() -> anyhow::Result<()> {
                         let _ = w.write_all(b"plain tcp\n").await;
                     }
                 })
-            }))).shared());
+            })))
+            .shared(),
+        );
 
     eprintln!("detector_tls listening on {addr}");
-    server.start().await
+    server.start(addr).await
 }

@@ -3,6 +3,10 @@
 //! This module provides HTTP/2 support as a codec that can be integrated
 //! into the existing TCP pipeline architecture.
 
+pub mod protocol;
+
+pub use protocol::*;
+
 use bytes::Bytes;
 use h2::server;
 use http::Response;

@@ -47,9 +47,9 @@ macro_rules! codec {
 
 #[macro_export]
 macro_rules! router {
-    ($cmd_ty:ty, { $($id:expr => $handler:expr),* $(,)? }) => {
+    ($extractor:expr, { $($id:expr => $handler:expr),* $(,)? }) => {
         {
-            let mut r = $crate::tcp::Router::<$cmd_ty>::new();
+            let mut r = $crate::tcp::router::Router::new().extractor($extractor);
             $(
                 r.on_simple($id, $handler);
             )*

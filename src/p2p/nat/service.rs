@@ -10,9 +10,9 @@
 use std::sync::Arc;
 
 use crate::connection::context::Context;
+use crate::detect::DetectorMode;
+use crate::detect::{DetectionState, ProtocolDetector, Verdict};
 use crate::protocols::tcp::TCPHandler;
-use crate::unified::DetectorMode;
-use crate::unified::detect::{DetectionState, ProtocolDetector, Verdict};
 
 use super::server::NatRelayService;
 use super::types::{NAT_MAGIC, NAT_MAGIC_LEN};
@@ -87,7 +87,7 @@ pub fn nat_tcp_handler(service: NatRelayService) -> TCPHandler {
 /// NAT 中继协议（struct 形态，协议差异由结构的字段/方法表达）。
 pub struct Nat {
     service: NatRelayService,
-    commands: crate::unified::handler::CommandRegistry<bytes::Bytes>,
+    commands: crate::handler::CommandRegistry<bytes::Bytes>,
 }
 
 impl Nat {
@@ -95,25 +95,25 @@ impl Nat {
     pub fn new(service: NatRelayService) -> Self {
         Self {
             service,
-            commands: crate::unified::handler::CommandRegistry::new(),
+            commands: crate::handler::CommandRegistry::new(),
         }
     }
 
     /// 注册协议命令处理器。
-    pub fn with_command<K: Into<crate::unified::handler::CommandKey>>(
+    pub fn with_command<K: Into<crate::handler::CommandKey>>(
         mut self,
         key: K,
-        handler: crate::unified::handler::CommandHandler<bytes::Bytes>,
+        handler: crate::handler::CommandHandler<bytes::Bytes>,
     ) -> Self {
         self.commands.register(key, handler);
         self
     }
 
     /// 处理一条被认领的 NAT 连接（struct 特有方法）。
-    pub async fn handle(&self, ctx: &mut Context) -> crate::unified::handler::Outcome {
-        let owned = crate::unified::handler::take_context(ctx);
+    pub async fn handle(&self, ctx: &mut Context) -> crate::handler::Outcome {
+        let owned = crate::handler::take_context(ctx);
         nat_tcp_handler(self.service.clone())(owned);
-        crate::unified::handler::Outcome::Done
+        crate::handler::Outcome::Done
     }
 
     /// Box 以便注册。
@@ -122,7 +122,7 @@ impl Nat {
     }
 }
 
-impl crate::unified::Protocol for Nat {
+impl crate::protocol::Protocol for Nat {
     fn name(&self) -> &str {
         NAT_PROTOCOL
     }
@@ -131,14 +131,14 @@ impl crate::unified::Protocol for Nat {
         Some(Arc::new(NatDetector))
     }
 
-    fn commands(&self) -> &crate::unified::handler::CommandRegistry<bytes::Bytes> {
+    fn commands(&self) -> &crate::handler::CommandRegistry<bytes::Bytes> {
         &self.commands
     }
 
     fn process<'a>(
         &'a self,
         ctx: &'a mut Context,
-    ) -> futures::future::BoxFuture<'a, crate::unified::handler::Outcome> {
+    ) -> futures::future::BoxFuture<'a, crate::handler::Outcome> {
         Box::pin(async move { self.handle(ctx).await })
     }
 }
@@ -148,7 +148,7 @@ pub trait UnifiedServerExt {
     fn enable_nat(self, service: NatRelayService) -> Self;
 }
 
-impl UnifiedServerExt for crate::unified::UnifiedServer {
+impl UnifiedServerExt for crate::server::Server {
     fn enable_nat(self, service: NatRelayService) -> Self {
         self.push(Nat::new(service).shared())
     }

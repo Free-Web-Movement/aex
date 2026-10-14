@@ -19,7 +19,7 @@ use std::path::PathBuf;
 
 use aex::http::router::Router as HttpRouter;
 use aex::protocols::{http1::Http1, tcp::Tcp};
-use aex::unified::Server;
+use aex::server::Server;
 use std::sync::Arc;
 
 #[tokio::main]
@@ -67,13 +67,13 @@ async fn main() -> anyhow::Result<()> {
     }
     println!("Press Ctrl+C to stop.");
 
-    let server = Server::solo(addr).push(
+    let server = Server::default().push(
         Tcp::new(None)
             .sub(Http1::new(Some(Arc::new(router)), None).shared())
             .shared(),
     );
     tokio::spawn(async move {
-        if let Err(e) = server.start().await {
+        if let Err(e) = server.start(addr).await {
             eprintln!("server error: {e}");
         }
     });

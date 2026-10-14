@@ -5,8 +5,9 @@
 
 use aex::connection::global::GlobalContext;
 use aex::protocols::tcp;
-use aex::unified::{
-    DetectionState, DetectorMode, DetectorRegistry, ProtocolDetector, UnifiedServer, Verdict,
+use aex::{
+    detect::{DetectionState, DetectorMode, DetectorRegistry, ProtocolDetector, Verdict},
+    server::Server,
 };
 use aex::{http, tcp_raw};
 use std::net::SocketAddr;
@@ -80,7 +81,7 @@ async fn custom_detector_routes_to_custom_handler() {
     let handler_hits = hits.clone();
     let (detector, consults) = MagicDetector::standard(b"MAGIC1", "magic-proto");
 
-    let server = UnifiedServer::at(addr, Arc::new(GlobalContext::new(addr, None)))
+    let server = Server::new(Arc::new(GlobalContext::new(addr, None)))
         .detector(Arc::new(detector))
         .push(tcp::from_handler(
             "magic-proto",
@@ -114,7 +115,7 @@ async fn custom_detector_routes_to_custom_handler() {
             })),
         ));
 
-    tokio::spawn(async move { server.start().await.ok() });
+    tokio::spawn(async move { server.start(addr).await.ok() });
     sleep(Duration::from_millis(100)).await;
 
     let mut conn = TcpStream::connect(addr).await.unwrap();
@@ -161,7 +162,7 @@ async fn forward_mode_terminates_detection_and_forwards_directly() {
     let http_handler_hits = http_hits.clone();
     // The forwarder's handler echoes whatever it receives.
     let fw = forward_hits.clone();
-    let server = UnifiedServer::at(addr, Arc::new(GlobalContext::new(addr, None)))
+    let server = Server::new(Arc::new(GlobalContext::new(addr, None)))
         .detector(Arc::new(NatForwarder(nat_hits)))
         .push(http!(handler: move |_ctx| {
             let http_hits = http_handler_hits.clone();
@@ -170,7 +171,6 @@ async fn forward_mode_terminates_detection_and_forwards_directly() {
                 true
             })
         }))
-
         .push(tcp::from_handler(
             "nat-flow",
             Some(Arc::new(move |mut ctx| {
@@ -189,7 +189,7 @@ async fn forward_mode_terminates_detection_and_forwards_directly() {
             })),
         ));
 
-    tokio::spawn(async move { server.start().await.ok() });
+    tokio::spawn(async move { server.start(addr).await.ok() });
     sleep(Duration::from_millis(100)).await;
 
     // Forwarded connection: claimed by the NAT detector, HTTP never runs.
@@ -225,8 +225,8 @@ async fn empty_registry_is_pure_tcp_passthrough() {
 
     // No detectors registered at all: nothing is peeked, everything goes to
     // the TCP handler verbatim.
-    let server = UnifiedServer::at(addr, Arc::new(GlobalContext::new(addr, None))).push(tcp_raw!(
-        move |mut ctx| {
+    let server =
+        Server::new(Arc::new(GlobalContext::new(addr, None))).push(tcp_raw!(move |mut ctx| {
             let h = h.clone();
             tokio::spawn(async move {
                 let mut buf = [0u8; 64];
@@ -240,10 +240,9 @@ async fn empty_registry_is_pure_tcp_passthrough() {
                 assert_eq!(&buf[..n], b"raw-bytes");
                 h.fetch_add(1, Ordering::SeqCst);
             })
-        }
-    ));
+        }));
 
-    tokio::spawn(async move { server.start().await.ok() });
+    tokio::spawn(async move { server.start(addr).await.ok() });
     sleep(Duration::from_millis(100)).await;
 
     let mut conn = TcpStream::connect(addr).await.unwrap();
@@ -263,7 +262,7 @@ async fn runtime_unregister_stops_claiming() {
 
     let ch = custom_hits.clone();
     let th = tcp_hits.clone();
-    let server = UnifiedServer::at(addr, Arc::new(GlobalContext::new(addr, None)))
+    let server = Server::new(Arc::new(GlobalContext::new(addr, None)))
         .with_registry(registry.clone())
         .detector(Arc::new(detector))
         .push(tcp::from_handler(
@@ -294,7 +293,7 @@ async fn runtime_unregister_stops_claiming() {
             })
         }));
 
-    tokio::spawn(async move { server.start().await.ok() });
+    tokio::spawn(async move { server.start(addr).await.ok() });
     sleep(Duration::from_millis(100)).await;
 
     // While registered: claimed by magic2 → custom handler.

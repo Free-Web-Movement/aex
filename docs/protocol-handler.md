@@ -11,7 +11,7 @@
 
 aex 的 server 收敛为**一个协议无关的核心**，连接分派只有一句话：
 `for p in protocols { if p.is_mine(claim) { p.run(ctx); break } }`。
-**`unified` 目录里不出现任何 http1/http2/websocket/tcp/udp 的名字**，也不会
+**核心代码（`server.rs` / `protocol.rs` / `detect.rs` / `handler.rs`）里不出现任何 http1/http2/websocket/tcp/udp 的名字**，也不会
 在 `resolve`/`is_mine` 之外存在任何协议判断分支。每个协议是一组相同风格的
 积木：
 
@@ -31,16 +31,15 @@ aex 的 server 收敛为**一个协议无关的核心**，连接分派只有一�
 命令数据用**泛型占位** `C`，默认 `C = Bytes`；`Server` 本身**非泛型**，内部固定
 用通用实例化，业务命令类型后期由上层通过适配层特化。
 
-## 架构：unified 与 protocols 的分工
+## 架构：核心（server/protocol/detect/handler）与 protocols 的分工
 
 ```
 aex/src
-├── unified/                    协议无关核心（不知道任何具体协议名）
-│   ├── mod.rs                  Protocol trait、Transport、Server（分派=is_mine 循环）
-│   ├── detect.rs               ProtocolDetector / DetectorRegistry / DetectionState /
-│   │                           Claim / Verdict / run_pipeline（纯登记 + 流水线，零内置）
-│   └── handler/
-│       └── mod.rs              ProtocolHandler<C=Bytes>（递归处理器 + 通用实现）
+├── server.rs                   统一服务器 Server（分派 = is_mine 循环）
+├── protocol.rs                 Protocol trait、Transport
+├── detect.rs                   ProtocolDetector / DetectorRegistry / DetectionState /
+│                               Claim / Verdict / run_pipeline（纯登记 + 流水线，零内置）
+├── handler.rs                  ProtocolHandler<C=Bytes>（递归处理器 + 通用实现）
 └── protocols/                  具体协议（project-agnostic，统一用同一套 API）
     ├── classify.rs             ProtocolKind 后缀前缀分类（兼容旧调用方）
     ├── http1.rs                Http11Detector + Http1（struct；内含 websocket 子协议）
@@ -53,14 +52,14 @@ aex/src
         └── proxy.rs            http_proxy(router, handler, authorizer)
 ```
 
-- **`unified` 不依赖 `protocols`**：只有反向依赖（`protocols` 里的每个协议用
+- **核心不依赖 `protocols`**：只有反向依赖（`protocols` 里的每个协议用
   unified 的积木组装自己）。分层与“aex 是项目无关底层框架”一致——具体协议仍是
   aex 自带的通用能力，但与核心解耦，新增/裁剪协议都不碰核心。
 - **探测与分派**：检测流水线产出 `Claim`（命中哪个 detector、声称什么协议）。
   `Protocol::is_mine` 的**默认实现纯粹用协议自身的 name 与 detector 表述**，
   无需每个协议重写。Server 不解释 claim，只把它交给各协议的 `is_mine` 自述。
 
-## 统一接口：`unified::Protocol`
+## 统一接口：`protocol::Protocol`
 
 ```rust
 pub trait Protocol: Send + Sync {
@@ -88,7 +87,7 @@ pub trait Protocol: Send + Sync {
 协议差异由结构表达，而非 `*Config`。具体结构只实现 `process`（通常是
 `Box::pin(self.handle(ctx))`），其余全部走 trait 默认。
 
-## 通用处理器：`unified::handler::ProtocolHandler`
+## 通用处理器：`handler::ProtocolHandler`
 
 `ProtocolHandler<C=Bytes>` 现在**只服务于自定义闭包协议**（`tcp::from_handler`、
 SOCKS 的便捷构造）。内置协议都是各自的结构体（`Http1`/`Http2`/`Websocket`/`Tcp`/
@@ -128,8 +127,8 @@ pub struct ProtocolHandler<C = Bytes> {
 
 ```rust
 Server::new(globals)                       // 只传 GlobalContext
-    .push(tcp!(http!(router)))             // 顶层 TCP，HTTP 作为子处理器
-    .listen(addr).await?;
+    .push(http!(router))             // 顶层 TCP，HTTP 作为子处理器
+    .start(addr).await?;
 ```
 
 - **`push` = 唯一挂载点**（`mount` 原地版）。挂载时：
@@ -141,10 +140,10 @@ Server::new(globals)                       // 只传 GlobalContext
   首个认领者 `run`。无认领 → 记录 warning。`detection(false)` 或空注册表时
   完全不 peek，流直接交兜底协议。
 - writer 是否 `BufWriter` 由 `protocol.buffered_writer()` 决定，Server 不问协议名。
-- 保留：`at(addr, globals)`（旧构造器短名）、`solo(addr)`、`UnifiedServer = Server`
-  兼容别名、`detector`/`detector_at`/`with_registry`/`detection`、`start`/`listen`、`Clone`。
+- 保留：`detector`/`detector_at`/`with_registry`/`detection`、`start(addr)`、`Clone`。
 - **已删除**：`start_tcp`/`start_udp`（TCP/UDP 的收发循环由挂载的 `Tcp`/`Udp` 协议承载，
-  `start` 会为 `Udp` 在后台起循环）。
+  `start` 会为 `Udp` 在后台起循环）；`at(addr, globals)` / `solo(addr)` / `listen(addr)`
+  与 `UnifiedServer` 兼容别名。
 - **故意移除**：`http_router`/`http_handler`/`tcp_handler`/`udp_handler`/
   `custom_handlers`/`enable_http2` 等旧字段与 `enable_*` 链式方法，以及
   硬编码 `match claim.protocol` 的 `handle_http11`/`handle_http2`/`dispatch_tcp`/
@@ -168,19 +167,19 @@ Server::new(globals)                       // 只传 GlobalContext
 （`Http1Config`/`Http2Config`/`TcpConfig`/`UdpConfig`/`WebsocketConfig`）与
 `protocol(cfg)` 构造器**已删除**，改由各协议的 struct 承载。旧的
 `handler/{http1,websocket,http2,tcp,udp}.rs` 已演进为 `protocols/` 下同名文件
-（`unified/handler/` 只剩 `ProtocolHandler` 机制本身）。
+（`handler.rs` 只剩 `ProtocolHandler` 机制本身）。
 
 ### 挂载示例
 
 ```rust
 use std::sync::Arc;
 use aex::{http, http2, tcp, udp};
-use aex::unified::Server;
+use aex::server::Server;
 
 Server::new(globals)
-    .push(tcp!(http!(router), http2!()))  // 顶层 TCP 兜底，HTTP/1.1 + HTTP/2 作为子处理器
+    .push(http!(router))  // 顶层 TCP 兜底，HTTP/1.1 + HTTP/2 作为子处理器
     .push(udp!())                          // 兜底 UDP 数据报
-    .listen(addr).await?;
+    .start(addr).await?;
 ```
 
 > 协议宏（`http!`/`http1!`/`http2!`/`ws!`/`tcp!`/`tcp_raw!`/`udp!`，见

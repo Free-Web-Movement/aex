@@ -3,11 +3,11 @@
 //! 验证：检测层识别 NAT 魔数（与 HTTP/SOCKS 在同一端口共存）、NatFrame
 //! 编解码（带魔数）、NatRelayService 连接处理。
 
+use aex::detect::{DetectionState, ProtocolDetector, Verdict};
 use aex::nat::{
     NAT_MAGIC, NAT_MAGIC_LEN, NAT_MAX_FRAME_BODY, NatDetector, NatFrame, NatFrameType,
     NatRelayService, TunnelPeer, frame_len_from_header,
 };
-use aex::unified::detect::{DetectionState, ProtocolDetector, Verdict};
 
 #[test]
 fn nat_detector_matches_magic() {

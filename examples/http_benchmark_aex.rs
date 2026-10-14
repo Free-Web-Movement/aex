@@ -6,7 +6,7 @@ use aex::connection::context::Context;
 use aex::http::router::Router as HttpRouter;
 use aex::protocols::http1::Http1;
 use aex::protocols::tcp::Tcp;
-use aex::unified::Server;
+use aex::server::Server;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -36,7 +36,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         true
     });
 
-    let server = Server::solo(addr).push(
+    let server = Server::default().push(
         Tcp::new(None)
             .sub(Http1::new(Some(Arc::new(http_router)), None).shared())
             .shared(),
@@ -44,7 +44,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("AEX server on {}", addr);
 
     let _handle = tokio::spawn(async move {
-        if let Err(e) = server.start().await {
+        if let Err(e) = server.start(addr).await {
             eprintln!("Server error: {}", e);
         }
     });

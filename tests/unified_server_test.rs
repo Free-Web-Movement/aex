@@ -1,8 +1,8 @@
 use aex::connection::context::Context;
 use aex::connection::global::GlobalContext;
 use aex::http::router::Router as HttpRouter;
-use aex::unified::UnifiedServer;
-use aex::{http, http2, tcp_raw};
+use aex::server::Server;
+use aex::{http1, http2, tcp_raw};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -20,19 +20,19 @@ fn make_http_router() -> HttpRouter {
     router
 }
 
-fn setup_unified_server(addr: SocketAddr, enable_http2: bool) -> (UnifiedServer, Arc<AtomicUsize>) {
+fn setup_unified_server(addr: SocketAddr, enable_http2: bool) -> (Server, Arc<AtomicUsize>) {
     let tcp_counter = Arc::new(AtomicUsize::new(0));
 
     let globals = Arc::new(GlobalContext::new(addr, None));
 
-    let mut unified = UnifiedServer::at(addr, globals);
+    let mut unified = Server::new(globals);
 
     let counter_for_handler = tcp_counter.clone();
     // Detection is opt-in since the pluggable pipeline: HTTP/2 first (exact
     // preface), then HTTP/1.x method prefixes.
-    unified = unified
-        .push(http!(make_http_router()))
-        .push(tcp_raw!(move |mut ctx| {
+    // One top-level TCP: HTTP/1.1 as a sub-handler, raw handler as fallback.
+    unified = unified.push(tcp_raw!(
+        move |mut ctx| {
             println!("[Test] TCP handler called");
             let counter = counter_for_handler.clone();
             tokio::spawn(async move {
@@ -49,7 +49,9 @@ fn setup_unified_server(addr: SocketAddr, enable_http2: bool) -> (UnifiedServer,
                     }
                 }
             })
-        }));
+        },
+        http1!(make_http_router())
+    ));
 
     if enable_http2 {
         unified = unified.push(http2!());
@@ -68,7 +70,7 @@ async fn test_unified_protocol_detection() {
     let (server, tcp_counter) = setup_unified_server(actual_addr, false);
 
     tokio::spawn(async move {
-        if let Err(e) = server.start().await {
+        if let Err(e) = server.start(actual_addr).await {
             eprintln!("Server error: {}", e);
         }
     });
@@ -113,7 +115,7 @@ async fn test_http1_on_unified_server() {
     let (server, _) = setup_unified_server(actual_addr, false);
 
     tokio::spawn(async move {
-        if let Err(e) = server.start().await {
+        if let Err(e) = server.start(actual_addr).await {
             eprintln!("Server error: {}", e);
         }
     });
@@ -138,7 +140,7 @@ async fn test_p2p_tcp_on_unified_server() {
     let (server, tcp_counter) = setup_unified_server(actual_addr, false);
 
     let server_handle = tokio::spawn(async move {
-        if let Err(e) = server.start().await {
+        if let Err(e) = server.start(actual_addr).await {
             eprintln!("Server error: {}", e);
         }
     });
@@ -177,7 +179,7 @@ async fn test_websocket_detection() {
     let (server, _) = setup_unified_server(actual_addr, false);
 
     tokio::spawn(async move {
-        if let Err(e) = server.start().await {
+        if let Err(e) = server.start(actual_addr).await {
             eprintln!("Server error: {}", e);
         }
     });
@@ -213,7 +215,7 @@ async fn test_http2_detection() {
     let (server, _) = setup_unified_server(actual_addr, true);
 
     tokio::spawn(async move {
-        if let Err(e) = server.start().await {
+        if let Err(e) = server.start(actual_addr).await {
             eprintln!("Server error: {}", e);
         }
     });
@@ -244,7 +246,7 @@ async fn test_unified_all_protocols() {
     let (server, tcp_counter) = setup_unified_server(actual_addr, true);
 
     let server_handle = tokio::spawn(async move {
-        if let Err(e) = server.start().await {
+        if let Err(e) = server.start(actual_addr).await {
             eprintln!("Server error: {}", e);
         }
     });

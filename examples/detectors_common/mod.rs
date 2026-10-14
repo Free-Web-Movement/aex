@@ -1,7 +1,7 @@
 //! Shared building blocks for the proxy-protocol detector examples.
 //!
 //! This module is development material and is intentionally kept out of the
-//! aex core: the core detection framework (`aex::unified::detect`) ships only
+//! aex core: the core detection framework (`aex::detect`) ships only
 //! mainstream web protocols (HTTP/1.1, HTTP/2; HTTP/3/QUIC later). Proxy
 //! protocols — TLS routing, SOCKS, trojan, VLESS — are composed here on top
 //! of the public framework APIs to show how they integrate.
@@ -42,8 +42,8 @@ use tokio_rustls::TlsAcceptor;
 use tokio_rustls::rustls::pki_types::{CertificateDer, PrivateKeyDer};
 
 use aex::connection::context::{BoxReader, BoxWriter, Context};
+use aex::detect::{DetectionState, ProtocolDetector, Verdict};
 use aex::http::types::Executor;
-use aex::unified::detect::{DetectionState, ProtocolDetector, Verdict};
 
 // ---------------------------------------------------------------------------
 // Passive detectors (sniffing pipeline)

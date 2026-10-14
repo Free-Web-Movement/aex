@@ -3,13 +3,13 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use aex::http::router::Router;
 use aex::http::static_files::StaticFiles;
-use aex::unified::Server;
+use aex::server::Server;
 use aex::{http, tcp};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::time::sleep;
 
-fn http_server(addr: SocketAddr, router: Router) -> Server {
-    Server::solo(addr).push(tcp!(http!(router)))
+fn http_server(router: Router) -> Server {
+    Server::default().push(http!(router))
 }
 
 fn unique_tmp_dir() -> std::path::PathBuf {
@@ -38,9 +38,9 @@ async fn start_router(router: Router) -> TestServer {
     let actual_addr = listener.local_addr().unwrap();
     drop(listener);
 
-    let server = http_server(actual_addr, router);
+    let server = http_server(router);
     tokio::spawn(async move {
-        let _ = server.start().await;
+        let _ = server.start(actual_addr).await;
     });
 
     TestServer {

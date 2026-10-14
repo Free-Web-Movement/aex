@@ -14,7 +14,7 @@
 //!
 //! ```rust,ignore
 //! use aex::http::router::Router as HttpRouter;
-//! use aex::unified::Server;
+//! use aex::server::Server;
 //! use aex::{http, tcp};
 //! use std::net::SocketAddr;
 //!
@@ -25,9 +25,9 @@
 //!
 //!     router.get("/", |_| "Hello, World!");
 //!
-//!     Server::solo(addr)
-//!         .push(tcp!(http!(router)))
-//!         .start()
+//!     Server::default()
+//!         .push(http!(router))
+//!         .start(addr)
 //!         .await?;
 //!     Ok(())
 //! }
@@ -52,20 +52,30 @@ pub mod communicators;
 pub mod connection;
 pub mod constants;
 pub mod crypto;
-pub mod http;
-pub mod http2;
+pub mod detect;
+pub mod handler;
 pub mod macros;
-pub mod nat;
+pub mod p2p;
+pub mod protocol;
 pub mod protocols;
 #[cfg(feature = "proxy")]
 pub mod proxy;
+pub mod server;
 pub mod storage;
-pub mod tcp;
 pub mod time;
-pub mod udp;
-pub mod unified;
+
+// The protocol machinery now lives under `protocols/`; keep the historical
+// top-level paths (`aex::http`, `aex::http2`, `aex::tcp`, `aex::udp`) working.
+pub use protocols::{http, http2, tcp, udp};
+
+// NAT now lives under `p2p/`; keep the historical `aex::nat` path working.
+pub use p2p::nat;
 
 pub use aex_macros::routes;
+
+/// Re-export of [`bytes`] so downstream crates can name the `Bytes` type used by
+/// the TCP/UDP router APIs without depending on a matching `bytes` version.
+pub use bytes;
 
 #[doc(hidden)]
 pub use futures::future::FutureExt;

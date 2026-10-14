@@ -14,9 +14,9 @@ use tokio::io::AsyncWriteExt;
 
 use aex::connection::context::Context;
 use aex::connection::global::GlobalContext;
+use aex::detect::DetectionState;
 use aex::protocols::tcp;
-use aex::unified::UnifiedServer;
-use aex::unified::detect::DetectionState;
+use aex::server::Server;
 
 async fn socks_info(ctx: Context) {
     let mut ctx = ctx;
@@ -37,7 +37,7 @@ async fn socks_info(ctx: Context) {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let addr: SocketAddr = "127.0.0.1:9080".parse()?;
-    let server = UnifiedServer::at(addr, Arc::new(GlobalContext::new(addr, None)))
+    let server = Server::new(Arc::new(GlobalContext::new(addr, None)))
         .detector(Arc::new(SocksDetector))
         .push(tcp::from_handler(
             "socks",
@@ -45,5 +45,5 @@ async fn main() -> anyhow::Result<()> {
         ));
 
     eprintln!("detector_socks5 listening on {addr}");
-    server.start().await
+    server.start(addr).await
 }

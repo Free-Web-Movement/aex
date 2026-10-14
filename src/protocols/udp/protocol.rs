@@ -8,9 +8,9 @@ use std::sync::Arc;
 use bytes::Bytes;
 
 use crate::connection::context::Context;
+use crate::handler::{CommandHandler, CommandKey, CommandRegistry, Outcome, take_context};
 use crate::http::types::Executor;
-use crate::unified::handler::{CommandHandler, CommandKey, CommandRegistry, Outcome, take_context};
-use crate::unified::{Protocol, Transport};
+use crate::protocol::{Protocol, Transport};
 
 /// UDP datagram handler (takes ownership of the [`Context`]).
 pub type UDPHandler = Arc<dyn Fn(Context) -> tokio::task::JoinHandle<()> + Send + Sync>;

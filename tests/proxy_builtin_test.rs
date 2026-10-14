@@ -1,6 +1,6 @@
 //! Integration tests for the built-in proxy services (feature = "proxy").
 //!
-//! One UnifiedServer instance simultaneously serves:
+//! One Server instance simultaneously serves:
 //!   * a website            — origin-form requests
 //!   * an HTTP forward proxy — absolute-form requests
 //!   * an HTTP tunnel       — CONNECT host:port
@@ -16,7 +16,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
 use aex::connection::global::GlobalContext;
-use aex::unified::UnifiedServer;
+use aex::server::Server;
 
 // ---------------------------------------------------------------------------
 // helpers
@@ -56,11 +56,11 @@ async fn spawn_upstream(body: &'static str) -> SocketAddr {
     addr
 }
 
-fn spawn_server(addr: SocketAddr, configure: impl FnOnce(UnifiedServer) -> UnifiedServer) {
+fn spawn_server(addr: SocketAddr, configure: impl FnOnce(Server) -> Server) {
     let globals = Arc::new(GlobalContext::new(addr, None));
-    let server = configure(UnifiedServer::at(addr, globals));
+    let server = configure(Server::new(globals));
     tokio::spawn(async move {
-        if let Err(e) = server.start().await {
+        if let Err(e) = server.start(addr).await {
             eprintln!("server exited: {e}");
         }
     });

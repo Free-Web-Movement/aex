@@ -7,8 +7,8 @@ use aex::protocols::http1::Http1;
 use aex::protocols::http2::Http2;
 use aex::protocols::tcp::Tcp;
 use aex::protocols::udp::Udp;
+use aex::server::Server;
 use aex::tcp::types::{Codec, Command, Frame};
-use aex::unified::UnifiedServer;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -57,7 +57,7 @@ async fn main() -> anyhow::Result<()> {
     let addr: SocketAddr = "0.0.0.0:8080".parse()?;
 
     let globals = Arc::new(GlobalContext::new(addr, None));
-    let mut unified = UnifiedServer::at(addr, globals);
+    let mut unified = Server::new(globals);
 
     let mut router = HttpRouter::new(aex::http::router::NodeType::default());
 
@@ -122,60 +122,66 @@ s.close()
         // into detection (HTTP/1.1 and HTTP/2 traffic is routed to the HTTP
         // paths, everything else falls through to the TCP/UDP handlers).
         .push(Http1::new(Some(Arc::new(router)), None).shared())
-        .push(Http2::new(None).shared())
-        .push(Tcp::new(Some(Arc::new(move |mut ctx| {
-            tokio::spawn(async move {
-                let mut buf = [0u8; 4096];
-                let mut reader = match ctx.reader.take() {
-                    Some(r) => r,
-                    None => return,
-                };
-                match reader.read(&mut buf).await {
-                    Ok(n) => {
-                        if n > 0 {
-                            let data = &buf[..n];
-                            match MyFrame::decode(data) {
-                                Ok(frame) => {
-                                    println!(
-                                        "[TCP Frame] id={}, data={:?}",
-                                        frame.id,
-                                        String::from_utf8_lossy(&frame.data)
-                                    );
+        .push(Http2::new(None, None).shared())
+        .push(
+            Tcp::new(Some(Arc::new(move |mut ctx| {
+                tokio::spawn(async move {
+                    let mut buf = [0u8; 4096];
+                    let mut reader = match ctx.reader.take() {
+                        Some(r) => r,
+                        None => return,
+                    };
+                    match reader.read(&mut buf).await {
+                        Ok(n) => {
+                            if n > 0 {
+                                let data = &buf[..n];
+                                match MyFrame::decode(data) {
+                                    Ok(frame) => {
+                                        println!(
+                                            "[TCP Frame] id={}, data={:?}",
+                                            frame.id,
+                                            String::from_utf8_lossy(&frame.data)
+                                        );
 
-                                    let response = MyCommand {
-                                        id: frame.id,
-                                        data: b"ACK".to_vec(),
-                                    };
-                                    let encoded = Codec::encode(&response).unwrap();
+                                        let response = MyCommand {
+                                            id: frame.id,
+                                            data: b"ACK".to_vec(),
+                                        };
+                                        let encoded = Codec::encode(&response).unwrap();
 
-                                    if let Some(mut w) = ctx.writer.take() {
-                                        let _ = w.write_all(&encoded).await;
-                                        let _ = w.flush().await;
+                                        if let Some(mut w) = ctx.writer.take() {
+                                            let _ = w.write_all(&encoded).await;
+                                            let _ = w.flush().await;
+                                        }
                                     }
-                                }
-                                Err(e) => {
-                                    println!("[TCP Frame] Decode error: {}", e);
-                                    if let Some(mut w) = ctx.writer.take() {
-                                        let _ = w.write_all(b"[TCP] Invalid frame\n").await;
-                                        let _ = w.flush().await;
+                                    Err(e) => {
+                                        println!("[TCP Frame] Decode error: {}", e);
+                                        if let Some(mut w) = ctx.writer.take() {
+                                            let _ = w.write_all(b"[TCP] Invalid frame\n").await;
+                                            let _ = w.flush().await;
+                                        }
                                     }
                                 }
                             }
                         }
+                        Err(e) => {
+                            println!("[TCP] Read error: {}", e);
+                        }
                     }
-                    Err(e) => {
-                        println!("[TCP] Read error: {}", e);
+                })
+            })))
+            .shared(),
+        )
+        .push(
+            Udp::new(Some(Arc::new(|ctx| {
+                tokio::spawn(async move {
+                    if let Some(data) = ctx.local.get_value::<Vec<u8>>() {
+                        println!("[UDP] Received {} bytes", data.len());
                     }
-                }
-            })
-        }))).shared())
-        .push(Udp::new(Some(Arc::new(|ctx| {
-            tokio::spawn(async move {
-                if let Some(data) = ctx.local.get_value::<Vec<u8>>() {
-                    println!("[UDP] Received {} bytes", data.len());
-                }
-            })
-        }))).shared());
+                })
+            })))
+            .shared(),
+        );
 
     println!("===========================================");
     println!("  AEX Unified Server + TCP Frame");
@@ -195,7 +201,7 @@ s.close()
     println!("  API:      curl http://{}/info", addr);
     println!();
 
-    unified.start().await?;
+    unified.start(addr).await?;
 
     Ok(())
 }

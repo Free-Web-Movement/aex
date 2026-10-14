@@ -8,14 +8,13 @@ use aex::{
         middlewares::validator::{to_validator, value_to_string},
         router::Router,
     },
-    tcp,
-    unified::Server,
-    v,
+    server::Server,
+    tcp, v,
 };
 use zz_validator::ast::Value;
 
-fn http_server(addr: std::net::SocketAddr, router: Router) -> Server {
-    Server::solo(addr).push(tcp!(http!(router)))
+fn http_server(router: Router) -> Server {
+    Server::default().push(http!(router))
 }
 #[tokio::test]
 async fn test_to_validator_integration_full() {
@@ -48,9 +47,9 @@ async fn test_to_validator_integration_full() {
     })
     .middleware(mw_validator);
 
-    let server = http_server(actual_addr, hr);
+    let server = http_server(hr);
     tokio::spawn(async move {
-        let _ = server.start().await;
+        let _ = server.start(actual_addr).await;
     });
 
     tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
@@ -122,9 +121,9 @@ async fn test_v_macro_integration_full() {
     })
     .middleware(mw_validator);
 
-    let server = http_server(actual_addr, hr);
+    let server = http_server(hr);
     tokio::spawn(async move {
-        let _ = server.start().await;
+        let _ = server.start(actual_addr).await;
     });
     tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
 
@@ -203,9 +202,9 @@ async fn test_validator_to_handler_data_flow() {
     })
     .middleware(mw_validator);
 
-    let server = http_server(actual_addr, hr);
+    let server = http_server(hr);
     tokio::spawn(async move {
-        let _ = server.start().await;
+        let _ = server.start(actual_addr).await;
     });
     tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
 
@@ -257,9 +256,9 @@ async fn test_validator_conversion_logic_hardcore() {
     })
     .middleware(mw_validator);
 
-    let server = http_server(actual_addr, hr);
+    let server = http_server(hr);
     tokio::spawn(async move {
-        let _ = server.start().await;
+        let _ = server.start(actual_addr).await;
     });
     tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
 
@@ -319,9 +318,9 @@ async fn test_validator_edge_cases_and_fallback() {
     })
     .middleware(mw_validator);
 
-    let server = http_server(actual_addr, hr);
+    let server = http_server(hr);
     tokio::spawn(async move {
-        let _ = server.start().await;
+        let _ = server.start(actual_addr).await;
     });
     tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
 
@@ -388,9 +387,9 @@ async fn test_validator_boolean_strict_error_integration() {
         Some(vec![validator_mw]),
     );
 
-    let server = http_server(actual_addr, hr);
+    let server = http_server(hr);
     tokio::spawn(async move {
-        let _ = server.start().await;
+        let _ = server.start(actual_addr).await;
     });
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
@@ -445,9 +444,9 @@ async fn test_validator_integer_strict_error_integration() {
     );
 
     // 3. 启动 AexServer
-    let server = http_server(actual_addr, hr);
+    let server = http_server(hr);
     tokio::spawn(async move {
-        let _ = server.start().await;
+        let _ = server.start(actual_addr).await;
     });
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
@@ -518,9 +517,9 @@ async fn test_validator_float_strict_error_integration() {
     );
 
     // 3. 启动 AexServer
-    let server = http_server(actual_addr, hr);
+    let server = http_server(hr);
     tokio::spawn(async move {
-        let _ = server.start().await;
+        let _ = server.start(actual_addr).await;
     });
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
@@ -603,9 +602,9 @@ async fn test_validator_float_auto_completion_promotion() {
         Some(vec![to_validator(dsl_map)]),
     );
 
-    let server = http_server(actual_addr, hr);
+    let server = http_server(hr);
     tokio::spawn(async move {
-        let _ = server.start().await;
+        let _ = server.start(actual_addr).await;
     });
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
@@ -680,9 +679,9 @@ async fn test_validator_value_to_string_fallback() {
         Some(vec![to_validator(dsl_map)]),
     );
 
-    let server = http_server(actual_addr, hr);
+    let server = http_server(hr);
     tokio::spawn(async move {
-        let _ = server.start().await;
+        let _ = server.start(actual_addr).await;
     });
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
@@ -767,9 +766,9 @@ async fn test_validator_params_none_fallback() {
     );
 
     // 2. 启动服务器并发送请求
-    let server = http_server(actual_addr, hr);
+    let server = http_server(hr);
     tokio::spawn(async move {
-        let _ = server.start().await;
+        let _ = server.start(actual_addr).await;
     });
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
@@ -821,9 +820,9 @@ async fn test_validator_range_validation_failure_400() {
         Some(vec![validator_mw]),
     );
 
-    let server = http_server(actual_addr, hr);
+    let server = http_server(hr);
     tokio::spawn(async move {
-        let _ = server.start().await;
+        let _ = server.start(actual_addr).await;
     });
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 

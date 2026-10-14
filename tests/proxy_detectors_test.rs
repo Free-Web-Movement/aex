@@ -10,7 +10,7 @@ mod detectors_common;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use aex::unified::detect::ProtocolDetector;
+use aex::detect::ProtocolDetector;
 use detectors_common::TlsSession;
 use detectors_common::{
     ClientHelloParse, SocksDetector, SocksVersion, TlsClientHello as _, TlsDetector, TlsLoader,
@@ -30,7 +30,7 @@ use tokio_rustls::rustls::{
 use aex::connection::context::{BoxReader, Context};
 use aex::connection::global::GlobalContext;
 use aex::protocols::tcp;
-use aex::unified::UnifiedServer;
+use aex::server::Server;
 
 // ---------------------------------------------------------------------------
 // Test scaffolding
@@ -43,11 +43,11 @@ fn free_addr() -> SocketAddr {
         .unwrap()
 }
 
-fn spawn_server(addr: SocketAddr, configure: impl FnOnce(UnifiedServer) -> UnifiedServer) {
+fn spawn_server(addr: SocketAddr, configure: impl FnOnce(Server) -> Server) {
     let globals = Arc::new(GlobalContext::new(addr, None));
-    let server = configure(UnifiedServer::at(addr, globals));
+    let server = configure(Server::new(globals));
     tokio::spawn(async move {
-        if let Err(e) = server.start().await {
+        if let Err(e) = server.start(addr).await {
             eprintln!("server exited: {e}");
         }
     });
@@ -203,19 +203,19 @@ async fn parser_extracts_sni_and_alpn() {
     }
 
     // Fragmented delivery must eventually reach the same verdict.
-    let mut state = aex::unified::detect::DetectionState::new();
+    let mut state = aex::detect::DetectionState::new();
     for cut in [5usize, 20, 60] {
         if cut >= hello_bytes.len() {
             break;
         }
         let verdict = TlsDetector.detect(&hello_bytes[..cut], &mut state);
         assert!(
-            matches!(verdict, aex::unified::detect::Verdict::NeedMore(_)),
+            matches!(verdict, aex::detect::Verdict::NeedMore(_)),
             "cut={cut} should still be pending"
         );
     }
     let verdict = TlsDetector.detect(&hello_bytes, &mut state);
-    assert!(matches!(verdict, aex::unified::detect::Verdict::Match));
+    assert!(matches!(verdict, aex::detect::Verdict::Match));
 
     // Non-TLS garbage is passed on immediately.
     assert!(matches!(
@@ -226,27 +226,27 @@ async fn parser_extracts_sni_and_alpn() {
 
 #[tokio::test]
 async fn socks_detector_verdicts() {
-    let mut state = aex::unified::detect::DetectionState::new();
+    let mut state = aex::detect::DetectionState::new();
 
     // Partial SOCKS5 greeting stays pending until all method bytes arrive.
     assert!(matches!(
         SocksDetector.detect(&[0x05, 0x02, 0x00], &mut state),
-        aex::unified::detect::Verdict::NeedMore(_)
+        aex::detect::Verdict::NeedMore(_)
     ));
     assert!(matches!(
         SocksDetector.detect(&[0x05, 0x02, 0x00, 0x02], &mut state),
-        aex::unified::detect::Verdict::Match
+        aex::detect::Verdict::Match
     ));
 
-    let mut state = aex::unified::detect::DetectionState::new();
+    let mut state = aex::detect::DetectionState::new();
     SocksDetector.detect(&[0x05, 0x02, 0x00, 0x02], &mut state);
     assert_eq!(state.get_scratch::<SocksVersion>(), Some(SocksVersion::V5));
 
     // HTTP traffic passes through untouched.
-    let mut state = aex::unified::detect::DetectionState::new();
+    let mut state = aex::detect::DetectionState::new();
     assert!(matches!(
         SocksDetector.detect(b"GET / HTTP/1.1\r\n\r\n", &mut state),
-        aex::unified::detect::Verdict::Pass
+        aex::detect::Verdict::Pass
     ));
 }
 
@@ -447,7 +447,7 @@ async fn socks5_sniff_dispatch_e2e() {
                     let mut ctx = ctx;
                     let version = ctx
                         .local
-                        .get_ref::<aex::unified::detect::DetectionState>()
+                        .get_ref::<aex::detect::DetectionState>()
                         .and_then(|s| s.get_scratch::<SocksVersion>());
                     if let Some(w) = ctx.writer.as_mut() {
                         let line = match version {

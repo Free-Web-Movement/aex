@@ -22,7 +22,7 @@ use aex::connection::context::Context;
 use aex::connection::global::GlobalContext;
 use aex::http::types::Executor;
 use aex::protocols::tcp;
-use aex::unified::UnifiedServer;
+use aex::server::Server;
 
 fn uuid_str(b: &[u8; 16]) -> String {
     let h = |r: std::ops::Range<usize>| b[r].iter().map(|x| format!("{x:02x}")).collect::<String>();
@@ -60,7 +60,7 @@ async fn run(cert: String, key: String) -> anyhow::Result<()> {
         })
     };
 
-    let server = UnifiedServer::at(addr, globals)
+    let server = Server::new(globals)
         .detector(Arc::new(TlsDetector))
         .push(tcp::from_handler(
             "tls",
@@ -92,7 +92,7 @@ async fn run(cert: String, key: String) -> anyhow::Result<()> {
         ));
 
     eprintln!("detector_vless listening on {addr} (cert={cert})");
-    server.start().await
+    server.start(addr).await
 }
 
 #[tokio::main]

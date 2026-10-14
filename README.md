@@ -1,28 +1,87 @@
 # Aex — Async-first, Executor-based Web/TCP/UDP Framework
 
-> 一个轻量、可控、忠于 HTTP 本质的 Rust 多协议框架
+**English** | [中文](README.zh.md)
+
+> A lightweight, controllable Rust multi-protocol framework faithful to the essence of HTTP
 
 [![Rust](https://img.shields.io/badge/rust-1.88%2B-blue.svg)](https://www.rust-lang.org)
 [![License](https://img.shields.io/badge/license-GPL--3.0--or--later-green.svg)](LICENSE)
 [![ crates.io version](https://img.shields.io/crates/v/aex.svg)](https://crates.io/crates/aex)
 [![crates.io downloads](https://img.shields.io/crates/d/aex.svg)](https://crates.io/crates/aex)
 [![codecov](https://img.shields.io/codecov/c/github/Free-Web-Movement/aex)](https://codecov.io/gh/Free-Web-Movement/aex)
+[![CI](https://github.com/Free-Web-Movement/aex/actions/workflows/rust.yml/badge.svg)](https://github.com/Free-Web-Movement/aex/actions/workflows/rust.yml)
+[![Dependencies](https://deps.rs/repo/github/Free-Web-Movement/aex/status.svg)](https://deps.rs/repo/github/Free-Web-Movement/aex)
+[![Discord](https://img.shields.io/discord/823762790165774386?logo=discord&logoColor=white&label=chat)](https://discord.com/channels/823762790165774386/823762790165774389)
 
-## Get Started (快速开始)
+## Table of Contents
 
-一条命令引入依赖：
+- [Get Started](#get-started)
+- [Version](#version)
+- [Core Features](#core-features)
+- [Design Philosophy: A Universal Server State Machine Containing the Web Straight Line](#design-philosophy-a-universal-server-state-machine-containing-the-web-straight-line)
+  - [The Universal Server State Machine](#the-universal-server-state-machine-the-tcp--udp-processing-logic)
+  - [The Web Straight Line: the Acyclic Straight Line of the HTTP Branch in the State Machine](#the-web-straight-line-the-acyclic-straight-line-of-the-http-branch-in-the-state-machine)
+  - [Stage Mapping of Protocols in the Same State Machine (HTTP / WebSocket / TCP / UDP)](#stage-mapping-of-protocols-in-the-same-state-machine-http--websocket--tcp--udp)
+  - [Grammar Diagram: the Universal Server State Machine (Containing the Web Straight Line)](#grammar-diagram-the-universal-server-state-machine-containing-the-web-straight-line)
+- [Unified Server Architecture](#unified-server-architecture)
+  - [Supported Protocols](#supported-protocols)
+  - [Unified Server (Server)](#unified-server-server)
+  - [Server Startup Modes](#server-startup-modes)
+  - [Protocol Macros in Detail (`tcp!` / `http!` / `udp!` / `ws!`)](#protocol-macros-in-detail-tcp--http--udp--ws)
+  - [Protocol Detector System (DetectorRegistry)](#protocol-detector-system-detectorregistry)
+  - [Handler Type Signatures](#handler-type-signatures)
+- [HTTP Quick Start](#http-quick-start)
+  - [Build a Web Server](#build-a-web-server)
+  - [HTTP Routing in Detail](#http-routing-in-detail)
+  - [Object-based Routing Methods (Core)](#object-based-routing-methods-core)
+  - [HTTP/2 Support](#http2-support)
+  - [WebSocket Support](#websocket-support)
+  - [Static File Serving](#static-file-serving)
+- [http-server Static Server](#http-server-static-server)
+  - [Middleware](#middleware)
+- [Unified Server API](#unified-server-api)
+  - [Use Cases](#use-cases)
+- [TCP Protocol](#tcp-protocol)
+  - [TCP Frame/Command Definitions](#tcp-framecommand-definitions)
+- [UDP Protocol](#udp-protocol)
+- [P2P: Low-level Infrastructure](#p2p-low-level-infrastructure)
+  - [Core Concepts](#core-concepts)
+  - [Command ID Definitions](#command-id-definitions)
+  - [Connection State Machine](#connection-state-machine)
+  - [Handshake Protocol](#handshake-protocol)
+  - [Heartbeat Protocol](#heartbeat-protocol)
+- [Communicators](#communicators)
+  - [Pipe - N:1 Pipeline](#pipe---n1-pipeline)
+  - [Spreader - 1:N Broadcast](#spreader---1n-broadcast)
+  - [Event - M:N Event System](#event---mn-event-system)
+- [Architecture](#architecture)
+  - [Multi-layer Architecture Design](#multi-layer-architecture-design)
+  - [Core Components](#core-components)
+- [Comparison with Other Frameworks](#comparison-with-other-frameworks)
+  - [Protocol Support Comparison](#protocol-support-comparison)
+  - [Aex Design Principles](#aex-design-principles)
+  - [Performance Comparison (AEX vs Axum vs Actix-web)](#performance-comparison-aex-vs-axum-vs-actix-web)
+  - [Use Cases](#use-cases-1)
+- [Module Structure](#module-structure)
+- [Testing](#testing)
+- [License](#license)
+- [Appendix: Web Straight Line Grammar and Images (docs/grammar.md)](docs/grammar.md)
+
+## Get Started
+
+Add the dependency with a single command:
 
 ```bash
 cargo add aex
 cargo add tokio --features full
 ```
 
-**30 秒起一个 HTTP 服务**
+**Spin up an HTTP service in 30 seconds**
 
 ```rust
 use aex::http::router::Router as HttpRouter;
-use aex::unified::Server;
-use aex::{_sync, http, tcp};
+use aex::server::Server;
+use aex::{_sync, http};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -31,58 +90,58 @@ async fn main() -> anyhow::Result<()> {
 
     router.get("/", _sync!(|_| "OK"));
 
-    Server::solo(addr)
-        .push(tcp!(http!(router)))
-        .start()
+    Server::default()
+        .push(http!(router))
+        .start(addr)
         .await?;
     Ok(())
 }
 ```
 
-**异步 handler 用 `_async!` 包一下即可**
+**For async handlers, just wrap them with `_async!`**
 
 ```rust
 use aex::http::router::Router as HttpRouter;
-use aex::unified::Server;
-use aex::{_async, http, tcp};
+use aex::server::Server;
+use aex::{_async, http};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let addr: SocketAddr = "0.0.0.0:8080".parse()?;
     let mut router = HttpRouter::default();
-    // 异步闭包：`_async!` 内部支持 await，同样免标注
+    // Async closure: `_async!` supports await internally, and likewise needs no annotation
     router.get("/", _async!(|ctx| {
-        let html = fetch_home_page().await; // 任意 async 逻辑
+        let html = fetch_home_page().await; // any async logic
         ctx.html(&html);
         true
     }));
 
-    Server::solo(addr)
-        .push(tcp!(http!(router)))
-        .start()
+    Server::default()
+        .push(http!(router))
+        .start(addr)
         .await?;
     Ok(())
 }
 ```
 
-**两种写法都是 `Arc<Executor>`，可在同一 router 上混用**
+**Both forms are `Arc<Executor>` and can be mixed on the same router**
 
-| | 同步 | 异步 |
+| | Synchronous | Asynchronous |
 |---|---|---|
-| 宏名 | `_sync!`（主）、`now!`（别名） | `_async!`（主）、`then!`（别名）、`exe!`（早期写法，兼容保留） |
-| 示例 | `_sync!(\|_\| "OK")` | `_async!(\|ctx\| { ...await... })` |
-| 用途 | 纯同步 handler / 中间件 | 需要 `await` 的异步 handler / 中间件 |
-| `ctx` 参数 | 免标注（泛型函数推断） | 免标注；不引用 ctx 时可写 `\|_\|` |
-| 内部能否 `await` | 不能 | 可以 |
-| 产物 | `Arc<Executor>` | `Arc<Executor>` |
+| Macro name | `_sync!` (primary), `now!` (alias) | `_async!` (primary), `then!` (alias) |
+| Example | `_sync!(\|_\| "OK")` | `_async!(\|ctx\| { ...await... })` |
+| Purpose | Pure synchronous handler / middleware | Async handler / middleware that needs `await` |
+| `ctx` parameter | No annotation needed (inferred via generic function) | No annotation needed; can write `\|_\|` when ctx is unused |
+| Can `await` internally | No | Yes |
+| Product | `Arc<Executor>` | `Arc<Executor>` |
 
->`_sync!` 通过泛型函数 `aex::http::types::sync` 恢复闭包参数推断，因此
->`|_| "OK"`、`|ctx| {...}` 无需写 `&mut Context` 标注；直接传给
->`router.get(...)`（走 `IntoExecutor`）则必须标注。
+>`_sync!` restores closure parameter inference through the generic function `aex::http::types::sync`, so
+>`|_| "OK"` and `|ctx| {...}` need no `&mut Context` annotation; passing them
+>directly to `router.get(...)` (which goes through `IntoExecutor`) does require the annotation.
 
-**路由即方法，一次挂载多个 URL（推荐）**
+**Routing as methods: mount multiple URLs at once (recommended)**
 
-不再逐个手写 `router.get(...)` —— 路由直接写在方法上，`push` 一个实例，全部挂上：
+No more writing `router.get(...)` one by one — write the routes directly on the methods, `push` a single instance, and they are all mounted:
 
 ```rust
 use aex::http::router::Router as HttpRouter;
@@ -97,19 +156,19 @@ struct User {
 
 #[aex::routes]
 impl User {
-    // 一个属性：两个 URL；[auth] 是对象中间件，见下方同名方法
+    // One attribute: two URLs; [auth] is object middleware, see the method of the same name below
     #[get(["/", "/profile"], [auth])]
     fn profile(&self, ctx: &mut Context) {
-        ctx.text(&self.name); // 直接用实例状态，无需全局变量
+        ctx.text(&self.name); // Use instance state directly, no global variables needed
     }
 
-    // async handler 同样支持
+    // Async handlers are supported just the same
     #[post("/resources")]
     async fn create(&self, ctx: &mut Context) {
         ctx.text("created");
     }
 
-    // 对象中间件：裸标识符 -> &self 方法，和 handler 看同一个 self
+    // Object middleware: a bare identifier -> a &self method, seeing the same self as the handler
     fn auth(&self, ctx: &mut Context) -> bool {
         let key = HeaderKey::from_str("x-api-key").unwrap();
         ctx.get::<HttpMetadata>()
@@ -125,21 +184,21 @@ router.push(User {
 });
 ```
 
-> **`&self` 就是你的状态** —— 路由方法和对象中间件都天然持有同一个实例：不用闭包套闭包、不用全局变量、不用手动传参。
+> **`&self` is your state** — both route methods and object middleware naturally hold the same instance: no closure wrapping closures, no global variables, no manual parameter passing.
 
-**`push` 收的是「实例」，不是「类型」** —— 两种写法都合法，取决于结构体怎么定义：
+**`push` takes an "instance", not a "type"** — both forms are valid, depending on how the struct is defined:
 
 ```rust
-// ① 单元结构体（无字段）：类名即实例，直接 push 类名
+// ① Unit struct (no fields): the class name is the instance, so push the class name directly
 struct Health;
 #[aex::routes(prefix = "/backend")]
 impl Health {
     #[get("/ping", no_prefix)]
     fn ping(ctx: &mut Context) -> &'static str { "pong" }
 }
-router.push(Health);                       // 构造零字段实例，等价于 push(Health {})
+router.push(Health);                       // Constructs a zero-field instance, equivalent to push(Health {})
 
-// ② 带字段结构体：必须显式构造实例，把状态一并传入
+// ② Struct with fields: you must explicitly construct an instance and pass the state in
 struct User { name: String, api_key: String }
 #[aex::routes]
 impl User {
@@ -149,22 +208,22 @@ impl User {
 router.push(User { name: "aex".into(), api_key: "secret".into() });
 ```
 
-- 内部实现：`push` 收到的是**值**，`router.push<C: AexRoutes>(instance: C)` 会 `Arc::new(instance)`，宏生成的路由/中间件各自 `Arc::clone` 持有同一实例；`&self` 方法直接读该实例状态。
-- 单元结构体 `struct Health;` 写 `push(Health)` 是**构造值**（零大小实例），不是传类型。
-- 无状态需求 → 用单元结构体（省事）；需要共享状态（连接池、配置、计数器等）→ 定义字段并在 push 时传入。
+- Internal implementation: `push` receives a **value**; `router.push<C: AexRoutes>(instance: C)` does `Arc::new(instance)`, and the macro-generated routes/middleware each `Arc::clone` to hold the same instance; `&self` methods read that instance's state directly.
+- For the unit struct `struct Health;`, writing `push(Health)` is **constructing a value** (a zero-sized instance), not passing a type.
+- No state needed → use a unit struct (less hassle); share state (connection pool, config, counters, etc.) → define fields and pass them in when pushing.
 
-**路由组前缀（`prefix`）** —— 一组路由共用一个前缀，适合按层级/子系统组织：
+**Route group prefix (`prefix`)** — a group of routes sharing a single prefix, ideal for organizing by hierarchy/subsystem:
 
 ```rust
-// #[aex::routes]               → 无前缀（根路径）
-// #[aex::routes("/api")]       → 字符串字面量前缀
+// #[aex::routes]               → no prefix (root path)
+// #[aex::routes("/api")]       → string-literal prefix
 #[aex::routes(prefix = "/backend")]
 impl BackendApi {
-    // 属性里的路径与 prefix 拼接：/backend/admin/users
+    // The path in the attribute is joined with prefix: /backend/admin/users
     #[get("/admin/users")]
     async fn users(ctx: &mut Context) { /* ... */ }
 
-    // "/" 与 "" 双写法都可用：/backend/ 与 /backend 均可访问
+    // Both "/" and "" work: /backend/ and /backend are both accessible
     #[get(["/", ""])]
     async fn home(ctx: &mut Context) { /* ... */ }
 }
@@ -173,99 +232,196 @@ let mut router = HttpRouter::default();
 router.push(BackendApi);
 ```
 
-- `#[aex::routes(prefix = "/...")]` 与 `#[aex::routes("/...")]` 两种写法等价；
-- 前缀自动规范化（保证前导 `/`、去掉尾斜杠），属性路径原样拼接在后方；
-- 空前缀（`#[aex::routes]`）等价于不加 prefix，路径保持不变；
-- **个别路由可跳过前缀**：在路径属性里追加 `no_prefix` 标记，该路由按原样注册在根路径（`#[get("/health", no_prefix)]` → `/health`，而非 `/backend/health`）。
+- `#[aex::routes(prefix = "/...")]` and `#[aex::routes("/...")]` are equivalent;
+- The prefix is normalized automatically (leading `/` guaranteed, trailing slash removed), and the attribute path is appended as-is;
+- An empty prefix (`#[aex::routes]`) is equivalent to no prefix, leaving paths unchanged;
+- **Individual routes can skip the prefix**: append the `no_prefix` marker to the path attribute, and that route is registered at the root path as-is (`#[get("/health", no_prefix)]` → `/health`, not `/backend/health`).
 
-**`no_prefix` 与中间件不会混淆** —— 判定规则很明确：只看它是不是**属性里的直接位置参数**（裸标识符，不在 `[]` 内）：
+**`no_prefix` and middleware are never confused** — the rule is clear: it only looks at whether it is a **direct positional argument in the attribute** (a bare identifier, not inside `[]`):
 
-| 写法 | 含义 |
+| Form | Meaning |
 |------|------|
-| `#[get("/health", no_prefix)]` | `no_prefix` 是直接参数 → **跳过前缀**标记 |
-| `#[get("/x", [auth], no_prefix)]` | 中间件数组在前、标记在后 → 既挂中间件又跳过前缀 |
-| `#[get("/x", no_prefix, [auth])]` | 标记在前 → 跳过前缀 + 挂中间件 |
-| `#[get("/x", [no_prefix])]` | 在 `[]` **数组内** → 是**中间件**（名为 `no_prefix`），前缀照常生效 |
+| `#[get("/health", no_prefix)]` | `no_prefix` is a direct argument → a **skip-prefix** marker |
+| `#[get("/x", [auth], no_prefix)]` | middleware array first, marker after → mounts middleware and skips the prefix |
+| `#[get("/x", no_prefix, [auth])]` | marker first → skips the prefix and mounts middleware |
+| `#[get("/x", [no_prefix])]` | inside the `[]` **array** → it is **middleware** (named `no_prefix`), and the prefix still applies |
 
-> 结论：**裸的 `no_prefix` = 跳过前缀**；**`[no_prefix]` = 名为 no_prefix 的中间件**。两者靠「是否在数组内」区分，不会打架。
-> 唯一要注意：若你的中间件恰好叫 `no_prefix`，请务必用 `[no_prefix]` 包裹，否则会被当成跳过前缀的标记。
+> Conclusion: **a bare `no_prefix` = skip the prefix**; **`[no_prefix]` = middleware named no_prefix**. The two are distinguished by "whether it is inside an array" and never clash.
+> The only thing to watch: if your middleware happens to be named `no_prefix`, be sure to wrap it as `[no_prefix]`, otherwise it will be treated as a skip-prefix marker.
 
 ```rust
 #[aex::routes(prefix = "/backend")]
 impl Demo {
-    // 跳过前缀 → GET /ping（不带 /backend）
+    // Skips the prefix → GET /ping (without /backend)
     #[get("/ping", no_prefix)]
     fn ping(ctx: &mut Context) -> &'static str { "pong" }
 
-    // [no_prefix] 是中间件，前缀仍生效 → GET /backend/secure，先过 no_prefix 中间件
+    // [no_prefix] is middleware, the prefix still applies → GET /backend/secure, going through the no_prefix middleware first
     #[get("/secure", [no_prefix])]
     fn secure(ctx: &mut Context) -> &'static str { "ok" }
 }
 
-// 全局中间件函数（名字恰好叫 no_prefix，必须用 [no_prefix] 包裹才生效）
-fn no_prefix(ctx: &mut Context) -> bool { /* 鉴权逻辑 */ }
+// Global middleware function (named exactly no_prefix, so it only takes effect when wrapped as [no_prefix])
+fn no_prefix(ctx: &mut Context) -> bool { /* authentication logic */ }
 ```
 
-完整的 HTTP 路由、中间件、HTTP/2、WebSocket 用法见 [HTTP 快速开始](#http-快速开始)。
+For complete HTTP routing, middleware, HTTP/2, and WebSocket usage, see [HTTP Quick Start](#http-quick-start).
 
 ---
 
-## 版本
+## Version
 
-当前版本: **0.1.22**
+Current version: **0.1.23**
 
-- 依赖配置见上方 [Get Started](#get-started-快速开始)。
+- For dependency configuration, see [Get Started](#get-started) above.
 
-## 核心特性
+## Core Features
 
-- **统一端口多协议** - HTTP/1.1、HTTP/2、WebSocket、TCP、UDP 共用同一端口，可插拔协议检测器体系
-- **直觉的 HTTP 路由** - Trie 树路由，支持静态路径、参数路径、通配符
-- **同步 / 异步 handler 双写法** - 同步闭包与 `_async!` 异步闭包统一由 `IntoExecutor` 接受，可混用
-- **显式中间件链** - 线性执行顺序，可预测的控制流（非洋葱模型）
-- **原生 WebSocket 支持** - 作为中间件自然集成，共享 HTTP 上下文
-- **多协议支持** - HTTP/1.1、HTTP/2、TCP、UDP 服务器统一接口
-- **TypeMap 扩展** - 灵活的请求/响应数据存储
-- **端到端加密** - ChaCha20-Poly1305 会话加密
-- **IPC 通信器** - Pipe、Spreader、Event 模式
-- **P2P 框架** - 基于 IP 识别的去中心化网络
-- **自带 `http-server`** - `cargo install aex` 即得到一个开箱即用的静态文件服务器（nginx/apache 式），见 [http-server 静态服务器](#http-server-静态服务器)
+- **Unified-port multi-protocol** - HTTP/1.1, HTTP/2, WebSocket, TCP, and UDP share a single port, with a pluggable protocol detector system
+- **Intuitive HTTP routing** - a Trie-tree router supporting static paths, parameter paths, and wildcards
+- **Dual synchronous / asynchronous handler forms** - synchronous closures and `_async!` async closures are both accepted uniformly by `IntoExecutor` and can be mixed
+- **Explicit middleware chain** - linear execution order with predictable control flow (not an onion model)
+- **Native WebSocket support** - integrates naturally as middleware, sharing the HTTP context
+- **Multi-protocol support** - a unified interface for HTTP/1.1, HTTP/2, TCP, and UDP servers
+- **TypeMap extension** - flexible request/response data storage
+- **End-to-end encryption** - ChaCha20-Poly1305 session encryption
+- **IPC communicators** - Pipe, Spreader, and Event patterns
+- **Bundled `http-server`** - `cargo install aex` gives you an out-of-the-box static file server (nginx/apache style), see [http-server Static Server](#http-server-static-server)
 
 ---
 
-## 统一服务器架构
+## Design Philosophy: A Universal Server State Machine Containing the Web Straight Line
 
-Aex 是目前 Rust 生态中**协议支持最全面**的 web 框架之一，可以在**同一个端口**同时运行多种协议。
+Aex (Rust) is a **universal server state machine**: it handles **all** protocols
+(HTTP / WebSocket / TCP / UDP) with a unified "staged process + linear middleware".
 
-### 支持的协议
+**The Web Straight Line is a theory that specifically describes the HTTP request / response mechanism and is unrelated to other protocols**,
+and it is **acyclic**: a request comes in, a response goes out, one straight line.
+**It applies to all "request → response" style HTTP protocols** (HTTP/1.1, HTTP/2, and later HTTP of the same kind).
+It was first proposed by [`calidion/aex`](https://github.com/calidion/aex)
+([The Web Straight Line Theory](https://github.com/calidion/aex#what-is-the-web-straight-line)).
+In aex, **the Web Straight Line corresponds to the HTTP branch of this universal server state machine — both `Http1` and `Http2` are inside it**:
+
+> **It is not "extended from the Web Straight Line."** aex's universal server state machine **contains** the Web Straight Line —
+> the Web Straight Line is the acyclic straight line on its internal HTTP branch, not its source or parent. The two stand in a
+> "whole ⊇ part" relationship. For the complete EBNF and railroad diagrams, see [`docs/grammar.md`](docs/grammar.md).
+
+### The Universal Server State Machine (the TCP / UDP Processing Logic)
+
+The essence of the universal server state machine is precisely the **TCP / UDP processing logic**; it is a **loop**:
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    Aex 统一协议支持                           │
-├─────────────────────────────────────────────────────────────┤
-│  协议类型       │  检测器               │  说明               │
-├─────────────────────────────────────────────────────────────┤
-│  HTTP/1.1     │ Http11Detector        │ 标准 HTTP 请求       │
-│  HTTP/2       │ Http2Detector         │ HTTP/2 协议 preface │
-│  WebSocket    │ HTTP 升级请求内识别     │ Upgrade 头          │
-│  HTTP 代理     │ Http11Detector 内分流  │ absolute-form / CONNECT（feature=proxy）│
-│  SOCKS4/4a/5  │ SocksDetector（内置）  │ CONNECT 隧道（feature=proxy）│
-│  自定义协议     │ 自定义 ProtocolDetector │ trojan/NAT/私有协议 │
-│  TCP          │ 兜底 handler           │ 其他所有流量         │
-│  UDP          │ 独立 UDP Socket        │ 数据报通信           │
-└─────────────────────────────────────────────────────────────┘
+Receive (detect / command) → Parse → Route → Middleware processing → Command processing → Return data → New loop ↺
 ```
 
-#### 内置 HTTP / SOCKS 代理（`feature = "proxy"`）
+- **Receive (detect / command)**: accept the connection / datagram, detect the protocol (**detect**) or read the **command**.
+- **Parse**: encode/decode, restoring bytes into frames / commands / requests.
+- **Route**: HTTP uses `method + url`; TCP/UDP use `command + message`.
+- **Middleware processing**: a linear `Executor` chain; returning `false` short-circuits.
+- **Command processing**: business logic (handler).
+- **Return data**: write back the response / reply.
+- **New loop**: back to "Receive", to process the next message — this is precisely the most essential difference from HTTP.
 
-单端口同时承载多个服务，**由客户端首字节决定走哪条服务线**，无服务器端模式切换：
+**HTTP is a special case on this loop**: it ends as soon as the request is received and data is returned, without returning to receive —
+that is the **acyclic** Web Straight Line below.
 
-| 客户端行为 | 服务线 |
+### The Web Straight Line: the Acyclic Straight Line of the HTTP Branch in the State Machine
+
+The Web Straight Line is the concrete form of the above state machine on **HTTP request / response** — **acyclic**, applicable to all request→response HTTP (HTTP/1.1, HTTP/2):
+
+```
+Request start → Data reception & storage / parameter validation → Identity verification → Data analysis & processing → Business processing → Data sending → Request end
+```
+
+![The Web Straight Line](docs/Web_Straight_Line.png)
+
+A single HTTP request flows **one-way, sequentially** through each stage along this line. Middleware is inserted between stages: it executes before the handler,
+and returning `false` short-circuits (equivalent to `res.end`), terminating the request — **leaving no room to "return" for a flow that has already ended**.
+
+**Why not the onion model**: mainstream middleware forces the linear stages into a recursive stack and keeps a `next` callback, making control flow travel in both the
+"enter" and "return" directions. This does not match the real shape of an HTTP request, and it wrongly preserves a callback that should disappear and requires maintaining
+two sets of middleware for the same functionality. The Web Straight Line rejects this model.
+
+**The five principles of the Web Straight Line (HTTP) itself** (from `calidion/aex`):
+
+1. **Separate web logic from business logic**, developing only for web logic itself;
+2. **Focus on the web flow**, without overstepping into the business domain;
+3. **Make writing good web projects simpler**;
+4. **View web interaction as a straight line** — i.e. the Web Straight Line;
+5. **No MVC**, focusing on the "web logic" architectural layer.
+
+### Stage Mapping of Protocols in the Same State Machine (HTTP / WebSocket / TCP / UDP)
+
+The Web Straight Line covers only the HTTP column; the state machine also includes other protocol branches, which **share the same set of stages and middleware semantics**,
+differing only in the concrete implementation of each stage:
+
+| Stage | HTTP/1.1 | WebSocket | TCP | UDP |
+|---|---|---|---|---|
+| Admission / protocol detection | claimed by `Http11Detector` | handed to the `Websocket` sub-handler after HTTP `Upgrade` | `Tcp` fallback | `Udp` datagram slot |
+| Routing | method + url (Trie, params/wildcards) | reuses the HTTP path and `router` from before the upgrade | command + message (`Router` / `CommandRegistry`) | dispatch key per datagram |
+| Authentication | cookie · session · http-auth | inherits HTTP headers | session key / handshake | session key / handshake |
+| Data parsing | query · body · formdata · files | frames (text / binary) | frames + command codec | datagram unpacking |
+| Access control / data control | middleware chain (linear `Executor`) | middleware chain | middleware chain | middleware chain |
+| Business logic | route handler | `on_text` / `on_binary` | command handler | datagram handler |
+| Output | html / xml / json / streaming | WebSocket frames | frames | datagrams |
+| End | response + keep-alive | close / upgrade complete | close | connectionless (a single packet ends it) |
+
+Key point: **the same middleware chain model runs through all four** — every processing unit returns `bool`, and `false` short-circuits;
+none of them has a `next` callback, and none is an onion model. WebSocket is merely "middleware after an HTTP upgrade",
+while TCP / UDP replace "routing / authentication / parsing" with the corresponding command and datagram implementations, with all other stages perfectly isomorphic.
+
+### How Aex Implements This State Machine
+
+- **Explicit linear middleware chain**: handlers are uniformly `Fn(&mut Context) -> BoxFuture<'_, bool>` (`Executor`),
+  executed **linearly** in registration order; returning `false` short-circuits. No `next`, no onion model.
+- **Context carries scope-style data**: stages pass data through `Context` (which contains a TypeMap),
+  exactly corresponding to "data reception & storage → data analysis & processing" in the state machine.
+- **No MVC**: routing is not made into a controller layer; instead `#[aex::routes]` declares routes on object methods,
+  mounted by `Router::push` — the business object is the route carrier.
+- **WebSocket is upgrade middleware**: WebSocket is reached only through an HTTP upgrade, so it shares the context and routing with HTTP,
+  rather than being treated as a "special protocol".
+- **Microservice-capable and full-featured**: the same state machine can be trimmed into a microservice, or extended into a
+  full-featured server by composing protocols/middleware.
+
+### Grammar Diagram: the Universal Server State Machine (Containing the Web Straight Line)
+
+The state machine written as a grammar: the top level has only `Tcp` (stream) and `Udp` (datagram), and HTTP / HTTP2 / WebSocket / SOCKS
+are all sub-handlers of `Tcp`; **the Web Straight Line is a straight line inside its HTTP branch (`Http1` / `Http2`)**.
+For the complete EBNF (directly renderable in the [Railroad Diagram Generator](https://bottlecaps.de/rr/ui)) see
+[`docs/grammar.md`](docs/grammar.md).
+
+![Universal Server State Machine (AEX Rust)](docs/aex_architecture.png)
+
+---
+
+## Unified Server Architecture
+
+Aex is one of the **most protocol-complete** web frameworks in the Rust ecosystem, and can run multiple protocols simultaneously on the **same port**.
+
+### Supported Protocols
+
+| Protocol type | Detector | Description |
+|---|---|---|
+| HTTP/1.1 | `Http11Detector` | Standard HTTP requests |
+| HTTP/2 | `Http2Detector` | HTTP/2 protocol preface |
+| WebSocket | Recognized within HTTP upgrade requests | `Upgrade` header |
+| HTTP proxy | Split within `Http11Detector` | absolute-form / CONNECT (`feature = "proxy"`) |
+| SOCKS4/4a/5 | `SocksDetector` (built-in) | CONNECT tunneling (`feature = "proxy"`) |
+| Custom protocol | custom `ProtocolDetector` | trojan / private protocols |
+| TCP | fallback handler | all other traffic |
+| UDP | a separate UDP Socket | datagram communication |
+
+#### Built-in HTTP / SOCKS Proxy (`feature = "proxy"`)
+
+A single port carries multiple services simultaneously, **with the client's first byte deciding which service line to take**, with no server-side mode switching:
+
+| Client behavior | Service line |
 |---|---|
-| `GET /path HTTP/1.1`（origin-form） | 网站路由 / handler |
-| `GET http://host/path HTTP/1.1`（absolute-form） | HTTP 正向代理 → 上游 |
-| `CONNECT host:port HTTP/1.1` | HTTP 隧道 → 上游 |
-| `\x05\x01\x00...`（SOCKS 问候） | SOCKS4/4a/5 CONNECT |
-| TLS ClientHello | 检测器认领 → 自定义 handler |
+| `GET /path HTTP/1.1` (origin-form) | website routing / handler |
+| `GET http://host/path HTTP/1.1` (absolute-form) | HTTP forward proxy → upstream |
+| `CONNECT host:port HTTP/1.1` | HTTP tunnel → upstream |
+| `\x05\x01\x00...` (SOCKS greeting) | SOCKS4/4a/5 CONNECT |
+| TLS ClientHello | detector claims → custom handler |
 
 ```bash
 # Cargo.toml
@@ -276,29 +432,29 @@ aex = { version = "0.1", features = ["proxy"] }
 use aex::connection::global::GlobalContext;
 use aex::protocols::{proxy, socks};
 use aex::proxy::ProxyAuthorizer;
-use aex::unified::UnifiedServer;
+use aex::server::Server;
 use std::sync::Arc;
 
 let authorizer: ProxyAuthorizer = Arc::new(|user, pass| user == "alice" && pass == "secret");
 
-let server = UnifiedServer::at(addr, Arc::new(GlobalContext::new(addr, None)))
-    // 同一个 HTTP/1.1 协议既服务网站（origin-form），也服务 HTTP 正向代理
-    // （absolute-form / CONNECT），受同一套凭据约束。
+let server = Server::new(Arc::new(GlobalContext::new(addr, None)))
+    // The same HTTP/1.1 protocol serves both the website (origin-form) and the HTTP forward proxy
+    // (absolute-form / CONNECT), subject to the same set of credentials.
     .push(proxy::http_proxy(None, Some(website), Some(authorizer.clone())))
     .push(socks::protocol(Some(authorizer)));
-server.start().await?;
+server.start(addr).await?;
 ```
 
-- HTTP 代理：absolute-form 请求改写为 origin-form 后中继（剥离 hop-by-hop 头、注入 `Via`）；CONNECT 建隧道后原始字节双向转发。
-- SOCKS 代理：仅 CONNECT（BIND / UDP ASSOCIATE 回“不支持”）；认证支持无认证与 RFC 1929 用户名/密码（`proxy_authenticator` 统一控制 HTTP 与 SOCKS 两端）。
-- 默认不编译任何代理逻辑（开放代理是风险资产）；示例见 `examples/proxy_demo`。
-- 测试：`cargo test --features proxy`（`tests/proxy_builtin_test.rs`：单端口网站+代理混跑、CONNECT 隧道、SOCKS4/4a/5、认证成败）。
+- HTTP proxy: absolute-form requests are rewritten to origin-form and relayed (stripping hop-by-hop headers, injecting `Via`); after a CONNECT tunnel is established, raw bytes are forwarded bidirectionally.
+- SOCKS proxy: CONNECT only (BIND / UDP ASSOCIATE reply "not supported"); authentication supports no-auth and RFC 1929 username/password (`proxy_authenticator` uniformly controls both the HTTP and SOCKS sides).
+- No proxy logic is compiled by default (an open proxy is a risky asset); see `examples/proxy_demo`.
+- Test: `cargo test --features proxy` (`tests/proxy_builtin_test.rs`: single-port website+proxy mixed operation, CONNECT tunnel, SOCKS4/4a/5, authentication success/failure).
 
-### 统一服务器 (UnifiedServer)
+### Unified Server (Server)
 
 ```rust
 use aex::http::router::Router as HttpRouter;
-use aex::unified::UnifiedServer;
+use aex::server::Server;
 use aex::{http, tcp_raw, udp, _async};
 use std::net::SocketAddr;
 
@@ -306,112 +462,201 @@ use std::net::SocketAddr;
 async fn main() -> anyhow::Result<()> {
     let addr: SocketAddr = "0.0.0.0:8080".parse()?;
 
-    // HTTP 路由
+    // HTTP routing
     let mut http_router = HttpRouter::default();
     http_router.get("/", _async!(|ctx| { ctx.text("Hello from unified server!"); true }));
 
-    // 创建统一服务器：顶层只挂 TCP / UDP，其余协议作为子处理器
-    let server = UnifiedServer::solo(addr)
+    // Create a unified server: only TCP / UDP are mounted at the top level, other protocols are sub-handlers
+    let server = Server::default()
         .push(tcp_raw!(
             |ctx| tokio::spawn(handle_tcp_connection(ctx)),
             http!(http_router)
         ))
         .push(udp!(|ctx| tokio::spawn(handle_udp_packet(ctx))));
 
-    // 启动服务器 - 所有协议共享同一端口
-    server.start().await?;
+    // Start the server - all protocols share the same port
+    server.start(addr).await?;
     Ok(())
 }
 ```
-### 服务器启动模式
+### Server Startup Modes
 
-统一服务器的生命周期分三步：**构造 → 挂载协议 → 启动**。
+The lifecycle of a unified server has three steps: **construct → mount protocols → start**.
 
-#### 1. 构造：共享还是独立上下文
+#### 1. Construction: Shared or Independent Context
 
-`GlobalContext` 承载跨连接的共享状态（连接管理器、事件总线、`PairedSessionKey`、业务注册的数据等）。
+`GlobalContext` carries state shared across connections (connection manager, event bus, `PairedSessionKey`, business-registered data, etc.).
 
-| 构造器 | 上下文 | 地址 | 用途 |
-|---|---|---|---|
-| `Server::at(addr, globals)` | **复用**传入的 `Arc<GlobalContext>` | 绑定 `addr` | 生产：与其他组件共享同一份全局状态 |
-| `Server::new(globals)` | **复用**传入的 `GlobalContext` | 未绑定（留给 `listen`） | 与 `at` 等价，链式结尾用 `.listen(addr)` |
-| `Server::solo(addr)` | **新建**独立 `GlobalContext`（含新 `PairedSessionKey`） | 绑定 `addr` | examples / tests：自成一体、不共享全局状态；等价旧 `Server::new(addr, None)` |
+| Constructor | Context | Purpose |
+|---|---|---|
+| `Server::new(globals)` | **Reuses** the passed `Arc<GlobalContext>` | Production: share the same global state with other components |
+| `Server::default()` | **Creates** an independent `GlobalContext` (with a new `PairedSessionKey`) | examples / tests: self-contained, sharing no global state |
 
-**同一进程内要共享状态的服务器，必须用 `at` / `new` 传入同一个 `Arc<GlobalContext>`**；
-只有“这台服务器不跟外界共享任何状态”时才用 `solo`。多台服务器各自 `solo`
-会得到**互相隔离**的连接表、事件总线与 session key。
+**Servers within the same process that need to share state must pass the same `Arc<GlobalContext>` via `new`**;
+only when "this server shares no state with the outside" should you use `default()`. Multiple servers each calling `default()`
+will get **mutually isolated** connection tables, event buses, and session keys. The listen address is not bound here, but passed in at startup.
 
-#### 2. 挂载：顶层挂 TCP / UDP（其它作为子处理器）
+#### 2. Mounting: Top-level TCP / UDP (others as sub-handlers)
 
-`push(protocol)`（原地版 `mount`）是唯一挂载入口。**推荐顶层挂 `Tcp` 兜底 + `Udp`**，
-HTTP / HTTP/2 / WebSocket / 代理等作为 `Tcp` 的**子处理器**；只服务某一种流协议时，
-也可把它直接 `push` 到顶层（此时没有非该协议的兜底）：
+`push(protocol)` (the in-place version of `mount`) is the only mounting entry point. **The recommended top level is a `Tcp` fallback plus `Udp`**,
+with HTTP / HTTP/2 / WebSocket / proxy etc. as **sub-handlers** of `Tcp`; when serving only one streaming protocol,
+you may also `push` it directly at the top level (in which case there is no fallback for other protocols):
 
 ```rust
-use aex::{http, tcp, udp};
+use aex::{http1, http2, tcp, udp};
 
-Server::at(addr, globals)
-    .push(tcp!(http!(router)))   // 顶层 TCP，HTTP 作为其子处理器
-    .push(udp!());               // 数据报协议
+// Multi-protocol: you must use `tcp!` to explicitly mount each streaming protocol; `http!` is a web-only shorthand
+Server::new(globals)
+    .push(tcp!(http1!(router), http2!(router)))  // top-level TCP + HTTP/1.1 + HTTP/2
+    .push(udp!());                               // datagram protocol
 ```
 
-- `Tcp` 是流式兜底：检测层认领后，把连接交给能处理该协议的**子处理器**（HTTP → WebSocket）。
-- `Udp` 进数据报槽位；`start()` 会在后台为它起一个 UDP 接收循环。
-- 带 `detector` 的协议挂载时自动把探测器登记进检测目录，通常无需手动 `.detector(...)`。
+> **Only when developing a web (HTTP) server** should you use the simplified `http!(router)` (equivalent to
+> `tcp!(http1!(router), http2!(router))`); **as soon as you need to mount another protocol, you must use `tcp!`**.
 
-#### 协议宏（简化书写）
+- `Tcp` is the streaming fallback: after the detection layer claims a connection, it hands it to the **sub-handler** able to handle that protocol (HTTP → WebSocket).
+- `Udp` enters the datagram slot; `start(addr)` will spawn a UDP receive loop for it in the background.
+- Protocols with a `detector` automatically register their detector into the detection registry when mounted, usually removing the need for a manual `.detector(...)`.
 
-每个内置协议都有同名宏，展开为 `Struct::new(..).shared()`，可组合：
+#### 3. Startup: `start(addr)`
 
-| 宏 | 展开 / 说明 |
+| Method | Behavior |
 |---|---|
-| `http!(router)` / `http1!(router)` | HTTP/1.1，默认带一个用同一 router 构建的 WebSocket 子处理器（`http1!` 为别名） |
-| `http!(router, ws!(ws_router))` | 用指定 WebSocket 子处理器替换默认（WebSocket 只经 HTTP 升级触达，故作为 `http!` 的参数传入） |
-| `http!(router, handler: h)` | 显式 handler 优先于 router |
-| `http2!()` / `http2!(handler)` | HTTP/2 |
-| `ws!(router)` | 构造 WebSocket 协议，作为 `http!` 的参数使用 |
-| `tcp!(sub, …)` | 顶层 TCP，挂若干子处理器；`tcp!()` 为纯兜底 |
-| `tcp_raw!(handler, sub, …)` | 带原始连接 handler 的 TCP |
-| `udp!()` / `udp!(handler)` | UDP 数据报协议 |
+| `.start(addr).await` | Binds `addr`, runs the TCP accept loop; **if a `Udp` protocol is mounted, it also `spawn`s a UDP receive loop in the background**. Blocks and does not return. |
 
 ```rust
-use aex::{http, http2, tcp, udp};
+Server::new(globals).push(http!(router)).start(addr).await?;   // shared context
+Server::default().push(http!(router)).start(addr).await?;      // independent context
+```
 
-Server::solo(addr)
-    .push(tcp!(http!(router), http2!()))  // 一个 TCP 兜底，下挂 HTTP/1.1 + HTTP/2
-    .push(udp!(|ctx| tokio::spawn(handle_ctx(ctx))))
-    .start()
+`start(addr)` uses `tokio::spawn` for UDP, so the TCP main loop and the UDP loop run **concurrently within the same process**,
+sharing the same port number (TCP / UDP ports are independent of each other). TCP and UDP protocol handling is entirely the responsibility of the
+protocol handlers mounted for each (`Tcp` / `Udp`); Server no longer exposes separate `start_tcp` / `start_udp` entry points,
+nor does it provide `at` / `solo` / `listen`.
+
+### Protocol Macros in Detail (`tcp!` / `http!` / `udp!` / `ws!`)
+
+The built-in protocol macros are syntactic sugar for `Struct::new(..).shared()`, compressing "construct → box as `Arc<dyn Protocol>`
+→ mount" into one line, directly usable with `Server::push`. They are all `#[macro_export]`, located at the crate root:
+after `use aex::{http, tcp, udp};` you can write `tcp!(…)` directly.
+
+**Expansion reference table**
+
+| Macro | Expands to | Returns |
+|---|---|---|
+| `tcp!()` | `Tcp::new(None).shared()` | `Arc<Tcp>` |
+| `tcp!(sub, …)` | `Tcp::new(None).sub(sub)….shared()` | `Arc<Tcp>` |
+| `tcp_raw!(h, sub, …)` | `Tcp::new(Some(Arc::new(h))).sub(sub)….shared()` | `Arc<Tcp>` |
+| `http1!()` | `Http1::new(None, None).shared()` | `Arc<Http1>` |
+| `http1!(router)` | `Http1::new(Some(Arc::new(router)), None).shared()` | `Arc<Http1>` |
+| `http1!(handler: h)` | `Http1::new(None, Some(Arc::new(h))).shared()` | `Arc<Http1>` |
+| `http1!(router, handler: h)` | `Http1::new(Some(..), Some(..)).shared()` | `Arc<Http1>` |
+| `http1!(router, ws!(r2))` | `Http1::new(Some(..), None).with_websocket(ws!(r2)).shared()` | `Arc<Http1>` |
+| `http2!(…)` | The **exact same** parameter forms as `http1!(…)` (router / `handler:` / `ws!`) | `Arc<Http2>` |
+| `http!(…)` | **`tcp!(http1!(…), http2!(…))`** (a completeness wrapper, see below) | `Arc<Tcp>` |
+| `ws!()` / `ws!(r)` | `Arc::new(Websocket::new(None / Some(Arc::new(r))))` | `Arc<Websocket>` |
+| `udp!()` / `udp!(h)` | `Udp::new(None / Some(Arc::new(h))).shared()` | `Arc<Udp>` |
+
+> `.shared()` is just `Arc::new(self)`; `ws!` returns an `Arc` directly, because it only serves as a parameter to the HTTP protocol.
+
+**One by one**
+
+- **`http!` — the web-only simplified entry point.** Expands to `tcp!(http1!(...), http2!())`:
+  it gives you **top-level TCP fallback + HTTP/1.1 + HTTP/2** in one go, so you only describe HTTP handling.
+  **Use it only when developing a web (HTTP) server alone**; **to develop multi-protocol (HTTP + TCP/UDP/…), you must
+  combine explicitly with `tcp!`**. Also, HTTP/1.1 and HTTP/2 **share the same `router` and the same `ws!` sub-handler**:
+  - `http!(router)` ≡ `tcp!(http1!(router), http2!(router))` (the same router)
+  - `http!(router, ws!(ws_router))` ≡ both share this WebSocket sub-handler
+  - `http!(handler: h)`, `http!(router, handler: h)`, `http!()` likewise pass the arguments to both protocols.
+- **`http1!` / `http2!` — bare protocols.** They construct `Http1` / `Http2` respectively, with **identical** parameter forms
+  (router, `handler:`, `ws!`). `handler:` takes precedence over `router`; the `router` mechanism is the same for both.
+  They are usually explicitly composed as sub-handlers of `tcp!`: `tcp!(http1!(router), http2!(router))`.
+  Use the bare protocols only when you need independent routers (by default `http!` already makes the two share).
+- **`tcp!` — the top-level streaming fallback.** TCP is the **only** top-level streaming protocol: HTTP/1.1, HTTP/2, WebSocket,
+  and SOCKS are all its **sub-handlers**; a connection claimed by no sub-handler goes to the optional raw handler inside `tcp!`,
+  and is dropped if there is none. The registration order of sub-handlers is their priority at the same level.
+  - `tcp!()`: no raw handler, pure fallback.
+  - `tcp!(sub, …)`: `Tcp::new(None).sub(sub)` appends sub-handlers one by one (zero or more).
+- **`tcp_raw!(handler, sub, …)` — TCP with a raw connection handler.** Use it when you must handle a bare connection that
+  "no one claimed". The `handler` type is `Fn(Context) -> JoinHandle<()>` (takes over the `Context`,
+  usually with `tokio::spawn`); it can be followed by any number of sub-handlers.
+- **`ws!` — WebSocket.** It is **never mounted alone**: WebSocket is reached only through an HTTP upgrade, so it can only be
+  passed as a parameter to `http!` / `http1!` / `http2!`. `ws!` returns `Arc<Websocket>`.
+- **`udp!` — UDP datagrams.** `Udp` is the only top-level datagram protocol. Each datagram constructs a short-lived
+  `Context` handed to the handler; if `None`, it is dropped. Independent of the TCP port, they can coexist with the same number.
+
+**Composition and nesting rules**
+
+```
+// Web-only server: use the simplified entry point http!
+Server::push
+ └─ http!(router)            top-level TCP + HTTP/1.1 + HTTP/2 (sharing router / ws!)
+      └─ ws!(…)              WebSocket (reached via HTTP upgrade, only at this level)
+
+// Multi-protocol: must compose explicitly with tcp!
+Server::push
+ ├─ tcp!(http1!(router), http2!(router))   // top-level TCP (stream)
+ │    └─ ws!(…)                              // WebSocket reached via HTTP upgrade
+ └─ udp!( … )                                // top-level datagram (the only one)
+```
+
+- **The top level has only two protocols**: `Tcp` (stream) and `Udp` (datagram).
+- **`http!` is only for web-only servers**; `http!(router)` already includes top-level `Tcp` and HTTP/1.1/HTTP/2.
+- **To develop multi-protocol (HTTP + TCP/UDP/…), you must use `tcp!`**:
+  `tcp!(http1!(router), http2!(router), …)`.
+- WebSocket **must not** be `push`ed directly; it must be embedded in `http!` / `http1!` / `http2!`.
+- Detectors register automatically with the protocol; the sub-handler order inside `tcp!` is their priority.
+
+**Common mistakes**
+
+| Form | Problem | Correct form |
+|---|---|---|
+| `push(tcp!(http!(r)))` | `http!` already contains `tcp!`, causing duplicate nesting | `push(http!(r))` |
+| `push(ws!(r))` | WebSocket is not mounted under HTTP | `push(http!(r, ws!(wr)))` |
+| `http!(router, handler: h, ws)` | illegal argument order/form | `http!(router, handler: h)` or `http!(router, ws!(wr))` |
+| `tcp!(handler, …)` | `tcp!` does not accept a positional handler | use `tcp_raw!(handler, …)` |
+| `await` a long task inside `udp!(handler)` | blocks the UDP receive loop | `udp!(|ctx| tokio::spawn(...))` |
+
+**Related companion macros**
+
+| Macro | Purpose |
+|---|---|
+| `_async!` / `then!` | wraps an async closure into an `Arc<Executor>` handler/middleware |
+| `_sync!` / `now!` | wraps a synchronous closure into an `Arc<Executor>` (e.g. `_sync!(\|_\| "OK")`) |
+| `validator!` / `v!` | constructs validation middleware from a DSL |
+| `frame!` / `command!` / `codec!` | define TCP frames/commands and their codec implementations |
+| `router!` | constructs a TCP `Router` from extractors + handlers |
+| `#[aex::routes]` | declares HTTP routes on an `impl`, mounted with a `Router::push` instance |
+
+```rust
+use aex::{http, http1, http2, tcp, udp};
+
+// Multi-protocol: use `tcp!` to explicitly mount each streaming protocol (HTTP/1.1, HTTP/2), plus UDP
+Server::default()
+    .push(tcp!(http1!(router), http2!(router)))       // one TCP fallback, with HTTP/1.1 + HTTP/2 underneath
+    .push(udp!(|ctx| tokio::spawn(handle_ctx(ctx))))  // datagrams
+    .start(addr)
     .await?;
 
-// WebSocket 通过 HTTP 升级触达，因此传给 http!（而非单独挂载）
-Server::solo(addr).push(http!(router, ws!(ws_router))).start().await?;
+// Web (HTTP) server only: use the simplified http! (equivalent to tcp!(http1!, http2!))
+// WebSocket is reached via HTTP upgrade, so it is passed to http!/http1! (not mounted separately)
+Server::default().push(http!(router, ws!(ws_router))).start(addr).await?;
 ```
 
-#### 3. 启动：start / listen
+### Protocol Detector System (DetectorRegistry)
 
-| 方法 | 行为 |
-|---|---|
-| `.start().await` | 绑定 `self.addr`，跑 TCP accept 循环；**若挂了 `Udp` 协议，同时在后台 `spawn` 一个 UDP 接收循环**。阻塞不返回。 |
-| `.listen(addr).await` | 先把地址设为 `addr` 再执行 `start()`；`Server::new(gctx).push(...)` 的顺手收尾。 |
-
-`start()` 对 UDP 用 `tokio::spawn`，因此 TCP 主循环与 UDP 循环在**同一进程内并发**，
-共用同一个端口号（TCP / UDP 端口彼此独立）。TCP 与 UDP 的协议处理完全由各自挂载的
-协议处理器（`Tcp` / `Udp`）承担，Server 不再暴露单独的 `start_tcp` / `start_udp` 入口。
-
-### 协议检测器体系（DetectorRegistry）
-
-协议识别不再是写死在服务器里的逻辑，而是一个**有序、可插拔、运行时可变**的检测器队列。
-目录默认为空——HTTP/1.1、HTTP/2、WebSocket、trojan、NAT……所有协议检测器都由使用者
-按需手动添加，顺序即优先级：
+Protocol identification is no longer logic hardcoded into the server, but an **ordered, pluggable, runtime-mutable** detector queue.
+The registry is empty by default — HTTP/1.1, HTTP/2, WebSocket, trojan… all protocol detectors are added
+manually by the user as needed, with the order being the priority:
 
 ```rust
 use aex::protocols::{http1::Http11Detector, http2::Http2Detector};
-use aex::unified::{
+use aex::detect::{
     DetectorMode, DetectorRegistry, Position,
     ProtocolDetector, DetectionState, Verdict,
 };
 
-// 自定义检测器：实现 ProtocolDetector trait
+// Custom detector: implement the ProtocolDetector trait
 struct TrojanDetector;
 
 impl ProtocolDetector for TrojanDetector {
@@ -420,101 +665,101 @@ impl ProtocolDetector for TrojanDetector {
 
     fn detect(&self, buf: &[u8], _state: &mut DetectionState) -> Verdict {
         if buf.starts_with(b"\x16\x03\x01") {
-            Verdict::Match                       // 认领连接
+            Verdict::Match                       // claim the connection
         } else if !buf.is_empty() {
-            Verdict::Pass                        // 不匹配，交给下一个
+            Verdict::Pass                        // no match, hand to the next one
         } else {
-            Verdict::NeedMore(3)                 // 字节不够，再读一点
+            Verdict::NeedMore(3)                 // not enough bytes, read a bit more
         }
     }
 }
 
-let server = UnifiedServer::new(Arc::new(GlobalContext::new(addr, None)))
-    .detector(Arc::new(TrojanDetector))          // 排在队首，先于 HTTP 判定
-    .detector(Arc::new(Http2Detector))           // 内置组件同样可手动挂载
-    .detector_at(Position::Front, Arc::new(Http11Detector))  // 指定插入位置
-    .push(trojan_protocol);                      // 认领后的处理由挂载的 Protocol 负责
+let server = Server::new(Arc::new(GlobalContext::new(addr, None)))
+    .detector(Arc::new(TrojanDetector))          // placed at the head of the queue, before HTTP is decided
+    .detector(Arc::new(Http2Detector))           // built-in components can also be mounted manually
+    .detector_at(Position::Front, Arc::new(Http11Detector))  // specify the insertion position
+    .push(trojan_protocol);                      // handling after claiming is the job of the mounted Protocol
 ```
 
-核心语义：
+Core semantics:
 
-| 机制 | 说明 |
+| Mechanism | Description |
 |------|------|
-| **手动注册** | `detector()` 追加到队尾；`detector_at(Front / Back / Before(n) / After(n))` 自由排序 |
-| **运行时增删** | `registry.register() / unregister() / replace()` 可在服务运行中调用；每条连接取快照检测，互不撕裂 |
-| **冲突防护（双重）** | 注册时拒绝重名与 `conflicts_with` 声明冲突（双向检查）；运行期"首个 Match 获胜"短路后续检测器 |
-| **状态标记 DetectorMode** | `Standard` 正常分发到对应 handler；`Forward` 标记有状态的 NAT 直转型检测器——命中即终止全部检测，连接直接转发 |
-| **链路状态 DetectionState** | 已缓冲字节数、认领结果+模式、逐检测器判定轨迹（history）、每检测器私有 scratch；分发后作为 ctx 属性随整条链路传递 |
+| **Manual registration** | `detector()` appends to the tail; `detector_at(Front / Back / Before(n) / After(n))` orders freely |
+| **Runtime add/remove** | `registry.register() / unregister() / replace()` can be called while the service is running; each connection detects from a snapshot, with no tearing |
+| **Conflict protection (dual)** | On registration, duplicate names and `conflicts_with` declared conflicts are rejected (bidirectional check); at runtime the "first Match wins" short-circuits the remaining detectors |
+| **State marker DetectorMode** | `Standard` dispatches normally to the corresponding handler; `Forward` marks a stateful pass-through detector — a hit terminates all detection, and the connection is forwarded directly |
+| **Chain state DetectionState** | Number of buffered bytes, claim result+mode, per-detector verdict trace (history), per-detector private scratch; after dispatch it is passed along the whole chain as a ctx attribute |
 
-`Verdict` 三态：`Match`（认领）/ `Pass`（不匹配）/ `NeedMore(n)`（数据不足，最多缓冲 16 KiB）。
+`Verdict` has three states: `Match` (claim) / `Pass` (no match) / `NeedMore(n)` (insufficient data, buffering at most 16 KiB).
 
-#### 代理协议检测示例（examples/detectors_*）
+#### Proxy Protocol Detection Example (examples/detectors_*)
 
-核心只保留主流 Web 协议（HTTP/1.1、HTTP/2；HTTP/3/QUIC 后续加入）。TLS、SOCKS、
-trojan、VLESS 等代理协议的检测器与验证中间件作为**开发示例**放在 examples 目录，
-全部基于公开框架 API 组合，可直接运行、可作模板：
+The core keeps only mainstream Web protocols (HTTP/1.1, HTTP/2; HTTP/3/QUIC to be added later). The detectors and validation middleware
+for proxy protocols such as TLS, SOCKS, trojan, and VLESS are placed in the examples directory as **development examples**,
+all composed from the public framework API, directly runnable and usable as templates:
 
-| 示例 | 内容 |
+| Example | Content |
 |------|------|
-| `examples/detectors_common/mod.rs` | 共享实现：`TlsDetector`（ClientHello 被动解析，提取 SNI/ALPN）、`SocksDetector`（SOCKS4/5 问候识别）、`TlsLoader` + `TlsMiddleware::accept`（证书加载 + rustls TLS 终结）、`TrojanMiddleware::validate`、`VlessMiddleware::validate` |
-| `examples/detector_tls/` | SNI/ALPN 路由：检测层认领 "tls"，按 ClientHello 名字分发 |
-| `examples/detector_socks5/` | SOCKS5/SOCKS4 混合监听 |
-| `examples/detector_trojan/` | 单端口 trojan-over-TLS 全链路：嗅探 → TLS 终结 → 头部校验剥离 |
-| `examples/detector_vless/` | VLESS 结构校验（UUID 鉴权留待业务层） |
+| `examples/detectors_common/mod.rs` | Shared implementation: `TlsDetector` (passive ClientHello parsing, extracting SNI/ALPN), `SocksDetector` (SOCKS4/5 greeting recognition), `TlsLoader` + `TlsMiddleware::accept` (certificate loading + rustls TLS termination), `TrojanMiddleware::validate`, `VlessMiddleware::validate` |
+| `examples/detector_tls/` | SNI/ALPN routing: the detection layer claims "tls" and dispatches by ClientHello name |
+| `examples/detector_socks5/` | Mixed SOCKS5/SOCKS4 listening |
+| `examples/detector_trojan/` | Full single-port trojan-over-TLS chain: sniff → TLS termination → header validation and stripping |
+| `examples/detector_vless/` | VLESS structure validation (UUID authentication left to the business layer) |
 
 ```bash
-cargo test --test proxy_detectors_test   # 解析器单测 + 真实 socket 端到端
+cargo test --test proxy_detectors_test   # parser unit tests + real socket end-to-end
 cargo run --example detector_trojan cert.pem key.pem
 ```
 
-分层语义：
+Layering semantics:
 
 ```text
-原始字节 ──► 嗅探检测器（TlsDetector / SocksDetector / Http*）
-                 │ 首个 Match 获胜
+Raw bytes ──► sniffing detectors (TlsDetector / SocksDetector / Http*)
+                 │ first Match wins
                  ▼
-         custom_handler(protocol) 分发
+         custom_handler(protocol) dispatch
                  ▼
- TlsMiddleware::accept(cert,key) ──► ctx 流变为解密后的明文
+ TlsMiddleware::accept(cert,key) ──► the ctx stream becomes decrypted plaintext
                  ▼
- Trojan/VLESS validate ──► 业务 handler / fallback
+ Trojan/VLESS validate ──► business handler / fallback
 ```
 
-**边界说明**：VMess 与 Shadowsocks 的请求头在 UUID/PSK 派生密钥加密之下，被动字节
-层面无法与随机流量区分，因此不存在"被动检测器"——支持它们需要持有用户库并做试解密
-的完整协议中间件（应用层职责）。Clash 是客户端而非线上协议，无独立检测可言。
-所有 validator 内置 10 秒读超时（`VALIDATION_TIMEOUT`），半包挂起的对端会被切断。
+**Boundary note**: the request headers of VMess and Shadowsocks are encrypted under keys derived from UUID/PSK, so at the passive byte
+level they cannot be distinguished from random traffic; hence there is no "passive detector" — supporting them requires a complete protocol
+middleware that holds the user database and performs trial decryption (an application-layer responsibility). Clash is a client rather than a wire
+protocol, so there is no independent detection for it. All validators have a built-in 10-second read timeout (`VALIDATION_TIMEOUT`), and a peer hanging mid-packet is cut off.
 
-### Handler 类型签名
+### Handler Type Signatures
 
 ```rust
 pub type HttpHandler = Arc<dyn Fn(&mut Context) -> BoxFuture<'_, bool> + Send + Sync>;
 pub type Http2Handler = Arc<dyn Fn(&mut Context) -> BoxFuture<'static, bool> + Send + Sync>;
 
-// TCP/UDP handler 接收 Context，可在 aex 体系中交换信息
+// TCP/UDP handlers receive a Context and can exchange information within the aex system
 pub type TCPHandler = Arc<dyn Fn(Context) -> JoinHandle<()> + Send + Sync>;
 pub type UDPHandler = Arc<dyn Fn(Context) -> JoinHandle<()> + Send + Sync>;
 ```
 
 ---
 
-## HTTP 快速开始
+## HTTP Quick Start
 
-### 构建一个 Web 服务器
+### Build a Web Server
 
-三步走：**建 Router → 注册路由 → 交给统一服务器（`Server`）启动**。
-顶层只挂 TCP/UDP；HTTP 作为 TCP 的子处理器加载。
+Three steps: **create a Router → register routes → hand it to the unified server (`Server`) to start**.
+Only TCP/UDP are mounted at the top level; HTTP is loaded as a sub-handler of TCP.
 
-Handler 有两种形态，都是 `Arc<Executor>`，`IntoExecutor` trait 统一接受，可混用：
-- **同步** `_sync!(|ctx| R)`（别名 `now!`）：免标注，不能 `await`；效果等价于直接传 `|ctx: &mut Context| R`；
-- **异步** `_async!(|ctx| R)`（别名 `then!`，早期名 `exe!`）：内部可 `await`，免标注。
+Handlers come in two forms, both `Arc<Executor>`, uniformly accepted by the `IntoExecutor` trait and mixable:
+- **Synchronous** `_sync!(|ctx| R)` (alias `now!`): no annotation, cannot `await`; equivalent in effect to passing `|ctx: &mut Context| R` directly;
+- **Asynchronous** `_async!(|ctx| R)` (alias `then!`): can `await` internally, no annotation.
 
-下面先看同步最简写法：
+First, the simplest synchronous form:
 
 ```rust
 use aex::http::router::{NodeType, Router as HttpRouter};
-use aex::unified::Server;
-use aex::{_sync, http, tcp};
+use aex::server::Server;
+use aex::{_sync, http};
 use std::net::SocketAddr;
 
 #[tokio::main]
@@ -524,35 +769,36 @@ async fn main() -> anyhow::Result<()> {
 
     router.get("/", _sync!(|_| "Hello, World!"));
 
-    Server::solo(addr)
-        .push(tcp!(http!(router)))
-        .start()
+    Server::default()
+        .push(http!(router))
+        .start(addr)
         .await?;
     Ok(())
 }
 ```
 
-需要 HTTP/2、WebSocket、TCP、UDP 共用同一端口时，把更多协议作为 TCP 的子处理器挂上，
-例如 HTTP/2：`tcp!(http!(router), http2!())`。
+When HTTP/2, WebSocket, TCP, and UDP need to share the same port, `http!(router)` already enables
+HTTP/1.1 and HTTP/2 simultaneously by default (sharing the same router); if you need independent configuration for each,
+write `tcp!(http1!(router), http2!(router2))` explicitly.
 
-### HTTP 路由详解
+### HTTP Routing in Detail
 
-> **同步与异步两种写法，本质是两种不同的 handler 类型**（由 `IntoExecutor` trait 统一接受）：
-> - **同步** `_sync!(|ctx| R)`：R 为 `bool`/`()`/`String`/`&str`，免标注，不能 `await`
-> - **异步** `_async!(|ctx| R)`：内部可 `await`，由 `_async!` 包装成 `Arc<Executor>`，免标注
+> **The two forms, synchronous and asynchronous, are essentially two different handler types** (uniformly accepted by the `IntoExecutor` trait):
+> - **Synchronous** `_sync!(|ctx| R)`: R is `bool`/`()`/`String`/`&str`, no annotation, cannot `await`
+> - **Asynchronous** `_async!(|ctx| R)`: can `await` internally, wrapped into `Arc<Executor>` by `_async!`, no annotation
 
 ```rust
 use aex::http::router::{NodeType, Router as HttpRouter};
 use aex::http::params::Params;
 use aex::_sync;
 
-// 1. 创建路由器
+// 1. Create a router
 let mut router = HttpRouter::default();
 
-// 2. 静态路由（同步闭包：_sync! 免标注）
+// 2. Static route (synchronous closure: _sync! needs no annotation)
 router.get("/api/health", _sync!(|_| "OK"));
 
-// 3. 参数路由（同步闭包）
+// 3. Parameter route (synchronous closure)
 router.get("/api/users/:id", _sync!(|ctx| {
     let params = ctx.local.get_ref::<Params>();
     if let Some(p) = params {
@@ -561,7 +807,7 @@ router.get("/api/users/:id", _sync!(|ctx| {
     }
 }));
 
-// 4. 通配符路由（异步闭包：_async! 包装，内部可 await）
+// 4. Wildcard route (async closure: wrapped by _async!, can await internally)
 router.get("/api/files/*", _async!(|ctx| {
     let params = ctx.local.get_ref::<Params>();
     if let Some(p) = params {
@@ -571,45 +817,45 @@ router.get("/api/files/*", _async!(|ctx| {
     true
 }));
 
-// 5. 带中间件的路由（同步写法 + 链式中间件）
+// 5. Route with middleware (synchronous form + chained middleware)
 router.post("/api/users", _sync!(|ctx| {
     ctx.text("Created");
 })).middleware(auth_middleware);
 ```
 
-路由 handler 支持多种等价写法：直接返回字符串、`ctx.text(...)`/`ctx.json(...)`/`ctx.html(...)` 便捷方法、或原始 `ctx.send(content, mime)`：
+Route handlers support several equivalent forms: returning a string directly, the `ctx.text(...)`/`ctx.json(...)`/`ctx.html(...)` convenience methods, or the raw `ctx.send(content, mime)`:
 
 ```rust
-// 同步写法：_sync! 免标注
-router.get("/a", _sync!(|_| "Hello world!"));                       // 直接返回字符串
-router.get("/b", _sync!(|ctx| { ctx.text("Hello"); }));             // 便捷方法，无需 true
-router.get("/c", _sync!(|ctx| {                                     // 原始写法
+// Synchronous form: _sync! needs no annotation
+router.get("/a", _sync!(|_| "Hello world!"));                       // return a string directly
+router.get("/b", _sync!(|ctx| { ctx.text("Hello"); }));             // convenience method, no need for true
+router.get("/c", _sync!(|ctx| {                                     // raw form
     ctx.send("Hello world!", None);
     true
 }));
 ```
 
-> 若不用 `_sync!`，直接把同步闭包传给 `router.get(...)`（走 `IntoExecutor`）也等价，
-> 只是必须标注参数类型：`|ctx: &mut Context| R`。
+> If you don't use `_sync!`, passing the synchronous closure directly to `router.get(...)` (which goes through `IntoExecutor`) is also equivalent,
+> except that you must annotate the parameter type: `|ctx: &mut Context| R`.
 
-### 基于对象的路由方法（核心）
+### Object-based Routing Methods (Core)
 
-推荐方式：把**一个控制器 / 一个业务模块**写成一个 `struct`（类），路由是它的 `&self`
-方法，中间件也是它的 `&self` 方法——handler 与中间件看到的是**同一个实例**，状态天然一致。
+The recommended way: write **one controller / one business module** as a `struct` (class), with routes as its `&self`
+methods and middleware also as its `&self` methods — the handler and middleware see the **same instance**, so their state is naturally consistent.
 
 ```rust
 use aex::http::router::Router as HttpRouter;
 use aex::connection::context::Context;
 
-// 模块：一个承载路由与状态的实例（类）
+// Module: a single instance (class) carrying routes and state
 struct User {
     name: String,
-    db: String,      // 模拟依赖，真实项目里可以放连接池、配置等
+    db: String,      // simulated dependency; in a real project this could hold a connection pool, config, etc.
 }
 
 #[aex::routes]
 impl User {
-    // 多路径 + 对象中间件；&self 方法可直接使用实例状态
+    // Multiple paths + object middleware; &self methods can use instance state directly
     #[get(["/", "/profile"], [auth])]
     fn profile(&self, ctx: &mut Context) {
         ctx.text(&self.name);
@@ -621,9 +867,9 @@ impl User {
         ctx.text("created");
     }
 
-    // 对象中间件：&self 方法，返回 bool（true 放行 / false 拦截）
+    // Object middleware: a &self method returning bool (true passes / false intercepts)
     fn auth(&self, ctx: &mut Context) -> bool {
-        // 用 self 上的配置/依赖做鉴权
+        // Authenticate using the config/dependencies on self
         self.is_admin(ctx)
     }
 
@@ -637,33 +883,33 @@ let mut router = HttpRouter::default();
 router.push(User { name: "aex".into(), db: "...".into() });
 ```
 
-- 支持 `get`/`post`/`put`/`delete`/`patch`/`options`/`head`/`all` 属性。
-- 第一个参数是路径：字符串，或字符串数组（`["/", "/profile"]`）；第二个参数是中间件数组。
-- handler 支持 async 与同步，返回值遵循 `HandlerOutput`（`bool`/`()`/`String`/`&'static str`）。
-- 被挂载的实例被捕获到每个路由闭包中，`&self` 方法可读写该实例的状态。
-- `#[get]` 等属性只负责声明，真正的联结由 `router.push(实例)` 完成；push 收的是**实例**——单元结构体可直接写类名，带字段结构体须 `router.push(User { ... })`（详见 [push 收实例而非类型](#路由即方法一次挂载多个-url推荐)）。
-- 没有 `&self` 的关联函数（`fn f(ctx: &mut Context)`）同样可以作为路由或中间件使用。
-- 整组路由可加前缀：`#[aex::routes(prefix = "/backend")]`（或 `#[aex::routes("/backend")]`），块内所有路径自动拼接该前缀（详见 [路由组前缀](#路由即方法一次挂载多个-url推荐)）。
+- Supports the `get`/`post`/`put`/`delete`/`patch`/`options`/`head`/`all` attributes.
+- The first parameter is the path: a string, or an array of strings (`["/", "/profile"]`); the second parameter is the middleware array.
+- Handlers support async and synchronous, and their return value follows `HandlerOutput` (`bool`/`()`/`String`/`&'static str`).
+- The mounted instance is captured into each route closure, and `&self` methods can read and write that instance's state.
+- Attributes such as `#[get]` only declare; the actual binding is done by `router.push(instance)`; push takes an **instance** — for a unit struct you can write the class name directly, while a struct with fields needs `router.push(User { ... })` (see [push takes an instance, not a type](#get-started)).
+- Associated functions without `&self` (`fn f(ctx: &mut Context)`) can likewise be used as routes or middleware.
+- A whole group of routes can take a prefix: `#[aex::routes(prefix = "/backend")]` (or `#[aex::routes("/backend")]`), and every path inside the block is automatically joined with that prefix (see [route group prefix](#get-started)).
 
-### HTTP/2 支持
+### HTTP/2 Support
 
-HTTP/2 与 HTTP/1.1 共用同一个 router：
+HTTP/2 shares the same router as HTTP/1.1:
 
 ```rust
 use aex::{http, http2, tcp};
 use aex::http::router::{NodeType, Router as HttpRouter};
-use aex::unified::Server;
+use aex::server::Server;
 use std::net::SocketAddr;
 
-Server::solo(addr)
-    .push(tcp!(http!(router), http2!())) // HTTP/1.1 + HTTP/2 共用同一 router
-    .start()
+Server::default()
+    .push(http!(router)) // HTTP/1.1 + HTTP/2 share the same router
+    .start(addr)
     .await?;
 ```
 
-### WebSocket 支持
+### WebSocket Support
 
-WebSocket 作为中间件实现，共享 HTTP 上下文：
+WebSocket is implemented as middleware, sharing the HTTP context:
 
 ```rust
 use aex::http::websocket::{TextHandler, BinaryHandler};
@@ -686,9 +932,9 @@ router.get("/ws", _sync!(|_| true))
     .middleware(WebSocket::to_middleware(ws));
 ```
 
-### 静态文件服务
+### Static File Serving
 
-一行注册，自动识别 MIME 类型，默认支持 html/css/js/json/图片等基本网站资源：
+One line to register, with automatic MIME type detection, supporting basic website assets such as html/css/js/json/images by default:
 
 ```rust
 use aex::http::router::Router as HttpRouter;
@@ -700,13 +946,13 @@ router.static_files("/static", "public");
 // GET /static             -> public/index.html  (text/html)
 ```
 
-- **自动 MIME**：按扩展名识别，覆盖 html/htm、css、js/mjs、json、txt/md、csv、xml、pdf、zip、wasm、png/jpg/gif/webp/svg/ico；未识别回退 `application/octet-stream`。文本类型（txt/md/html/css/csv）的 `Content-Type` 默认带 `charset=utf-8`。
-- **目录列表**：目录无入口文件时生成 HTML 文件列表页（类似 `python -m http.server` / nginx autoindex），目录优先排序、显示文件大小、子目录可递归进入、父目录可返回。
-- **目录重定向**：访问目录不带尾部斜杠时返回 301 到 `path/`（带 query 不丢失），保证相对链接解析正确，与 nginx/apache 行为一致。
-- **递归目录**：前缀下的所有**子目录**都可访问（`/static/assets/img/...`）；目录请求优先回退到该目录的 `index.html`。
-- **禁止越界**：`..` 路径段一律拒绝；并且每次访问都会解析符号链接校验目标仍位于根目录之内（symlink 无法绕出），永远无法访问根目录之外的任何文件。
-- **大小上限**：默认 **100 MiB**，覆盖内网常见的几十 M 级文件下载；超限返回 404，防止超大文件拖垮服务器，更大的文件请走专门的下载服务。
-- **自定义**：`static_files_with` 可调整上限与入口文件名：
+- **Automatic MIME**: detected by extension, covering html/htm, css, js/mjs, json, txt/md, csv, xml, pdf, zip, wasm, png/jpg/gif/webp/svg/ico; unrecognized types fall back to `application/octet-stream`. For text types (txt/md/html/css/csv), the `Content-Type` includes `charset=utf-8` by default.
+- **Directory listing**: when a directory has no entry file, an HTML file listing page is generated (similar to `python -m http.server` / nginx autoindex), with directories sorted first, file sizes shown, subdirectories recursively enterable, and a parent directory to return to.
+- **Directory redirect**: accessing a directory without a trailing slash returns a 301 to `path/` (not losing the query), ensuring correct relative-link resolution, consistent with nginx/apache behavior.
+- **Recursive directories**: all **subdirectories** under the prefix are accessible (`/static/assets/img/...`); a directory request falls back to that directory's `index.html` first.
+- **No escaping**: `..` path segments are always rejected; and every access resolves symlinks to verify the target is still within the root directory (symlinks cannot escape), making it impossible to ever access any file outside the root.
+- **Size limit**: **100 MiB** by default, covering the tens-of-megabyte file downloads common on internal networks; over-limit returns 404 to prevent huge files from dragging down the server — use a dedicated download service for larger files.
+- **Customization**: `static_files_with` can adjust the limit and entry filename:
 
 ```rust
 use aex::http::static_files::StaticFiles;
@@ -714,61 +960,61 @@ use aex::http::static_files::StaticFiles;
 router.static_files_with("/static", StaticFiles::new("public").max_file_size(5 * 1024 * 1024));
 ```
 
-## http-server 静态服务器
+## http-server Static Server
 
-`aex` 默认自带 `http-server` 二进制 —— 一个**开箱即用的 nginx/apache 式静态文件服务器**。只要 `cargo install aex`（或开发期 `cargo install --path .`），即可在任意目录直接发布 HTTP 静态资源站，无需写任何代码：
+`aex` ships with an `http-server` binary by default — an **out-of-the-box nginx/apache-style static file server**. Just `cargo install aex` (or `cargo install --path .` during development), and you can publish an HTTP static-asset site from any directory with no code at all:
 
 ```bash
 cargo install aex
-http-server                 # 当前目录，端口 8080
-http-server 3000            # 当前目录，端口 3000
-http-server ./public        # 发布 ./public
-http-server ./public 3000   # 发布 ./public，端口 3000
+http-server                 # current directory, port 8080
+http-server 3000            # current directory, port 3000
+http-server ./public        # publish ./public
+http-server ./public 3000   # publish ./public, port 3000
 ```
 
-**当前能力**（与上面的 `Router::static_files` 完全一致）：
+**Current capabilities** (exactly the same as `Router::static_files` above):
 
-- 自动 MIME（文本类型带 `charset=utf-8`）
-- 目录列表页：**文件类型专属图标**（目录=📁、Rust=🦀、Go=🐹、Python=🐍、Ruby=💎、C=🅲、TS=🔷、JS=🟨、HTML=🌐、CSS=🎨、图片=🖼️/🌅、文本=📄/📝、音频=🎵/🎼、视频=🎬/🎥、压缩包=📦/🗜️、PDF=📕、安装包=⚙️/🤖 等，几十种扩展名各不相同）+ 文件大小 + 目录优先排序
-- 递归进入所有子目录、`..` 返回上级、目录 301 重定向补尾部斜杠
-- 目录回退 `index.html`
-- 禁止越界：`..` 段拒绝 + 符号链接解析校验，永远无法访问根目录之外的文件
-- 单文件上限 100 MiB（超限 404，大文件走专门下载服务）
-- **端口占用自动递增**：被占用则 +1 重试直到可用
-- 启动打印本机 IPv4 地址，方便内网访问
+- Automatic MIME (text types with `charset=utf-8`)
+- Directory listing page: **file-type-specific icons** (directory=📁, Rust=🦀, Go=🐹, Python=🐍, Ruby=💎, C=🅲, TS=🔷, JS=🟨, HTML=🌐, CSS=🎨, image=🖼️/🌅, text=📄/📝, audio=🎵/🎼, video=🎬/🎥, archive=📦/🗜️, PDF=📕, installer=⚙️/🤖 etc., with dozens of extensions each distinct) + file size + directories sorted first
+- Recursively enter all subdirectories, `..` to go up, 301 redirect to add a trailing slash to directories
+- Directory fallback to `index.html`
+- No escaping: reject `..` segments + symlink resolution validation, so files outside the root are never accessible
+- Single-file limit of 100 MiB (over-limit 404, use a dedicated download service for large files)
+- **Automatic port increment on conflict**: if occupied, retry with +1 until available
+- Print the local machine's IPv4 addresses on startup for convenient internal-network access
 
-**持续完善中**（对照 nginx/apache 的常用静态能力，按优先级推进）：
+**Continuously improving** (benchmarked against nginx/apache's common static capabilities, advanced by priority):
 
-- [x] 目录列表页（autoindex）与文件类型图标
-- [ ] 字节级 Range 请求（断点续传/视频拖动）
-- [ ] 条件请求：`ETag` / `Last-Modified`（304 缓存协商）
-- [ ] gzip/brotli 按内容协商压缩
-- [ ] 隐藏文件（`.git` 等）默认不列出、可配置开关
-- [ ] 自定义 404 页面
-- [ ] 目录索引页模板自定义 / 排序方式配置
-- [ ] `index` 多入口回退（index.html → index.htm → default.htm）
-- [ ] 上传功能（可选开启）
-- [ ] `--auth` 简单 Basic Auth 保护
-- [ ] `--prefix` 指定发布前缀、`--host` 绑定网卡
+- [x] Directory listing page (autoindex) and file-type icons
+- [ ] Byte-range requests (resumable downloads / video seeking)
+- [ ] Conditional requests: `ETag` / `Last-Modified` (304 cache negotiation)
+- [ ] gzip/brotli content-negotiated compression
+- [ ] Hidden files (`.git` etc.) not listed by default, with a configurable switch
+- [ ] Custom 404 page
+- [ ] Customizable directory index page template / sort-order configuration
+- [ ] Multi-entry `index` fallback (index.html → index.htm → default.htm)
+- [ ] Upload support (optionally enabled)
+- [ ] `--auth` simple Basic Auth protection
+- [ ] `--prefix` to specify the publish prefix, `--host` to bind a network interface
 
-> 以上能力在 `Router::static_files_with` + `StaticFiles` 配置项上同步演进，库与二进制保持一致。
+> The above capabilities evolve in sync across `Router::static_files_with` + `StaticFiles` configuration items, keeping the library and the binary consistent.
 
-### 中间件
+### Middleware
 
-中间件是处理链上的一环，位于 handler 之前，按声明顺序线性执行。它的本质就是一个 `Executor`：
+Middleware is a link in the processing chain, located before the handler and executed linearly in declaration order. Its essence is just an `Executor`:
 
 ```rust
 pub type Executor = dyn for<'a> Fn(&'a mut Context) -> BoxFuture<'a, bool> + Send + Sync;
 ```
 
-- 返回 `true` → 放行，继续下一个中间件 / handler
-- 返回 `false` → 拦截，请求终止（状态码默认 400，可先用 `ctx.status(...)` 覆盖）
+- Returning `true` → pass through, continue to the next middleware / handler
+- Returning `false` → intercept, terminate the request (status code defaults to 400, can be overridden first with `ctx.status(...)`)
 
-有两种写法，对应两种需求：
-- **函数式（无状态）**：闭包、自由函数、可复用的 `Arc<Executor>`，见下文前几节；
-- **对象式（有状态）**：`&self` 方法，能直接拿到实例的 `self`，见 [对象中间件](#对象中间件把-self-带进中间件)。
+There are two forms, corresponding to two needs:
+- **Functional (stateless)**: closures, free functions, reusable `Arc<Executor>`, see the preceding sections;
+- **Object-based (stateful)**: `&self` methods that can directly access the instance's `self`, see [Scenario 2: Attribute Macros](#scenario-2-attribute-macros-get--post---inside-impl-block).
 
-#### 写一个最简单的中间件（同步）
+#### Writing the Simplest Middleware (Synchronous)
 
 ```rust
 use aex::connection::context::Context;
@@ -784,53 +1030,52 @@ let auth = _sync!(|ctx| {
 });
 ```
 
-#### 异步中间件：用 `_async!` 即可
+#### Async Middleware: Just Use `_async!`
 
 ```rust
 let rate_limiter = _async!(|ctx| {
-    // 任意 async 逻辑：查库、计数、IO……
+    // any async logic: querying a DB, counting, IO……
     true
 });
 ```
 
-#### 同步 vs 异步：写法差异一览
+#### Sync vs Async: Writing Differences at a Glance
 
-| | `_sync!(\|ctx\| { ... })` / `now!(...)` | `_async!(\|ctx\| { ... })` / `then!(...)` / `exe!(...)` |
+| | `_sync!(\|ctx\| { ... })` / `now!(...)` | `_async!(\|ctx\| { ... })` / `then!(...)` |
 |---|---|---|
-| 用途 | 纯同步 handler / 中间件 | 需要 `await` 的异步 handler / 中间件 |
-| `ctx` 参数 | 免标注（泛型函数推断） | 免标注；不引用 ctx 时可写 `\|_\|` |
-| 返回值 | 直接返回 `bool`/`()`/`String`/`&str` | 返回 `bool`（可省略，body 内 await 后返回 true） |
-| 内部能否 `await` | 不能 | 可以（查库 / IO / 调用 async fn） |
-| 产物类型 | `Arc<Executor>` | `Arc<Executor>` |
-| 使用位置 | `.middleware(...)` / `router.get(...)` | 与同步完全一致，可混排 |
+| Purpose | Pure synchronous handler / middleware | Async handler / middleware that needs `await` |
+| `ctx` parameter | No annotation needed (inferred via generic function) | No annotation needed; can write `\|_\|` when ctx is unused |
+| Return value | Returns `bool`/`()`/`String`/`&str` directly | Returns `bool` (can be omitted; return true after awaiting in the body) |
+| Can `await` internally | No | Yes (query a DB / IO / call an async fn) |
+| Product type | `Arc<Executor>` | `Arc<Executor>` |
+| Where to use | `.middleware(...)` / `router.get(...)` | Exactly the same as synchronous, mixable |
 
-> 免标注是 `_sync!`/`_async!` 独有的便利：`_sync!` 通过泛型函数 `aex::http::types::sync`
-> 恢复闭包参数推断。若把同步闭包**直接**传给 `router.get(...)`（走 `IntoExecutor`），
-> 则必须标注 `|ctx: &mut Context|`——效果等价，只是多写几个字。
+> No annotation is a convenience unique to `_sync!`/`_async!`: `_sync!` restores closure parameter inference through the generic function
+> `aex::http::types::sync`. If you pass a synchronous closure **directly** to `router.get(...)` (via `IntoExecutor`),
+> you must annotate `|ctx: &mut Context|` — equivalent in effect, just a few more characters.
 
-**一句话**：同步用 `_sync!`（或别名 `now!`），需要 `await` 就用 `_async!`（或别名 `then!`，
-早期版本名 `exe!`），两个都是 `Arc<Executor>`，同一路由的中间件链可以**同步 + 异步混排**：
-`.middleware(_sync!(auth)).middleware(_async!(async_log))`。
+**In one sentence**: use `_sync!` (or its alias `now!`) for synchronous work, and `_async!` (or its alias `then!`) when you need `await`; both are `Arc<Executor>`, and a route's middleware chain can **mix sync + async**:
+`.middleware(_sync!(auth)).middleware(_async!(async_log))`.
 
-#### 中间件能做什么
+#### What Middleware Can Do
 
-- **读请求**：`ctx.req().method()` / `.param("id")` / `.query("token")` / `.form("name")`，或 `ctx.local.get_ref::<HttpMetadata>()` 读取请求头与元数据
-- **写响应**：`ctx.text()` / `ctx.json()` / `ctx.html()` / `ctx.send()`、`ctx.status(...)`、`ctx.redirect(url)`
-- **传状态**：`ctx.set(data)` / `ctx.get::<T>()` 在中间件与 handler 之间共享数据
+- **Read the request**: `ctx.req().method()` / `.param("id")` / `.query("token")` / `.form("name")`, or `ctx.local.get_ref::<HttpMetadata>()` to read request headers and metadata
+- **Write the response**: `ctx.text()` / `ctx.json()` / `ctx.html()` / `ctx.send()`, `ctx.status(...)`, `ctx.redirect(url)`
+- **Pass state**: `ctx.set(data)` / `ctx.get::<T>()` to share data between middleware and handlers
 
-#### 两种使用场景，中间件形式不同
+#### Two Usage Scenarios, Different Middleware Forms
 
-##### 场景一：链式 API（`router.get` / `.middleware(...)`）
+##### Scenario 1: Chained API (`router.get` / `.middleware(...)`)
 
-链式 API 没有 `self` 上下文，中间件**只接受全局函数**和**匿名闭包**（返回 `Arc<Executor>`）：
+The chained API has no `self` context, so middleware **only accepts global functions** and **anonymous closures** (returning `Arc<Executor>`):
 
 ```rust
 use aex::connection::context::Context;
 use aex::http::types::IntoExecutor;
 
-// 匿名闭包（同步 / 异步均可）
+// Anonymous closures (sync / async both fine)
 router.get("/x", _sync!(|_| true)).middleware(_sync!(|ctx| {
-    // 同步逻辑
+    // synchronous logic
     true
 }));
 router.get("/x", _async!(|_| { true })).middleware(_async!(|ctx| {
@@ -838,32 +1083,32 @@ router.get("/x", _async!(|_| { true })).middleware(_async!(|ctx| {
     true
 }));
 
-// 全局函数
+// Global functions
 fn auth(ctx: &mut Context) -> bool {
     ctx.req().header("x-api-key").is_some()
 }
 router.get("/secret", handler).middleware(auth);
 
-// 配置构建器
+// Config builder
 router.get("/x", handler).middleware(RateLimitConfig::new(100, 60).by_ip().build());
 ```
 
-`router.get_with(...)` / `router.post_with(...)` 等内联写法同样只接受 `Arc<Executor>`：
+Inline forms such as `router.get_with(...)` / `router.post_with(...)` likewise only accept `Arc<Executor>`:
 
 ```rust
 router.get_with("/x", [_sync!(|_| true), auth], |_ctx: &mut Context| true);
 ```
 
-##### 场景二：属性宏（`#[get]` / `#[post]` / ...，在 impl 块内）
+##### Scenario 2: Attribute Macros (`#[get]` / `#[post]` / ..., inside impl block)
 
-属性宏的中间件数组有**更丰富的解析能力**——因为宏知道 impl 块里有哪些方法：
+The middleware array of an attribute macro has **richer resolution capabilities** — because the macro knows which methods are in the impl block:
 
-| 写法 | 分类 | 查找顺序 |
+| Form | Category | Lookup order |
 |------|------|----------|
-| `self.auth` | SelfMethod | 强制实例方法（`&self`，返回 `bool`）；找不到 → 编译报错 |
-| `auth` | BareIdent | 级联：① self 方法（`&self`，`→ bool`）→ ② 关联函数（无 self，`→ bool`）→ ③ 全局函数（仅同步） |
-| `_sync!(...)` / `_async!(...)` | Expr | 经 `IntoExecutor` 转换，与链式 API 等价 |
-| `logger!()` / `v!(...)` | Expr | 内置中间件，同上 |
+| `self.auth` | SelfMethod | forces an instance method (`&self`, returning `bool`); if not found → compile error |
+| `auth` | BareIdent | cascade: ① self method (`&self`, `→ bool`) → ② associated function (no self, `→ bool`) → ③ global function (sync only) |
+| `_sync!(...)` / `_async!(...)` | Expr | converted via `IntoExecutor`, equivalent to the chained API |
+| `logger!()` / `v!(...)` | Expr | built-in middleware, same as above |
 
 ```rust
 struct Api {
@@ -872,138 +1117,144 @@ struct Api {
 
 #[aex::routes]
 impl Api {
-    // self.auth → 显式实例方法
+    // self.auth → explicit instance method
     #[get("/admin", [self.auth])]
     fn admin(&self, ctx: &mut Context) {
         ctx.text("admin-only");
     }
 
-    // auth → 级联：先找 self.auth（找到，走实例方法）
+    // auth → cascade: first looks for self.auth (found, uses the instance method)
     #[get("/secret", [auth])]
     fn secret(&self, ctx: &mut Context) {
         ctx.text("secret-ok");
     }
 
-    // global_auth → 级联：不在 impl 块 → 全局函数
+    // global_auth → cascade: not in the impl block → global function
     #[get("/public", [global_auth])]
     fn public(&self, ctx: &mut Context) {
         ctx.text("public-ok");
     }
 
-    // check → 级联：找关联函数 check（无 self，返回 bool）
+    // check → cascade: finds the associated function check (no self, returns bool)
     #[get("/checked", [check])]
     fn checked(&self, ctx: &mut Context) {
         ctx.text("checked-ok");
     }
 
-    // 实例方法
+    // Instance method
     fn auth(&self, ctx: &mut Context) -> bool { /* ... */ }
 
-    // 关联函数（无 self）
+    // Associated function (no self)
     fn check(ctx: &mut Context) -> bool { /* ... */ }
 }
 
-// 全局函数
+// Global function
 fn global_auth(ctx: &mut Context) -> bool { /* ... */ }
 ```
 
-**关键区别**：
-- 链式 API 没有 `self` 上下文，实例方法无法调用 → 只有全局函数 + 闭包。
-- 属性宏知道 impl 块的方法列表，所以支持**实例方法**和**关联函数**的级联查找。
-- 裸标识符 `auth` 在属性宏里是**级联查找**（self → 关联 → 全局），在链式 API 里如果传一个函数名就直接走 `IntoExecutor`（无级联）。
+**Key differences**:
+- The chained API has no `self` context, so instance methods cannot be called → only global functions + closures.
+- The attribute macro knows the impl block's method list, so it supports cascade lookup of **instance methods** and **associated functions**.
+- The bare identifier `auth` is a **cascade lookup** (self → associated → global) in the attribute macro, whereas in the chained API, passing a function name goes straight through `IntoExecutor` (no cascade).
 
-#### 挂载
+#### Mounting
 
-两种方式最终都走 `Router::push(instance)`：
+Both approaches ultimately go through `Router::push(instance)`:
 
 ```rust
-// 链式：中间件通过 .middleware() 追加
+// Chained: middleware is appended via .middleware()
 router.get("/x", _sync!(|_| true)).middleware(auth);
 router.get_with("/x", [_sync!(|_| true), rate_limiter], |_ctx: &mut Context| true);
 
-// 属性宏：路由 + 中间件在 #[get/post] 里声明，router.push(instance) 一次性挂载
+// Attribute macro: routes + middleware are declared in #[get/post], and router.push(instance) mounts them all at once
 #[get(["/", "/profile"], [self.auth, RateLimitConfig::new(100, 60).build()])]
 ```
 
 `post_with`/`put_with`/`delete_with`/`patch_with`/`options_with`/`head_with`/`all_with`
-提供同样的内联写法。
+provide the same inline form.
 
-> 注意：属性宏生成的注册代码在 `impl` 块作用域内，所以中间件数组只能引用**实例方法**、
-> **关联函数**、**全局函数**，以及 **模块级条目**（自由函数、`logger!()`/`v!(...)` 宏调用、
-> `RateLimitConfig::new(...).build()` 等自包含表达式），不能引用 `main`/闭包内的局部变量。
+> Note: the registration code generated by the attribute macro is within the scope of the `impl` block, so the middleware array can only reference **instance methods**,
+> **associated functions**, **global functions**, and **module-level items** (free functions, `logger!()`/`v!(...)` macro calls,
+> self-contained expressions such as `RateLimitConfig::new(...).build()`), and cannot reference local variables inside `main`/closures.
 
-#### 内置中间件
+#### Built-in Middleware
 
-| 中间件 | 说明 | 使用 |
+| Middleware | Description | Usage |
 |--------|------|------|
-| `logger!()` | 请求日志 | `logger!()` |
-| `v!(...)` | DSL 参数校验 | `v!(name => "required")` |
-| `RateLimitConfig` | 限流（按 IP / 头 / 路径） | `RateLimitConfig::new(100, 60).by_ip().build()` |
-| `CorsConfig` | 跨域 | `CorsConfig::new().allow_origin_all(true).build()` |
-| `WebSocket` | WebSocket 升级 | `WebSocket::to_middleware(ws)` |
+| `logger!()` | Request logging | `logger!()` |
+| `v!(...)` | DSL parameter validation | `v!(name => "required")` |
+| `RateLimitConfig` | Rate limiting (by IP / header / path) | `RateLimitConfig::new(100, 60).by_ip().build()` |
+| `CorsConfig` | CORS | `CorsConfig::new().allow_origin_all(true).build()` |
+| `WebSocket` | WebSocket upgrade | `WebSocket::to_middleware(ws)` |
 
-#### 投资少，回报大，一劳永逸
+#### Low Investment, High Return, One-time Effort
 
-- 契约自框架诞生至今**没有变过**：一个 `Executor`、一个 `bool`，两条规则。
-- 函数式与对象式中间件**共用同一契约**，写一次，链式 / 内联 / 属性宏**三种挂载全部通用**，无需为每种写法适配。
-- 没有 tower/layer、没有 extractor、没有 rejection——**不需要学习任何额外抽象**，会写闭包、会写方法就会写中间件。
-- 中间件只依赖稳定的 `Context` 与可选的 `&self`，不受路由 API 演进影响，写完可长期复用、跨项目搬运。
+- The contract has **never changed** since the framework was born: one `Executor`, one `bool`, two rules.
+- Functional and object-based middleware **share the same contract**; write once and all three mounting styles — chained / inline / attribute macro — **work everywhere**, with no need to adapt for each.
+- No tower/layer, no extractor, no rejection — **no extra abstraction to learn**; if you can write a closure and a method, you can write middleware.
+- Middleware depends only on the stable `Context` and the optional `&self`, unaffected by the evolution of the routing API; once written, it can be reused long-term and moved across projects.
 
 ---
 
-## 统一服务器 API
+## Unified Server API
 
-| 方法 | 说明 |
+| Method | Description |
 |------|------|
-| `.new(globals)` / `.at(addr, globals)` / `.solo(addr)` | 构造（共享上下文 / 指定地址+上下文 / 独立上下文） |
-| `.push(protocol)` | 挂载一个实现了 `Protocol` 的协议（HTTP / HTTP2 / WebSocket / TCP / UDP / 自定义） |
-| `.mount(protocol)` | 同 `push`，以 `&mut self` 形式挂载 |
-| `.detector(d)` / `.detector_at(pos, d)` | 注册协议检测器（队尾 / 指定位置） |
-| `.with_registry(registry)` | 共享外部管理的检测器目录（运行时增删） |
-| `.detection(bool)` | 开关检测阶段；关闭后连接直接进默认 TCP 处理器，不嗅探 |
-| `.start()` | 启动统一服务器 |
+| `.new(globals)` / `Server::default()` | Construct (shared context / independent context) |
+| `.push(protocol)` | Mount a protocol implementing `Protocol` (HTTP / HTTP2 / WebSocket / TCP / UDP / custom) |
+| `.mount(protocol)` | Same as `push`, mounting in `&mut self` form |
+| `.detector(d)` / `.detector_at(pos, d)` | Register a protocol detector (tail / specified position) |
+| `.with_registry(registry)` | Share an externally managed detector registry (runtime add/remove) |
+| `.detection(bool)` | Toggle the detection phase; when off, connections go straight to the default TCP handler with no sniffing |
+| `.start(addr)` | Start the unified server |
 
-> 推荐的顶层处理器是 `Tcp`（流）与 `Udp`（数据报）；HTTP、HTTP/2、WebSocket 等通常作为
-> `Tcp` 的子处理器（用宏写作 `tcp!(http!(router))`）。只服务流协议时也可直接 `push(http!(router))`。
+> The recommended top-level handlers are `Tcp` (stream) and `Udp` (datagram); HTTP, HTTP/2, WebSocket etc. are usually
+> sub-handlers of `Tcp` (written with the macros as `http!(router)`). When serving only streaming protocols you may also directly `push(http!(router))`.
 
-> 连接属性：统一服务器在分发前把 `ConnectionFd`（原始文件描述符）写入 ctx，
-> split 后的读写半部仍可做 fd 级操作（如 NAT 场景的 `SO_ORIGINAL_DST` 原目的地址查询）。
+> Connection attributes: before dispatching, the unified server writes `ConnectionFd` (the raw file descriptor) into the ctx,
+> so the split read/write halves can still perform fd-level operations (such as querying the original destination `SO_ORIGINAL_DST`).
 
-### 适用场景
+### Use Cases
 
-| 场景 | 使用的协议 |
+| Scenario | Protocols used |
 |------|----------|
 | REST API | HTTP/1.1, HTTP/2 |
-| 实时聊天 | HTTP/1.1 + WebSocket, HTTP/2 + WebSocket |
-| 游戏服务器 | TCP/UDP, P2P |
-| 物联网网关 | HTTP + TCP + UDP |
-| 实时推送 | HTTP + SSE |
-| P2P 网络 | 统一端口支持 P2P 握手协议 |
+| Real-time chat | HTTP/1.1 + WebSocket, HTTP/2 + WebSocket |
+| Game server | TCP/UDP |
+| IoT gateway | HTTP + TCP + UDP |
+| Real-time push | HTTP + SSE |
 
 ---
 
-## TCP 协议
+## TCP Protocol
 
 ```rust
+use aex::bytes::Bytes;
 use aex::tcp::router::Router as TcpRouter;
-use aex::tcp::types::{Codec, Command, Frame, RawCodec};
-use aex::connection::global::GlobalContext;
 use futures::FutureExt;
-use std::sync::Arc;
-use std::net::SocketAddr;
 
-// 1. 创建 TCP 路由器 (指定 Frame/Command 类型)
-let mut tcp_router = TcpRouter::<RawCodec, RawCodec>::new();
+// 1. Create a TCP router and install a byte-level extractor.
+//    extractor signature: Fn(&[u8]) -> anyhow::Result<Option<(usize, u32, Bytes, Bytes)>>
+//      Ok(Some((consumed_bytes, dispatch_key, frame_bytes, command_bytes))) —— parsed one complete frame
+//      Ok(None) —— half packet / not enough, wait for more bytes
+//      Err(..)  —— parsed successfully but validation failed, meaning it is not this protocol (the GlobalContext policy decides drop or disconnect)
+let mut tcp_router = TcpRouter::new().extractor(|buf: &[u8]| {
+    // Parse buf here into (consumed, key, frame_bytes, cmd_bytes)
+    Ok(None)
+});
 
-// 注册命令处理器 (命令 ID = 1)
+// 2. Register a handler (command ID = 1). The handler receives Bytes directly and parses them itself.
 tcp_router.on(
     1,
-    Box::new(|_, _, _| async move { Ok(true) }.boxed()),
+    Box::new(|_ctx, _frame: Bytes, _cmd: Bytes| async move { Ok(true) }.boxed()),
     vec![],
 );
 ```
 
-### TCP 帧/命令定义
+> The router itself **contains no business types**: everything sent and received is `Bytes`. The protocol's encoding/decoding (`Bytes → Codec →
+> Frame/Command`) is done by the extractor and handler.
+
+### TCP Frame/Command Definitions
 
 ```rust
 use aex::tcp::types::{Codec, Command, Frame};
@@ -1036,20 +1287,24 @@ impl Command for MyCommand {
 
 ---
 
-## UDP 协议
+## UDP Protocol
 
 ```rust
+use aex::bytes::Bytes;
 use aex::udp::router::Router as UdpRouter;
-use aex::tcp::types::{Codec, Command, Frame, RawCodec};
-use std::sync::Arc;
 
-// 创建 UDP 路由器 (指定 Frame/Command 类型)
-let mut udp_router = UdpRouter::<RawCodec, RawCodec>::new();
+// Create a UDP router and install an extractor.
+//   extractor signature: Fn(&[u8]) -> anyhow::Result<Option<(u32, Bytes, Bytes)>>
+//     each datagram is one complete message; returns (dispatch_key, frame_bytes, command_bytes).
+let mut udp_router = UdpRouter::new().extractor(|buf: &[u8]| {
+    // Parse buf to get (key, frame_bytes, cmd_bytes); return Ok(None) if it cannot be parsed
+    Ok(None)
+});
 
-// 注册处理器
-udp_router.on(100, |global, frame, cmd, addr, socket| {
+// Register a handler (the handler receives Bytes directly and parses them itself)
+udp_router.on(100, |_global, _frame: Bytes, _cmd: Bytes, addr, _socket| {
     Box::pin(async move {
-        println!("UDP packet from {}: cmd_id={}", addr, cmd.id());
+        println!("UDP packet from {}", addr);
         Ok(true)
     })
 });
@@ -1057,37 +1312,41 @@ udp_router.on(100, |global, frame, cmd, addr, socket| {
 
 ---
 
-## P2P 框架
+## P2P: Low-level Infrastructure
 
-Aex 内置基于 **IP 识别** 的 P2P 框架，支持去中心化网络通信。
+> **P2P is not a protocol, but a low-level infrastructure / service capability**: it targets nodes, providing
+> generic capabilities such as NAT traversal, handshaking, and connection management for upper-layer services to reuse. It does not occupy a protocol branch,
+> nor does it appear in the protocol list of the [universal server state machine](#design-philosophy-a-universal-server-state-machine-containing-the-web-straight-line).
 
-### 核心概念
+Aex has a built-in **IP-identification-based** P2P infrastructure, supporting decentralized network communication.
+
+### Core Concepts
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                      P2P 节点                               │
+│                          P2P node                           │
 ├─────────────────────────────────────────────────────────────┤
 │  Node {                                                    │
-│    id: Vec<u8>,      // 节点 ID，通常是公钥哈希               │
-│    version: u8,     // 协议版本                             │
-│    started_at: u64, // 启动时间戳                           │
-│    port: u16,       // 监听端口                             │
-│    protocols: HashSet<Protocol>,  // 支持的协议列表          │
-│    ips: Vec<(NetworkScope, IpAddr)>,  // 网络地址列表        │
+│    id: Vec<u8>,      // node ID, usually a public-key hash  │
+│    version: u8,     // protocol version                     │
+│    started_at: u64, // startup timestamp                    │
+│    port: u16,       // listen port                          │
+│    protocols: HashSet<Protocol>,  // list of supported protocols │
+│    ips: Vec<(NetworkScope, IpAddr)>,  // list of network addresses │
 │  }                                                         │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### 命令 ID 定义
+### Command ID Definitions
 
-| CommandId | 值 | 说明 |
+| CommandId | Value | Description |
 |----------|-----|------|
-| Hello | 1 | 握手请求 (含节点信息) |
-| Welcome | 2 | 握手响应 (接受/拒绝) |
-| Ack | 3 | 确认握手完成 |
-| Reject | 4 | 拒绝连接 |
-| Ping | 5 | 心跳请求 |
-| Pong | 6 | 心跳响应 |
+| Hello | 1 | Handshake request (includes node info) |
+| Welcome | 2 | Handshake response (accept/reject) |
+| Ack | 3 | Acknowledge handshake complete |
+| Reject | 4 | Reject connection |
+| Ping | 5 | Heartbeat request |
+| Pong | 6 | Heartbeat response |
 
 ```rust
 use aex::connection::commands::CommandId;
@@ -1096,11 +1355,11 @@ assert_eq!(CommandId::Hello.as_u32(), 1);
 assert_eq!(CommandId::Pong.as_u32(), 6);
 ```
 
-### 连接状态机
+### Connection State Machine
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│              连接状态机 (ConnectionStateMachine)              │
+│                  Connection State Machine                   │
 ├─────────────────────────────────────────────────────────────┤
 │  Initial ──→ Connecting ──→ Handshake ──→ Established        │
 │     │           │              │              │             │
@@ -1129,11 +1388,11 @@ assert!(sm.is_active());
 assert!(sm.should_heartbeat());
 ```
 
-### 握手协议
+### Handshake Protocol
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                   P2P 握手协议流程                          │
+│                     P2P handshake flow                      │
 ├─────────────────────────────────────────────────────────────┤
 │   Client                                Server               │
 │     │                                     │                 │
@@ -1146,23 +1405,23 @@ assert!(sm.should_heartbeat());
 │     │───────── CMD_ACK ─────────────────→│                 │
 │     │  (accepted, session_key_id?)        │                 │
 │     │                                     │                 │
-│     │         [加密通道建立]                │                 │
+│     │         [encrypted channel]         │                  │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### 心跳协议
+### Heartbeat Protocol
 
 ```rust
 use aex::connection::heartbeat::{HeartbeatManager, HeartbeatConfig};
 
 let config = HeartbeatConfig::new()
-    .with_interval(30)   // 30秒间隔
-    .with_timeout(10)     // 10秒超时
+    .with_interval(30)   // 30-second interval
+    .with_timeout(10)     // 10-second timeout
     .on_timeout(|addr| {
-        println!("连接超时: {}", addr);
+        println!("connection timeout: {}", addr);
     })
     .on_latency(|addr, latency| {
-        println!("延迟 {} ms", latency);
+        println!("latency {} ms", latency);
     });
 
 let manager = HeartbeatManager::new(local_node).with_config(config);
@@ -1170,11 +1429,11 @@ let manager = HeartbeatManager::new(local_node).with_config(config);
 
 ---
 
-## 通信器 (Communicators)
+## Communicators
 
-### Pipe - N:1 管道
+### Pipe - N:1 Pipeline
 
-多个发送者 → 一个消费者（适用于日志、审计）：
+Multiple senders → one consumer (suitable for logging, auditing):
 
 ```rust
 use futures::FutureExt;
@@ -1186,9 +1445,9 @@ server.globals.pipe::<String>("audit_log", Box::new(|msg| {
 server.globals.pipe.send("audit_log", "User logged in".to_string()).await;
 ```
 
-### Spreader - 1:N 广播
+### Spreader - 1:N Broadcast
 
-一个发送者 → 多个消费者（适用于配置同步）：
+One sender → multiple consumers (suitable for config synchronization):
 
 ```rust
 use futures::FutureExt;
@@ -1200,9 +1459,9 @@ server.globals.spread::<i32>("config_sync", Box::new(|val| {
 server.globals.spread.publish("config_sync", 42).await;
 ```
 
-### Event - M:N 事件系统
+### Event - M:N Event System
 
-多个发送者 → 多个消费者（适用于业务事件）：
+Multiple senders → multiple consumers (suitable for business events):
 
 ```rust
 use aex::communicators::event::Event;
@@ -1217,9 +1476,9 @@ Event::<u32>::notify(&server.globals.event, "user_login".to_string(), 888).await
 
 ---
 
-## 架构层面
+## Architecture
 
-### 多层架构设计
+### Multi-layer Architecture Design
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -1252,131 +1511,147 @@ Event::<u32>::notify(&server.globals.event, "user_login".to_string(), 888).await
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### 核心组件
+### Core Components
 
-| 组件 | 职责 | 特点 |
+| Component | Responsibility | Feature |
 |------|------|------|
-| **UnifiedServer** | 统一多协议入口 | HTTP/TCP/H2/P2P 共享端口 |
-| **Router** | 路由匹配 | Trie 树 / HashMap |
-| **Executor** | 处理器 | BoxFuture 异步 |
-| **Context** | 请求上下文 | TypeMap 存储 |
-| **ConnectionManager** | 连接池 | DashMap 并发 |
-| **GlobalContext** | 全局共享状态 | 跨连接通信 |
-| **SessionKeyManager** | 加密会话管理 | 端到端加密 |
-| **Pipe** | N:1 消息管道 | 日志/审计 |
-| **Spreader** | 1:N 广播 | 配置同步 |
-| **Event** | M:N 事件系统 | 事件通知 |
+| **Server** | Unified multi-protocol entry | HTTP/TCP/H2 share a port |
+| **Router** | Route matching | Trie tree / HashMap |
+| **Executor** | Handler | BoxFuture async |
+| **Context** | Request context | TypeMap storage |
+| **ConnectionManager** | Connection pool | DashMap concurrency |
+| **GlobalContext** | Globally shared state | Cross-connection communication |
+| **SessionKeyManager** | Encrypted session management | End-to-end encryption |
+| **Pipe** | N:1 message pipeline | Logging/auditing |
+| **Spreader** | 1:N broadcast | Config synchronization |
+| **Event** | M:N event system | Event notification |
 
 ---
 
-## 与其他框架对比
+## Comparison with Other Frameworks
 
-### 协议支持对比
+### Protocol Support Comparison
 
-| 协议 | Aex | Axum | Actix-web |
+| Protocol | Aex | Axum | Actix-web |
 |------|-----|------|----------|
 | HTTP/1.1 + WebSocket | ✅ | ✅ | ✅ |
 | HTTP/2 + WebSocket | ✅ | ✅ | ✅ |
-| **统一端口多协议** | ✅ | ❌ | ❌ |
-| TCP 自定义 | ✅ | ❌ | ❌ |
+| **Unified-port multi-protocol** | ✅ | ❌ | ❌ |
+| Custom TCP | ✅ | ❌ | ❌ |
 | UDP | ✅ | ❌ | ✅ |
 | mDNS | ✅ | ❌ | ❌ |
-| P2P | ✅ | ❌ | ❌ |
 
-### Aex 设计理念
+### Aex Design Principles
 
-  1. **显式优于隐式** - 线性中间件链，控制流可预测
-  2. **轻量优于重** - 最少依赖，直面核心问题
-  3. **性能优先** - ahash + Trie 树优化
-  4. **HTTP 本质** - 尊重 HTTP 协议设计
-  5. **统一架构** - 同一端口支持所有协议
+  1. **Explicit over implicit** - linear middleware chain with predictable control flow
+  2. **Lightweight over heavy** - minimal dependencies, facing the core problem directly
+  3. **Performance first** - ahash + Trie-tree optimization
+  4. **The essence of HTTP** - respecting HTTP's design
+  5. **Unified architecture** - all protocols on the same port
 
-### 性能对比 (AEX vs Axum vs Actix-web)
+### Performance Comparison (AEX vs Axum vs Actix-web)
 
-wrk 基准测试 (release 构建, `t4-c500` 高并发 5s):
+wrk benchmark (release build, `t4-c500` high-concurrency 5s):
 
-| 路由 | AEX QPS | Axum 0.8.9 QPS | Actix-web 4 QPS | AEX vs Axum | AEX vs Actix |
+| Route | AEX QPS | Axum 0.8.9 QPS | Actix-web 4 QPS | AEX vs Axum | AEX vs Actix |
 |------|---------|-----------------|-----------------|-------------|-------------|
 | `/` | 130,455 | 118,448 | 141,612 | **1.10x** | 0.92x |
 | `/api/users` | 132,157 | 114,872 | 128,422 | **1.15x** | **1.02x** |
 | `/api/users/{id}` | 116,345 | 97,831 | 110,414 | **1.18x** | **1.05x** |
 
-AEX 在静态和动态路由上均优于 Axum，动态参数路由优势最大 (1.18x)。与 Actix-web 相比，AEX 在带路径参数的路由上表现更好。
+AEX outperforms Axum on both static and dynamic routes, with the biggest advantage on dynamic parameter routes (1.18x). Compared with Actix-web, AEX performs better on routes with path parameters.
 
-### 适用场景
+### Use Cases
 
-- 高性能 API 服务
-- WebSocket 应用
-- TCP/UDP 混合服务
-- P2P 去中心化网络
-- 微服务架构
-- 资源受限环境
+- High-performance API services
+- WebSocket applications
+- TCP/UDP hybrid services
+- Microservice architectures
+- Resource-constrained environments
 
 ---
 
-## 模块结构
+## Module Structure
 
 ```
 aex/
-├── http/               # HTTP Web 框架
-│   ├── router.rs      # Trie 树路由器
-│   ├── types.rs       # Executor 类型定义
-│   ├── meta.rs        # HTTP 元数据
-│   ├── req.rs         # 请求解析
-│   ├── res.rs         # 响应处理
-│   ├── params.rs      # 路径/查询/表单参数
-│   ├── websocket.rs   # WebSocket 支持
-│   ├── macros.rs      # HTTP 方法宏
-│   └── middlewares/   # 内置中间件
+├── protocols/          # all protocol handlers (`Protocol` trait implementations)
+│   ├── http/           # HTTP/1.1 framework
+│   │   ├── router.rs   # Trie-tree router
+│   │   ├── types.rs    # Executor type definitions
+│   │   ├── meta.rs     # HTTP metadata
+│   │   ├── req.rs      # request parsing
+│   │   ├── res.rs      # response handling
+│   │   ├── params.rs   # path/query/form parameters
+│   │   ├── websocket.rs# WebSocket frames
+│   │   ├── macros.rs   # HTTP method macros / validator!
+│   │   └── middlewares/# built-in middleware (cors/logger/rate_limit/validator/websocket)
+│   ├── http1.rs        # Http1 protocol (HTTP/1.1 + default WebSocket sub-handler)
+│   ├── http2/          # HTTP/2
+│   │   ├── mod.rs      # H2Codec codec
+│   │   └── protocol.rs # Http2 protocol
+│   ├── tcp/            # TCP
+│   │   ├── protocol.rs # Tcp protocol + router_handler/from_handler
+│   │   ├── router.rs   # command router (extractor + handler)
+│   │   ├── types.rs    # Frame/Command trait
+│   │   ├── listeners.rs# TCP listeners
+│   │   └── macros.rs   # frame!/command!/codec!/router!
+│   ├── udp/            # UDP
+│   │   ├── protocol.rs # Udp protocol
+│   │   ├── router.rs   # datagram router
+│   │   └── types.rs    # UDP types
+│   ├── websocket.rs    # WebSocket protocol (HTTP upgrade middleware form)
+│   ├── socks.rs        # SOCKS4/5 protocol (feature = "proxy")
+│   ├── proxy.rs        # proxy protocol entry
+│   └── classify.rs     # protocol classification helpers (HTTP methods, H2 preface…)
 │
-├── http2/             # HTTP/2 协议支持
-│   └── mod.rs         # H2Codec 编解码器
+├── p2p/                # P2P low-level infrastructure (NAT traversal etc., not a protocol)
+│   └── nat/            # NAT traversal (below the transport layer, operating sockets directly)
+│       ├── client.rs   # client/tunnel
+│       ├── server.rs   # relay service
+│       ├── punch.rs    # hole-punching coordination
+│       ├── service.rs  # NatDetector + unified service registration
+│       └── types.rs    # frame/error types
 │
-├── tcp/               # TCP 协议支持
-│   ├── router.rs      # 命令路由器
-│   ├── types.rs       # Frame/Command trait
-│   └── listeners.rs   # TCP 监听器
+├── server.rs           # unified server ⭐ (Server::push/start)
+├── protocol.rs         # Protocol trait + Transport (unified protocol interface)
+├── detect.rs           # pluggable protocol detector system (registration/ordering/conflict protection)
+├── handler.rs          # ProtocolHandler / CommandRegistry / HandlerState
 │
-├── udp/               # UDP 协议支持
-│   ├── router.rs      # 数据包路由器
-│   └── types.rs       # UDP 类型
+├── connection/         # connection management
+│   ├── context.rs      # per-request Context
+│   ├── global.rs       # global context (including FrameErrorPolicy)
+│   ├── manager.rs      # connection pool management
+│   └── types.rs        # connection types
 │
-├── unified/           # 统一协议服务器 ⭐
-│   ├── mod.rs        # 统一监听 + 分发
-│   └── detect.rs     # 可插拔协议检测器体系（注册/排序/冲突防护/链路状态）
-│
-├── connection/         # 连接管理
-│   ├── context.rs     # Per-request Context
-│   ├── global.rs      # 全局上下文
-│   ├── manager.rs     # 连接池管理
-│   └── types.rs       # 连接类型
-│
-├── crypto/            # 加密支持
+├── crypto/             # crypto support
 │   └── session_key_manager.rs  # X25519 + ChaCha20Poly1305
 │
-├── communicators/     # IPC 模式
-│   ├── spreader.rs    # Pub/Sub 广播
-│   ├── event.rs       # 事件系统
-│   └── pipe.rs        # 命名管道
+├── communicators/      # IPC patterns
+│   ├── spreader.rs     # Pub/Sub broadcast
+│   ├── event.rs        # event system
+│   └── pipe.rs         # named pipes
 │
-└── server.rs          # 统一服务器入口
+├── proxy/              # HTTP / SOCKS proxy implementation (feature = "proxy")
+├── main.rs             # `http-server` executable entry
+└── lib.rs              # top-level modules and re-exports (http/http2/tcp/udp/nat)
 ```
 
 ---
 
-## 测试
+## Testing
 
 ```bash
-cargo test --all          # 全部单元 + 集成测试
-cargo test --lib unified  # 检测器体系单元测试
+cargo test --all          # all unit + integration tests
+cargo test --lib unified  # detector system unit tests
 ```
 
-统一服务器与检测器体系相关的测试文件：
+Test files related to the unified server and detector system:
 
-- `tests/unified_server_test.rs` - 统一服务器上的 HTTP/1.1、WebSocket、HTTP/2、TCP 共存
-- `tests/unified_listener_all_protocols_test.rs` - 同一监听端口的多协议检测（显式注册检测器）
-- `tests/unified_detect_pipeline_test.rs` - 检测管线端到端：自定义协议分发、Forward 模式直转、空目录纯 TCP 直通、运行时注销检测器
-- `src/unified/detect.rs` 内置单元测试 - 注册排序/增删/替换、冲突拒绝（双向）、首个 Match 短路、NeedMore 多轮判定、16 KiB 上限放弃、Forward 终止语义
+- `tests/unified_server_test.rs` - coexistence of HTTP/1.1, WebSocket, HTTP/2, and TCP on a unified server
+- `tests/unified_listener_all_protocols_test.rs` - multi-protocol detection on the same listening port (explicit detector registration)
+- `tests/unified_detect_pipeline_test.rs` - end-to-end detection pipeline: custom protocol dispatch, Forward-mode direct forwarding, pure TCP passthrough with an empty registry, runtime detector unregistration
+- Built-in unit tests in `src/detect.rs` - registration ordering/add/remove/replace, conflict rejection (bidirectional), first-Match short-circuit, multi-round NeedMore decisions, abandoning at the 16 KiB limit, Forward termination semantics
 
 ---
 

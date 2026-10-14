@@ -12,10 +12,10 @@ use std::sync::Arc;
 use bytes::Bytes;
 
 use crate::connection::context::Context;
+use crate::handler::{CommandHandler, CommandKey, CommandRegistry, Outcome};
 use crate::http::router::Router as HttpRouter;
 use crate::http::types::Executor;
-use crate::unified::handler::{CommandHandler, CommandKey, CommandRegistry, Outcome};
-use crate::unified::{Protocol, Transport};
+use crate::protocol::{Protocol, Transport};
 
 /// WebSocket sub-protocol: routes upgrade requests through its router.
 pub struct Websocket {

@@ -15,9 +15,8 @@ use aex::protocols::http1::Http1;
 use aex::protocols::http2::Http2;
 use aex::protocols::tcp;
 use aex::protocols::tcp::Tcp;
+use aex::server::Server;
 use aex::tcp::router::Router as TcpRouter;
-use aex::tcp::types::RawCodec;
-use aex::unified::Server;
 use anyhow::Result;
 
 fn setup_http() -> HttpRouter {
@@ -40,20 +39,26 @@ fn setup_ws() -> Arc<Executor> {
     Arc::from(WebSocket::to_middleware(ws))
 }
 
-fn setup_framed_tcp() -> TcpRouter<RawCodec, RawCodec> {
-    let mut router = TcpRouter::new();
-    router = router.extractor(|cmd: &RawCodec| -> u32 {
-        if cmd.0.len() >= 4 {
+fn setup_framed_tcp() -> TcpRouter {
+    let mut router = TcpRouter::new().extractor(
+        |buf: &[u8]| -> anyhow::Result<Option<(usize, u32, bytes::Bytes, bytes::Bytes)>> {
+            if buf.len() < 4 {
+                return Ok(None);
+            }
             let mut arr = [0u8; 4];
-            arr.copy_from_slice(&cmd.0[0..4]);
-            u32::from_le_bytes(arr)
-        } else {
-            0
-        }
-    });
+            arr.copy_from_slice(&buf[0..4]);
+            let key = u32::from_le_bytes(arr);
+            Ok(Some((
+                buf.len(),
+                key,
+                bytes::Bytes::copy_from_slice(buf),
+                bytes::Bytes::new(),
+            )))
+        },
+    );
     router.on(
         1,
-        Box::new(|ctx, _frame: RawCodec, _cmd: RawCodec| {
+        Box::new(|ctx, _frame: bytes::Bytes, _cmd: bytes::Bytes| {
             Box::pin(async move {
                 let mut g = ctx.lock().await;
                 if let Some(_w) = g.writer.as_mut() {
@@ -81,15 +86,14 @@ async fn main() -> Result<()> {
         .middleware(setup_ws());
 
     let tcp_router = std::sync::Arc::new(setup_framed_tcp());
-    let srv = Server::solo(addr)
-        .push(
-            Tcp::new(Some(tcp::router_handler(tcp_router)))
-                .sub(Http1::new(Some(std::sync::Arc::new(http)), None).shared())
-                .sub(Http2::new(None).shared())
-                .shared(),
-        );
+    let srv = Server::default().push(
+        Tcp::new(Some(tcp::router_handler(tcp_router)))
+            .sub(Http1::new(Some(std::sync::Arc::new(http)), None).shared())
+            .sub(Http2::new(None, None).shared())
+            .shared(),
+    );
     tokio::spawn(async move {
-        let _ = srv.start().await;
+        let _ = srv.start(addr).await;
     });
 
     // Raw UDP

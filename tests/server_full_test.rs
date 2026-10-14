@@ -1,17 +1,15 @@
 use aex::connection::context::TypeMapExt;
 use aex::http::router::Router as HttpRouter;
+use aex::server::Server;
 use aex::tcp::types::{Codec, RawCodec};
 use aex::udp::router::Router as UdpRouter;
-use aex::unified::Server;
 use aex::{http, tcp};
+use bytes::Bytes;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::time::Duration;
 
-fn addr() -> SocketAddr {
-    "127.0.0.1:0".parse().unwrap()
-}
 async fn free_addr() -> SocketAddr {
     let t = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let a = t.local_addr().unwrap();
@@ -19,15 +17,30 @@ async fn free_addr() -> SocketAddr {
     a
 }
 
-fn http_server(addr: SocketAddr, router: HttpRouter) -> Server {
-    Server::solo(addr).push(tcp!(http!(router)))
+fn http_server(router: HttpRouter) -> Server {
+    Server::default().push(http!(router))
+}
+
+fn rawcodec_extract(buf: &[u8]) -> anyhow::Result<Option<(u32, Bytes, Bytes)>> {
+    let (codec, consumed) = match <RawCodec as Codec>::decode_with_len(buf) {
+        Ok(v) => v,
+        Err(_) => return Ok(None),
+    };
+    let key = codec
+        .0
+        .get(0..4)
+        .map(|s| u32::from_le_bytes(s.try_into().unwrap()))
+        .unwrap_or(0);
+    Ok(Some((
+        key,
+        Bytes::copy_from_slice(&buf[..consumed]),
+        Bytes::copy_from_slice(&codec.0),
+    )))
 }
 
 #[test]
 fn server_new_defaults() {
-    let a = addr();
-    let server = Server::solo(a);
-    assert_eq!(server.addr, a);
+    let server = Server::default();
     assert!(
         server
             .globals
@@ -45,8 +58,8 @@ async fn server_start_http_only_serves_route() {
         "/ping",
         |_ctx: &mut aex::connection::context::Context| "pong",
     );
-    let server = http_server(a, router);
-    let handle = tokio::spawn(async move { server.start().await });
+    let server = http_server(router);
+    let handle = tokio::spawn(async move { server.start(a).await });
 
     tokio::time::sleep(Duration::from_millis(200)).await;
     let resp = reqwest::get(format!("http://{}/ping", a)).await.unwrap();
@@ -59,9 +72,9 @@ async fn server_start_http_only_serves_route() {
 async fn server_start_accepts_connection() {
     use tokio::io::AsyncWriteExt;
     let a = free_addr().await;
-    let server = Server::solo(a).push(tcp!());
+    let server = Server::default().push(tcp!());
     let handle = tokio::spawn(async move {
-        let _ = server.start().await;
+        let _ = server.start(a).await;
     });
 
     tokio::time::sleep(Duration::from_millis(200)).await;
@@ -76,8 +89,7 @@ async fn udp_router_dispatches_datagram() {
     let a = free_addr().await;
     let counter = Arc::new(AtomicUsize::new(0));
     let c = counter.clone();
-    let mut udp = UdpRouter::<RawCodec, RawCodec>::new()
-        .extractor(|c: &RawCodec| u32::from_le_bytes(c.0[..4].try_into().unwrap()));
+    let mut udp = UdpRouter::new().extractor(rawcodec_extract);
     udp.on(42, move |_g, _f, _c, _a, _s| {
         let c = c.clone();
         async move {
@@ -86,7 +98,7 @@ async fn udp_router_dispatches_datagram() {
         }
     });
 
-    let server = Server::solo(a);
+    let server = Server::default();
     let globals = server.globals.clone();
     let udp = Arc::new(udp);
     let sock = Arc::new(tokio::net::UdpSocket::bind(a).await.unwrap());
@@ -116,8 +128,7 @@ async fn server_start_multi_protocol_with_tcp_and_udp() {
     let counter = Arc::new(AtomicUsize::new(0));
     let c = counter.clone();
 
-    let mut udp = UdpRouter::<RawCodec, RawCodec>::new()
-        .extractor(|c: &RawCodec| u32::from_le_bytes(c.0[..4].try_into().unwrap()));
+    let mut udp = UdpRouter::new().extractor(rawcodec_extract);
     udp.on(99, move |_g, _f, _c, _a, _s| {
         let c = c.clone();
         async move {
@@ -127,10 +138,10 @@ async fn server_start_multi_protocol_with_tcp_and_udp() {
     });
 
     // TCP 由统一 server 启动，UDP 由 router 在后台独立收包。
-    let server = Server::solo(a).push(tcp!());
+    let server = Server::default().push(tcp!());
     let globals = server.globals.clone();
     let tcp_handle = tokio::spawn(async move {
-        let _ = server.start().await;
+        let _ = server.start(a).await;
     });
 
     let udp = Arc::new(udp);

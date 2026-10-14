@@ -4,7 +4,7 @@ mod tests {
 
     #[test]
     fn test_udp_router_new() {
-        let router = Router::<(), ()>::new();
+        let router = Router::new();
         assert_eq!(router.handlers.len(), 0);
     }
 }

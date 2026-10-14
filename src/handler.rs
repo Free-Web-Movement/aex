@@ -28,10 +28,10 @@ use bytes::Bytes;
 use futures::future::BoxFuture;
 
 use crate::connection::context::Context;
+use crate::detect::{Claim, ProtocolDetector};
 use crate::http::router::Router as HttpRouter;
 use crate::http::types::Executor;
-use crate::unified::detect::{Claim, ProtocolDetector};
-use crate::unified::{Protocol, Transport};
+use crate::protocol::{Protocol, Transport};
 
 /// Move every field out of `ctx`, leaving it empty.
 ///

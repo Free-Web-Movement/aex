@@ -5,7 +5,7 @@ use aex::http::types::Executor;
 use aex::http::websocket::WSFrame;
 use aex::protocols::http1::Http1;
 use aex::protocols::tcp::Tcp;
-use aex::unified::Server;
+use aex::server::Server;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
@@ -43,13 +43,13 @@ async fn main() -> anyhow::Result<()> {
     println!("Server running at http://{}", addr);
     println!("WebSocket endpoint: ws://{}/ws", addr);
 
-    Server::solo(addr)
+    Server::default()
         .push(
             Tcp::new(None)
                 .sub(Http1::new(Some(std::sync::Arc::new(router)), None).shared())
                 .shared(),
         )
-        .start()
+        .start(addr)
         .await?;
     Ok(())
 }

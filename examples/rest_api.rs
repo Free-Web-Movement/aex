@@ -5,7 +5,7 @@ use aex::http::router::Router as HttpRouter;
 use aex::http::types::IntoExecutor;
 use aex::protocols::http1::Http1;
 use aex::protocols::tcp::Tcp;
-use aex::unified::Server;
+use aex::server::Server;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Mutex;
@@ -184,13 +184,13 @@ async fn main() -> anyhow::Result<()> {
 
     println!("REST API Server running at http://{}", addr);
 
-    Server::solo(addr)
+    Server::default()
         .push(
             Tcp::new(None)
                 .sub(Http1::new(Some(std::sync::Arc::new(router)), None).shared())
                 .shared(),
         )
-        .start()
+        .start(addr)
         .await?;
     Ok(())
 }

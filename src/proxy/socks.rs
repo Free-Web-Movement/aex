@@ -14,8 +14,8 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
 use crate::connection::context::{BoxReader, BoxWriter, Context};
+use crate::detect::{DetectionState, ProtocolDetector, Verdict};
 use crate::protocols::tcp::TCPHandler;
-use crate::unified::detect::{DetectionState, ProtocolDetector, Verdict};
 
 use super::http_proxy::ProxyAuthorizer;
 

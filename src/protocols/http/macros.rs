@@ -147,14 +147,6 @@ macro_rules! _async {
     }};
 }
 
-/// `exe!` 是 `_async!` 的别名，保留兼容旧写法。
-#[macro_export]
-macro_rules! exe {
-    ($($tt:tt)*) => {
-        $crate::_async!($($tt)*)
-    };
-}
-
 /// `then!` 是 `_async!` 的别名（then = 稍后异步执行）。
 #[macro_export]
 macro_rules! then {

@@ -3,7 +3,7 @@ use aex::http::router::Router as HttpRouter;
 use aex::protocols::http1::Http1;
 use aex::protocols::http2::Http2;
 use aex::protocols::tcp::Tcp;
-use aex::unified::Server;
+use aex::server::Server;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
@@ -25,14 +25,14 @@ async fn main() -> anyhow::Result<()> {
     println!("Starting HTTP/2 server on {}", addr);
     println!("Use: curl --http2 http://localhost:8080/");
 
-    Server::solo(addr)
+    Server::default()
         .push(
             Tcp::new(None)
                 .sub(Http1::new(Some(Arc::new(router)), None).shared())
-                .sub(Http2::new(None).shared())
+                .sub(Http2::new(None, None).shared())
                 .shared(),
         )
-        .start()
+        .start(addr)
         .await?;
     Ok(())
 }

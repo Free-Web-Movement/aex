@@ -75,30 +75,18 @@ pub struct HttpRouterKey;
 pub struct TcpRouterKey;
 pub struct UdpRouterKey;
 
-pub fn get_tcp_router<F, C>(
-    global: &ConcurrentTypeMap,
-) -> Option<Arc<crate::tcp::router::Router<F, C>>>
-where
-    F: Send + Sync + 'static,
-    C: Send + Sync + 'static,
-{
+pub fn get_tcp_router(global: &ConcurrentTypeMap) -> Option<Arc<crate::tcp::router::Router>> {
     global.get(&TypeId::of::<TcpRouterKey>()).and_then(|r| {
         r.value()
-            .downcast_ref::<Arc<crate::tcp::router::Router<F, C>>>()
+            .downcast_ref::<Arc<crate::tcp::router::Router>>()
             .cloned()
     })
 }
 
-pub fn get_udp_router<F, C>(
-    global: &ConcurrentTypeMap,
-) -> Option<Arc<crate::udp::router::Router<F, C>>>
-where
-    F: Send + Sync + 'static,
-    C: Send + Sync + 'static,
-{
+pub fn get_udp_router(global: &ConcurrentTypeMap) -> Option<Arc<crate::udp::router::Router>> {
     global.get(&TypeId::of::<UdpRouterKey>()).and_then(|r| {
         r.value()
-            .downcast_ref::<Arc<crate::udp::router::Router<F, C>>>()
+            .downcast_ref::<Arc<crate::udp::router::Router>>()
             .cloned()
     })
 }

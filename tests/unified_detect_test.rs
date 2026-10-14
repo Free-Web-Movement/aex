@@ -1,11 +1,11 @@
-// Tests for the unified detection pipeline (`aex::unified::detect`): verdict
+// Tests for the unified detection pipeline (`aex::detect`): verdict
 // naming, per-connection DetectionState, the DetectorRegistry (register/replace/
 // unregister/ordering/conflicts) and run_pipeline combinatorics. The pipeline's
 // regression tests live here via the public API — no code under src/.
 
 use std::sync::Arc;
 
-use aex::unified::{
+use aex::detect::{
     DetectionState, DetectorMode, DetectorRegistry, MAX_PEEK, Position, ProtocolDetector,
     RegisterError, Verdict, run_pipeline,
 };
@@ -126,11 +126,13 @@ fn protocol_detector_defaults() {
 
 #[test]
 fn run_pipeline_first_match_claims_and_short_circuits() {
-    let dets: Vec<Arc<dyn ProtocolDetector>> =
-        vec![Arc::new(Passer), Arc::new(ClaimC {
+    let dets: Vec<Arc<dyn ProtocolDetector>> = vec![
+        Arc::new(Passer),
+        Arc::new(ClaimC {
             prefix: b"CLM ",
             tag: "claimc",
-        })];
+        }),
+    ];
     let mut st = DetectionState::new();
     run_pipeline(&dets, b"CLM x", &mut st);
 
@@ -150,14 +152,8 @@ fn run_pipeline_first_match_claims_and_short_circuits() {
 #[test]
 fn run_pipeline_need_more_records_and_merges() {
     let dets: Vec<Arc<dyn ProtocolDetector>> = vec![
-        Arc::new(NeedPending {
-            n: 2,
-            tag: "need2",
-        }),
-        Arc::new(NeedPending {
-            n: 7,
-            tag: "need7",
-        }),
+        Arc::new(NeedPending { n: 2, tag: "need2" }),
+        Arc::new(NeedPending { n: 7, tag: "need7" }),
     ];
     let mut st = DetectionState::new();
     run_pipeline(&dets, b"ab", &mut st);
@@ -276,10 +272,12 @@ fn detector_registry_position_insertion_and_missing_anchor() {
     r.register_at(Position::Front, stub("f")).unwrap();
     assert_eq!(r.list(), vec!["f", "d1", "d2"]);
 
-    r.register_at(Position::After("d1".to_string()), stub("da")).unwrap();
+    r.register_at(Position::After("d1".to_string()), stub("da"))
+        .unwrap();
     assert_eq!(r.list(), vec!["f", "d1", "da", "d2"]);
 
-    r.register_at(Position::Before("d2".to_string()), stub("db")).unwrap();
+    r.register_at(Position::Before("d2".to_string()), stub("db"))
+        .unwrap();
     assert_eq!(r.list(), vec!["f", "d1", "da", "db", "d2"]);
 
     match r

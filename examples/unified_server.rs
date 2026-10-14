@@ -7,7 +7,7 @@ use aex::protocols::http1::Http1;
 use aex::protocols::http2::Http2;
 use aex::protocols::tcp::Tcp;
 use aex::protocols::udp::Udp;
-use aex::unified::UnifiedServer;
+use aex::server::Server;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -21,7 +21,7 @@ async fn main() -> anyhow::Result<()> {
     let addr: SocketAddr = "0.0.0.0:8080".parse()?;
 
     let globals = Arc::new(GlobalContext::new(addr, None));
-    let mut unified = UnifiedServer::at(addr, globals);
+    let mut unified = Server::new(globals);
 
     let mut router = HttpRouter::new(aex::http::router::NodeType::default());
 
@@ -116,36 +116,42 @@ async fn main() -> anyhow::Result<()> {
         // into detection (HTTP/1.1 and HTTP/2 traffic is routed to the HTTP
         // paths, everything else falls through to the TCP/UDP handlers).
         .push(Http1::new(Some(Arc::new(router)), None).shared())
-        .push(Http2::new(None).shared())
-        .push(Tcp::new(Some(Arc::new(|mut ctx| {
-            tokio::spawn(async move {
-                let mut buf = [0u8; 4096];
-                let reader = ctx.reader.as_mut().unwrap();
-                match reader.read(&mut buf).await {
-                    Ok(n) => {
-                        let data = &buf[..n];
-                        println!(
-                            "[TCP] Received {} bytes: {:?}",
-                            n,
-                            String::from_utf8_lossy(data)
-                        );
-                        let writer = ctx.writer.as_mut().unwrap();
-                        let _ = writer.write_all(b"[TCP] ACK\n").await;
-                        let _ = writer.flush().await;
+        .push(Http2::new(None, None).shared())
+        .push(
+            Tcp::new(Some(Arc::new(|mut ctx| {
+                tokio::spawn(async move {
+                    let mut buf = [0u8; 4096];
+                    let reader = ctx.reader.as_mut().unwrap();
+                    match reader.read(&mut buf).await {
+                        Ok(n) => {
+                            let data = &buf[..n];
+                            println!(
+                                "[TCP] Received {} bytes: {:?}",
+                                n,
+                                String::from_utf8_lossy(data)
+                            );
+                            let writer = ctx.writer.as_mut().unwrap();
+                            let _ = writer.write_all(b"[TCP] ACK\n").await;
+                            let _ = writer.flush().await;
+                        }
+                        Err(e) => {
+                            println!("[TCP] Read error: {}", e);
+                        }
                     }
-                    Err(e) => {
-                        println!("[TCP] Read error: {}", e);
+                })
+            })))
+            .shared(),
+        )
+        .push(
+            Udp::new(Some(Arc::new(|ctx| {
+                tokio::spawn(async move {
+                    if let Some(data) = ctx.local.get_value::<Vec<u8>>() {
+                        println!("[UDP] Received {} bytes", data.len());
                     }
-                }
-            })
-        }))).shared())
-        .push(Udp::new(Some(Arc::new(|ctx| {
-            tokio::spawn(async move {
-                if let Some(data) = ctx.local.get_value::<Vec<u8>>() {
-                    println!("[UDP] Received {} bytes", data.len());
-                }
-            })
-        }))).shared());
+                })
+            })))
+            .shared(),
+        );
 
     println!("===========================================");
     println!("  AEX Unified Server");
@@ -161,7 +167,7 @@ async fn main() -> anyhow::Result<()> {
     println!("  API Info:  curl http://{}/info", addr);
     println!();
 
-    unified.start().await?;
+    unified.start(addr).await?;
 
     Ok(())
 }

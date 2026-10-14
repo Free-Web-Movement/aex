@@ -18,14 +18,14 @@ mod tests {
             router::Router,
             types::{Executor, to_executor},
         },
+        server::Server,
         tcp,
-        unified::Server,
     };
     use futures::FutureExt;
     use tokio::time::sleep;
 
-    fn http_server(addr: SocketAddr, router: Router) -> Server {
-        Server::solo(addr).push(tcp!(http!(router)))
+    fn http_server(router: Router) -> Server {
+        Server::default().push(http!(router))
     }
 
     fn handler(ctx: &mut Context) -> bool {
@@ -132,13 +132,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_alias_macro_forms() {
-        // `exe!` / `now!` / `then!` 分别是 `_async!` / `_sync!` / `_async!` 的别名
-        use aex::{_async, _sync, exe, now, then};
+        // `now!` / `then!` 分别是 `_sync!` / `_async!` 的别名
+        use aex::{_async, _sync, now, then};
         let mut router = Router::default();
         router.get(
             "/a",
-            exe!(|ctx| {
-                ctx.text("exe alias");
+            then!(|ctx| {
+                ctx.text("then alias a");
                 true
             }),
         );
@@ -212,10 +212,10 @@ mod tests {
         let actual_addr = listener.local_addr().unwrap();
         drop(listener);
 
-        let server = http_server(actual_addr, router);
+        let server = http_server(router);
 
         tokio::spawn(async move {
-            let _ = server.start().await;
+            let _ = server.start(actual_addr).await;
         });
 
         let client = reqwest::Client::new();
@@ -354,10 +354,10 @@ mod tests {
         let actual_addr = listener.local_addr().unwrap();
         drop(listener); // 释放端口给 Server
 
-        let server = http_server(actual_addr, hr);
+        let server = http_server(hr);
 
         tokio::spawn(async move {
-            if let Err(e) = server.start().await {
+            if let Err(e) = server.start(actual_addr).await {
                 eprintln!("Server exit: {}", e);
             }
         });
@@ -454,10 +454,10 @@ mod tests {
         let actual_addr = listener.local_addr().unwrap();
         drop(listener);
 
-        let server = http_server(actual_addr, hr);
+        let server = http_server(hr);
 
         tokio::spawn(async move {
-            let _ = server.start().await;
+            let _ = server.start(actual_addr).await;
         });
 
         // --- 4. 发起真实请求验证 ---
@@ -533,9 +533,9 @@ mod tests {
             .unwrap()
             .local_addr()
             .unwrap();
-        let server = http_server(actual_addr, hr);
+        let server = http_server(hr);
         tokio::spawn(async move {
-            let _ = server.start().await;
+            let _ = server.start(actual_addr).await;
         });
 
         sleep(Duration::from_millis(200)).await;
@@ -561,9 +561,9 @@ mod tests {
             .local_addr()
             .unwrap();
 
-        let server = http_server(actual_addr, hr);
+        let server = http_server(hr);
         tokio::spawn(async move {
-            let _ = server.start().await;
+            let _ = server.start(actual_addr).await;
         });
 
         tokio::time::sleep(Duration::from_millis(200)).await;
@@ -605,8 +605,8 @@ mod tests {
     //         // --- 启动服务器 ---
     //         let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
     //         let actual_addr = tokio::net::TcpListener::bind(addr).await.unwrap().local_addr().unwrap();
-    //         let server = http_server(actual_addr, hr);
-    //         tokio::spawn(async move { let _ = server.start().await; });
+    //         let server = http_server(hr);
+    //         tokio::spawn(async move { let _ = server.start(actual_addr).await; });
 
     //         tokio::time::sleep(Duration::from_millis(200)).await;
 
@@ -638,9 +638,9 @@ mod tests {
             .unwrap()
             .local_addr()
             .unwrap();
-        let server = http_server(actual_addr, hr);
+        let server = http_server(hr);
         tokio::spawn(async move {
-            let _ = server.start().await;
+            let _ = server.start(actual_addr).await;
         });
 
         tokio::time::sleep(Duration::from_millis(200)).await;
@@ -695,9 +695,9 @@ mod tests {
             .unwrap()
             .local_addr()
             .unwrap();
-        let server = http_server(actual_addr, hr);
+        let server = http_server(hr);
         tokio::spawn(async move {
-            let _ = server.start().await;
+            let _ = server.start(actual_addr).await;
         });
 
         sleep(Duration::from_millis(200)).await;
@@ -757,9 +757,9 @@ mod tests {
             .unwrap()
             .local_addr()
             .unwrap();
-        let server = http_server(actual_addr, hr);
+        let server = http_server(hr);
         tokio::spawn(async move {
-            let _ = server.start().await;
+            let _ = server.start(actual_addr).await;
         });
 
         tokio::time::sleep(Duration::from_millis(200)).await;
@@ -819,9 +819,9 @@ mod tests {
 
         // ... 启动 Server ...
 
-        let server = http_server(actual_addr, hr);
+        let server = http_server(hr);
         tokio::spawn(async move {
-            let _ = server.start().await;
+            let _ = server.start(actual_addr).await;
         });
 
         tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
@@ -893,9 +893,9 @@ mod tests {
             Some(vec![mw_counter, mw_header_check]), // 顺序执行
         );
 
-        let server = http_server(actual_addr, hr);
+        let server = http_server(hr);
         tokio::spawn(async move {
-            let _ = server.start().await;
+            let _ = server.start(actual_addr).await;
         });
 
         // 给服务器起步时间，避免 Connection Refused
@@ -955,9 +955,9 @@ mod tests {
         hr.get("/api/specific", handler).middleware(mw_info);
 
         // --- 4. 启动服务器 ---
-        let server = http_server(actual_addr, hr);
+        let server = http_server(hr);
         tokio::spawn(async move {
-            let _ = server.start().await;
+            let _ = server.start(actual_addr).await;
         });
 
         tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
@@ -1023,9 +1023,9 @@ mod tests {
         hr.get("/api/specific", handler).middleware(mw_info);
 
         // --- 4. 启动服务器 ---
-        let server = http_server(actual_addr, hr);
+        let server = http_server(hr);
         tokio::spawn(async move {
-            let _ = server.start().await;
+            let _ = server.start(actual_addr).await;
         });
 
         tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
@@ -1080,9 +1080,9 @@ mod tests {
             true
         });
 
-        let server = http_server(actual_addr, hr);
+        let server = http_server(hr);
         tokio::spawn(async move {
-            let _ = server.start().await;
+            let _ = server.start(actual_addr).await;
         });
 
         tokio::time::sleep(Duration::from_millis(200)).await;
@@ -1116,9 +1116,9 @@ mod tests {
             true
         });
 
-        let server = http_server(actual_addr, hr);
+        let server = http_server(hr);
         tokio::spawn(async move {
-            let _ = server.start().await;
+            let _ = server.start(actual_addr).await;
         });
 
         tokio::time::sleep(Duration::from_millis(200)).await;
@@ -1153,9 +1153,9 @@ mod tests {
             true
         });
 
-        let server = http_server(actual_addr, hr);
+        let server = http_server(hr);
         tokio::spawn(async move {
-            let _ = server.start().await;
+            let _ = server.start(actual_addr).await;
         });
 
         tokio::time::sleep(Duration::from_millis(200)).await;
@@ -1189,9 +1189,9 @@ mod tests {
             true
         });
 
-        let server = http_server(actual_addr, hr);
+        let server = http_server(hr);
         tokio::spawn(async move {
-            let _ = server.start().await;
+            let _ = server.start(actual_addr).await;
         });
 
         tokio::time::sleep(Duration::from_millis(200)).await;
@@ -1227,9 +1227,9 @@ mod tests {
             true
         });
 
-        let server = http_server(actual_addr, hr);
+        let server = http_server(hr);
         tokio::spawn(async move {
-            let _ = server.start().await;
+            let _ = server.start(actual_addr).await;
         });
 
         tokio::time::sleep(Duration::from_millis(200)).await;

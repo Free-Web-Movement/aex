@@ -7,12 +7,12 @@ use aex::http::meta::HttpMetadata;
 use aex::http::protocol::header::HeaderKey;
 use aex::http::router::Router;
 use aex::http::types::Executor;
-use aex::unified::Server;
+use aex::server::Server;
 use aex::{http, tcp};
 use tokio::time::sleep;
 
-fn http_server(addr: SocketAddr, router: Router) -> Server {
-    Server::solo(addr).push(tcp!(http!(router)))
+fn http_server(router: Router) -> Server {
+    Server::default().push(http!(router))
 }
 
 static EXEC_ORDER: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
@@ -238,9 +238,9 @@ async fn test_routes_attribute_mount_http() {
     let actual_addr = listener.local_addr().unwrap();
     drop(listener);
 
-    let server = http_server(actual_addr, router);
+    let server = http_server(router);
     tokio::spawn(async move {
-        let _ = server.start().await;
+        let _ = server.start(actual_addr).await;
     });
 
     let client = reqwest::Client::new();

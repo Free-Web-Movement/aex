@@ -4,7 +4,7 @@
 //! helper is kept for compatibility with callers that only need a quick guess
 //! from the first bytes.
 //!
-//! [`DetectorRegistry`]: crate::unified::DetectorRegistry
+//! [`DetectorRegistry`]: crate::detect::DetectorRegistry
 
 /// HTTP/2 client connection preface.
 pub const H2_CONNECTION_PREFACE: &[u8] = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";

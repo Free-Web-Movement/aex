@@ -7,12 +7,16 @@ use futures::future::BoxFuture;
 
 use aex::connection::context::Context;
 use aex::connection::global::GlobalContext;
-use aex::http::types::Executor;
-use aex::protocols::http1::Http11Detector;
-use aex::unified::handler::{
+use aex::handler::{
     CommandKey, CommandRegistry, HandlerState, Outcome, ProtocolHandler, take_context,
 };
-use aex::unified::{Claim, DetectorMode, Protocol, Server, Transport, UnifiedServer};
+use aex::http::types::Executor;
+use aex::protocols::http1::Http11Detector;
+use aex::{
+    detect::{Claim, DetectorMode},
+    protocol::{Protocol, Transport},
+    server::Server,
+};
 
 fn test_ctx() -> Context {
     let addr: SocketAddr = "127.0.0.1:9000".parse().unwrap();
@@ -286,8 +290,8 @@ fn server_new_push_is_chainable_and_reachable() {
     assert!(server.protocols.iter().any(|p| p.name() == "proto-b"));
     assert!(!server.protocols.iter().any(|p| p.name() == "proto-c"));
 
-    // Legacy alias + `at(addr, globals)` still works.
-    let legacy = UnifiedServer::at(addr, globals);
+    // `Server::new(gctx)` with no protocols starts empty.
+    let legacy = Server::new(globals);
     assert!(!legacy.protocols.iter().any(|p| p.name() == "proto-a"));
 }
 

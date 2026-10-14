@@ -28,6 +28,21 @@ use crate::{
     crypto::session_key_manager::PairedSessionKey,
 };
 
+/// 解析/校验出错时的处理策略。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FrameErrorPolicy {
+    /// 丢弃出错的帧，保持连接继续读取。
+    Drop,
+    /// 直接结束连接（默认）。
+    Close,
+}
+
+impl Default for FrameErrorPolicy {
+    fn default() -> Self {
+        Self::Close
+    }
+}
+
 pub struct GlobalContext {
     // local socket listening address
     pub addr: SocketAddr,
@@ -44,6 +59,8 @@ pub struct GlobalContext {
     pub routers: TypeMap,
     pub h2_codec: OnceLock<Arc<crate::http2::H2Codec>>,
     pub exits: Mutex<HashMap<String, (CancellationToken, AbortHandle)>>,
+    /// 解析/校验出错时的处理策略，见 [`FrameErrorPolicy`]。
+    pub frame_error_policy: FrameErrorPolicy,
 }
 
 impl GlobalContext {
@@ -68,7 +85,14 @@ impl GlobalContext {
             routers: TypeMap::default(),
             h2_codec: OnceLock::new(),
             exits: Mutex::new(HashMap::new()),
+            frame_error_policy: FrameErrorPolicy::default(),
         }
+    }
+
+    /// 设置解析/校验出错时的处理策略。
+    pub fn with_frame_error_policy(mut self, policy: FrameErrorPolicy) -> Self {
+        self.frame_error_policy = policy;
+        self
     }
 
     pub fn with_heartbeat_config(mut self, config: HeartbeatConfig) -> Self {

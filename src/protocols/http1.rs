@@ -10,14 +10,14 @@ use std::sync::Arc;
 use bytes::Bytes;
 
 use crate::connection::context::Context;
+use crate::detect::{DetectionState, ProtocolDetector, Verdict};
+use crate::handler::{CommandHandler, CommandKey, CommandRegistry, Outcome};
 use crate::http::meta::HttpMetadata;
 use crate::http::router::Router as HttpRouter;
 use crate::http::types::Executor;
+use crate::protocol::{Protocol, Transport};
 use crate::protocols::classify::HTTP_METHODS;
 use crate::protocols::websocket::Websocket;
-use crate::unified::detect::{DetectionState, ProtocolDetector, Verdict};
-use crate::unified::handler::{CommandHandler, CommandKey, CommandRegistry, Outcome};
-use crate::unified::{Protocol, Transport};
 
 /// HTTP/1.1 request handler.
 pub type HttpHandler =

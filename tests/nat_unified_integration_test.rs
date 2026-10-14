@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use aex::connection::global::GlobalContext;
 use aex::nat::{NatRelayService, NatTunnelClient, UnifiedServerExt};
-use aex::unified::UnifiedServer;
+use aex::server::Server;
 
 async fn start_unified_nat_server() -> SocketAddr {
     let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
@@ -21,13 +21,13 @@ async fn start_unified_nat_server() -> SocketAddr {
     let actual = probe.local_addr().unwrap();
     drop(probe);
 
-    let server = UnifiedServer::at(actual, globals.clone())
+    let server = Server::new(globals.clone())
         .enable_nat(service)
         // 注册 HTTP 检测器，验证与 NAT 同端口共存。
         .detector(Arc::new(aex::protocols::http1::Http11Detector))
         .detector(Arc::new(aex::protocols::http2::Http2Detector));
     tokio::spawn(async move {
-        let _ = server.start().await;
+        let _ = server.start(actual).await;
     });
     // 等待监听就绪。
     tokio::time::sleep(Duration::from_millis(200)).await;
@@ -75,7 +75,7 @@ async fn nat_service_detected_and_dispatch_on_shared_port() {
 #[tokio::test]
 async fn nat_service_registers_detector_with_correct_protocol() {
     // NatDetector 的 protocol 标签应为 "nat"（分派键）。
-    use aex::unified::detect::ProtocolDetector;
+    use aex::detect::ProtocolDetector;
     let d = aex::nat::NatDetector;
     assert_eq!(d.protocol(), "nat");
     assert_eq!(d.name(), "nat-detector");

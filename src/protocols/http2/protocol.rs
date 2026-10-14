@@ -13,15 +13,16 @@ use bytes::Bytes;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
 use crate::connection::context::{BoxReader, BoxWriter, Context};
+use crate::detect::{DetectionState, ProtocolDetector, Verdict};
+use crate::handler::{CommandHandler, CommandKey, CommandRegistry, Outcome};
 use crate::http::meta::HttpMetadata;
 use crate::http::middlewares::websocket::WebSocket;
 use crate::http::protocol::header::HeaderKey;
 use crate::http::protocol::method::HttpMethod;
 use crate::http::protocol::version::HttpVersion;
+use crate::http::router::Router as HttpRouter;
+use crate::protocol::{Protocol, Transport};
 use crate::protocols::classify::H2_CONNECTION_PREFACE;
-use crate::unified::detect::{DetectionState, ProtocolDetector, Verdict};
-use crate::unified::handler::{CommandHandler, CommandKey, CommandRegistry, Outcome};
-use crate::unified::{Protocol, Transport};
 
 /// HTTP/2 request handler.
 pub type Http2Handler =
@@ -30,18 +31,31 @@ pub type Http2Handler =
 /// HTTP/2 protocol: claims connections via the connection preface and serves
 /// each request stream through its handler.
 pub struct Http2 {
+    router: Option<Arc<HttpRouter>>,
     handler: Option<Http2Handler>,
     commands: CommandRegistry<Bytes>,
+    sub_handlers: Vec<Arc<dyn Protocol>>,
 }
 
 impl Http2 {
-    /// The HTTP/2 protocol. `handler` is invoked for every HTTP/2 request
-    /// stream; `None` still answers requests with an empty response.
-    pub fn new(handler: Option<Http2Handler>) -> Self {
+    /// The HTTP/2 protocol. `router` serves each request stream (same router
+    /// mechanism as [`Http1`]); an explicit `handler` takes precedence. This is
+    /// the same `(router, handler)` shape as `Http1::new`.
+    ///
+    /// [`Http1`]: crate::protocols::http1::Http1
+    pub fn new(router: Option<Arc<HttpRouter>>, handler: Option<Http2Handler>) -> Self {
         Self {
+            router,
             handler,
             commands: CommandRegistry::new(),
+            sub_handlers: Vec::new(),
         }
+    }
+
+    /// Attach the router serving HTTP/2 requests.
+    pub fn with_router(mut self, router: Arc<HttpRouter>) -> Self {
+        self.router = Some(router);
+        self
     }
 
     /// Register a protocol command handler.
@@ -52,6 +66,30 @@ impl Http2 {
     ) -> Self {
         self.commands.register(key, handler);
         self
+    }
+
+    /// Attach a WebSocket sub-handler, reached when a request is a WebSocket
+    /// upgrade (RFC 8441). Mirrors [`Http1::with_websocket`].
+    ///
+    /// [`Http1::with_websocket`]: crate::protocols::http1::Http1::with_websocket
+    pub fn with_websocket(mut self, websocket: Arc<dyn Protocol>) -> Self {
+        match self
+            .sub_handlers
+            .iter_mut()
+            .find(|s| s.name() == "websocket")
+        {
+            Some(slot) => *slot = websocket,
+            None => self.sub_handlers.push(websocket),
+        }
+        self
+    }
+
+    /// The attached WebSocket sub-handler, if any.
+    pub fn websocket(&self) -> Option<Arc<dyn Protocol>> {
+        self.sub_handlers
+            .iter()
+            .find(|s| s.name() == "websocket")
+            .cloned()
     }
 
     /// Serve one HTTP/2 connection (struct-specific processing).
@@ -102,10 +140,19 @@ impl Http2 {
                             let mut stream_ctx = Context::new(None, None, globals.clone(), peer_addr);
                             stream_ctx.set(meta);
 
-                            if let Some(h) = &self.handler {
+                            // A WebSocket upgrade request (RFC 8441) is handed to
+                            // the attached `websocket` sub-handler, if any.
+                            // Otherwise: explicit handler first, then the router
+                            // (same precedence and router mechanism as Http1).
+                            let ws_handler = if is_ws { self.websocket() } else { None };
+                            if let Some(ws) = ws_handler {
+                                let _ = ws.process(&mut stream_ctx).await;
+                            } else if let Some(h) = &self.handler {
                                 h(&mut stream_ctx).await;
+                            } else if let Some(router) = &self.router {
+                                router.on_request(&mut stream_ctx).await;
                             } else {
-                                tracing::warn!("[H2] No HTTP/2 handler registered");
+                                tracing::warn!("[H2] No HTTP/2 router or handler registered");
                             }
 
                             let meta = stream_ctx.local.get_ref::<HttpMetadata>();
@@ -158,8 +205,16 @@ impl Protocol for Http2 {
         Some(Arc::new(Http2Detector))
     }
 
+    fn router(&self) -> Option<Arc<HttpRouter>> {
+        self.router.clone()
+    }
+
     fn commands(&self) -> &CommandRegistry<Bytes> {
         &self.commands
+    }
+
+    fn sub_handlers(&self) -> &[Arc<dyn Protocol>] {
+        &self.sub_handlers
     }
 
     fn transport(&self) -> Transport {

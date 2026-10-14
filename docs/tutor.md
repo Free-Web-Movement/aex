@@ -106,12 +106,12 @@ async fn main() -> anyhow::Result<()> {
     let ip = "0.0.0.0";
     let port = 8080;
     let addr: SocketAddr = format!("{}:{}", ip, port).parse()?;
-    let server = Server::solo(addr).push(
+    let server = Server::default().push(
         Tcp::new(None)
             .sub(Http1::new(Some(Arc::new(route)), None).shared())
             .shared(),
     );
-    server.start().await?;
+    server.start(addr).await?;
 }
 ```
 
@@ -129,7 +129,7 @@ use aex::{
     route,
     router::{ NodeType, Router },
     protocols::{ http1::Http1, tcp::Tcp },
-    unified::Server,
+    server::Server,
     types::{ BinaryHandler, HTTPContext },
 };
 use futures::FutureExt;
@@ -154,12 +154,12 @@ async fn main() -> anyhow::Result<()> {
     let ip = "0.0.0.0";
     let port = 8080;
     let addr: SocketAddr = format!("{}:{}", ip, port).parse()?;
-    let server = Server::solo(addr).push(
+    let server = Server::default().push(
         Tcp::new(None)
             .sub(Http1::new(Some(Arc::new(route)), None).shared())
             .shared(),
     );
-    server.start().await?;
+    server.start(addr).await?;
 ```
 
 ---
@@ -529,13 +529,13 @@ route!(route, ws_params);
     let ip = "0.0.0.0";
     let port = 8080;
     let addr: SocketAddr = format!("{}:{}", ip, port).parse()?;
-    let server = Server::solo(addr).push(
+    let server = Server::default().push(
         Tcp::new(None)
             .sub(Http1::new(Some(Arc::new(route)), None).shared())
             .shared(),
     );
 
-    server.start().await?;
+    server.start(addr).await?;
 ```
 
 > 外部的main结构保持不变

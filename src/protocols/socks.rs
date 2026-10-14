@@ -9,11 +9,11 @@ use std::sync::Arc;
 use bytes::Bytes;
 
 use crate::connection::context::Context;
+use crate::detect::ProtocolDetector;
+use crate::handler::{CommandHandler, CommandKey, CommandRegistry, Outcome, ProtocolHandler};
+use crate::protocol::{Protocol, Transport};
 use crate::protocols::tcp::{TCPHandler, from_handler};
 use crate::proxy::{ProxyAuthorizer, SocksDetector, socks_tcp_handler};
-use crate::unified::detect::ProtocolDetector;
-use crate::unified::handler::{CommandHandler, CommandKey, CommandRegistry, Outcome, ProtocolHandler};
-use crate::unified::{Protocol, Transport};
 
 /// SOCKS proxy protocol: claims connections via its detector and relays them.
 pub struct Socks {
@@ -43,7 +43,7 @@ impl Socks {
 
     /// Serve one SOCKS connection (struct-specific processing).
     pub async fn handle(&self, ctx: &mut Context) -> Outcome {
-        let owned = crate::unified::handler::take_context(ctx);
+        let owned = crate::handler::take_context(ctx);
         (self.handler)(owned);
         Outcome::Done
     }

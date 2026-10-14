@@ -13,13 +13,12 @@ use std::sync::Arc;
 use bytes::Bytes;
 
 use crate::connection::context::Context;
-use crate::http::types::Executor;
-use crate::tcp::router::Router as TcpRouter;
-use crate::tcp::types::{TCPCommand, TCPFrame};
-use crate::unified::handler::{
+use crate::handler::{
     CommandHandler, CommandKey, CommandRegistry, Outcome, ProtocolHandler, take_context,
 };
-use crate::unified::{Protocol, Transport};
+use crate::http::types::Executor;
+use crate::protocol::{Protocol, Transport};
+use crate::tcp::router::Router as TcpRouter;
 
 /// Raw TCP connection handler (takes ownership of the [`Context`]).
 pub type TCPHandler = Arc<dyn Fn(Context) -> tokio::task::JoinHandle<()> + Send + Sync>;
@@ -64,7 +63,11 @@ impl Tcp {
     }
 
     /// Register a protocol command handler.
-    pub fn with_command<K: Into<CommandKey>>(mut self, key: K, handler: CommandHandler<Bytes>) -> Self {
+    pub fn with_command<K: Into<CommandKey>>(
+        mut self,
+        key: K,
+        handler: CommandHandler<Bytes>,
+    ) -> Self {
         self.commands.register(key, handler);
         self
     }
@@ -127,11 +130,7 @@ impl Protocol for Tcp {
 /// The router itself is unchanged; the returned closure hands it the shared
 /// connection context on a background task, exactly as the previous
 /// server-embedded TCP pipeline did.
-pub fn router_handler<F, C>(router: Arc<TcpRouter<F, C>>) -> TCPHandler
-where
-    F: TCPFrame + Send + Sync + 'static,
-    C: TCPCommand + Send + Sync + 'static,
-{
+pub fn router_handler(router: Arc<TcpRouter>) -> TCPHandler {
     Arc::new(move |ctx: Context| {
         let router = router.clone();
         tokio::spawn(async move {
@@ -151,28 +150,26 @@ pub fn from_handler(
 ) -> Arc<ProtocolHandler<Bytes>> {
     let name = name.into();
     let label = name.clone();
-    Arc::new(
-        ProtocolHandler::new(
-            name,
-            move |_handler: &ProtocolHandler<Bytes>, ctx: &mut Context| {
-                let handler = handler.clone();
-                let label = label.clone();
-                Box::pin(async move {
-                    match handler {
-                        Some(h) => {
-                            let owned = take_context(ctx);
-                            h(owned);
-                        }
-                        None => {
-                            tracing::warn!(
-                                "[Unified] No {} handler registered, dropping connection",
-                                label
-                            );
-                        }
+    Arc::new(ProtocolHandler::new(
+        name,
+        move |_handler: &ProtocolHandler<Bytes>, ctx: &mut Context| {
+            let handler = handler.clone();
+            let label = label.clone();
+            Box::pin(async move {
+                match handler {
+                    Some(h) => {
+                        let owned = take_context(ctx);
+                        h(owned);
                     }
-                    Outcome::Done
-                })
-            },
-        )
-    )
+                    None => {
+                        tracing::warn!(
+                            "[Unified] No {} handler registered, dropping connection",
+                            label
+                        );
+                    }
+                }
+                Outcome::Done
+            })
+        },
+    ))
 }

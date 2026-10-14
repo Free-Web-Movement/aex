@@ -27,7 +27,7 @@
    `aex::connection` 层的 manager/context/router。
 2. **udp/tcp/http/ws/proxy/nat 都是服务**：通过**统一的服务注册机制**实现注册
    —— unified server 的 `DetectorRegistry`（检测层）+ `custom_handler`（处理层）协作：
-   - **注册**：`enable_xxx()` 在 `UnifiedServer` 上注册 detector + handler。
+   - **注册**：`enable_xxx()` 在 `Server` 上注册 detector + handler。
    - **检测**：`ProtocolDetector` 识别连接首字节（魔数/greeting/请求行），
      `Verdict::Match` 认领连接。
    - **分派**：检测命中后按 `protocol()` 标签查找 `custom_handler` 处理。

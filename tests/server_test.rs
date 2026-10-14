@@ -1,7 +1,7 @@
 use aex::communicators::event::Event;
 use aex::connection::context::Context;
 use aex::http::router::Router as HttpRouter;
-use aex::unified::Server;
+use aex::server::Server;
 use aex::{http, tcp};
 use futures::FutureExt;
 use std::net::SocketAddr;
@@ -22,10 +22,10 @@ async fn test_server_http() {
     let actual_addr = temp_listener.local_addr().unwrap();
     drop(temp_listener);
 
-    let server = Server::solo(actual_addr).push(tcp!(http!(http_router)));
+    let server = Server::default().push(http!(http_router));
 
     tokio::spawn(async move {
-        if let Err(e) = server.start().await {
+        if let Err(e) = server.start(actual_addr).await {
             eprintln!("Server error: {}", e);
         }
     });
@@ -42,8 +42,7 @@ async fn test_server_http() {
 
 #[tokio::test]
 async fn test_server_communication_bus() {
-    let addr: SocketAddr = "[::1]:0".parse().unwrap();
-    let server = Server::solo(addr);
+    let server = Server::default();
 
     let pipe_count = Arc::new(AtomicUsize::new(0));
     let spread_count = Arc::new(AtomicUsize::new(0));

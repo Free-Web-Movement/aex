@@ -20,7 +20,7 @@ use aex::connection::context::Context;
 use aex::connection::global::GlobalContext;
 use aex::protocols::http1::{Http1, HttpHandler};
 use aex::proxy::ProxyAuthorizer;
-use aex::unified::UnifiedServer;
+use aex::server::Server;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -38,7 +38,7 @@ async fn main() -> anyhow::Result<()> {
         })
     });
 
-    let server = UnifiedServer::at(addr, Arc::new(GlobalContext::new(addr, None)))
+    let server = Server::new(Arc::new(GlobalContext::new(addr, None)))
         // One HTTP/1.1 protocol serves both the website (origin-form requests)
         // and the HTTP forward proxy (absolute-form / CONNECT), gated by the
         // same credentials.
@@ -50,5 +50,5 @@ async fn main() -> anyhow::Result<()> {
         .push(aex::protocols::socks::protocol(Some(authorizer)));
 
     eprintln!("proxy_demo listening on {addr} (website + http proxy + socks5)");
-    server.start().await
+    server.start(addr).await
 }

@@ -5,7 +5,7 @@ use aex::http::router::Router as HttpRouter;
 use aex::http::types::{Executor, IntoExecutor};
 use aex::protocols::http1::Http1;
 use aex::protocols::tcp::Tcp;
-use aex::unified::Server;
+use aex::server::Server;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
@@ -95,13 +95,13 @@ async fn main() -> anyhow::Result<()> {
         addr
     );
 
-    Server::solo(addr)
+    Server::default()
         .push(
             Tcp::new(None)
                 .sub(Http1::new(Some(std::sync::Arc::new(router)), None).shared())
                 .shared(),
         )
-        .start()
+        .start(addr)
         .await?;
     Ok(())
 }
