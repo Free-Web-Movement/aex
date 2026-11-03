@@ -38,7 +38,9 @@ pub mod http {
 pub mod tcp {
     //! TCP Protocol Constants
 
-    pub const MAX_FRAME_SIZE: usize = 65536;
+    /// 协议允许的单帧最大长度（帧长度字段当前为 u32；未来若改为 u64 只改这里）。
+    /// 注意：这是解码/协议上限，不是读缓冲大小，读缓冲在 router 中按小块读取。
+    pub const MAX_FRAME_SIZE: usize = u32::MAX as usize;
     pub const MAX_HANDSHAKE_SIZE: usize = 4096;
     pub const PROTOCOL_HEADER_SIZE: usize = 12;
 

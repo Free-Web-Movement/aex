@@ -132,8 +132,10 @@ impl Router {
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("TCP extractor not set"))?;
 
-        let mut buf = vec![0u8; MAX_FRAME_SIZE];
-        let mut session_buf: Vec<u8> = Vec::with_capacity(MAX_FRAME_SIZE + 4096);
+        // 读缓冲按固定小块读，避免按协议上限（MAX_FRAME_SIZE）分配；
+        // 未完整的帧在 session_buf 中累积，直到 extractor 能切出完整帧。
+        let mut buf = vec![0u8; MAX_FRAME_SIZE.min(64 * 1024)];
+        let mut session_buf: Vec<u8> = Vec::new();
 
         // 💡 核心优化：在 I/O 时不锁定 Context，解决 P2P 双向传递锁死问题
         let (reader, policy) = {
