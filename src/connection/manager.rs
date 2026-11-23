@@ -150,6 +150,21 @@ impl ConnectionManager {
     {
         let ip = addr.ip();
         let scope = NetworkScope::from_ip(&ip);
+
+        // 生产环境（未设 AEX_ALLOW_LOOPBACK）拒绝回环拨号：本机回环连到自身监听
+        // 端口等于自连接，握手必然失败且 socket 无人回收。在最前面拦截，连
+        // TcpStream::connect 都不发起，从源头避免 FD 泄漏。
+        static ALLOW_LOOPBACK: once_cell::sync::OnceCell<bool> = once_cell::sync::OnceCell::new();
+        let allow = *ALLOW_LOOPBACK
+            .get_or_init(|| std::env::var("AEX_ALLOW_LOOPBACK").as_deref() == Ok("1"));
+        if !allow && ip.is_loopback() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "loopback dialing disabled (self-connection)",
+            )
+            .into());
+        }
+
         if let Some(bi_conn) = self.connections.get(&(ip, scope)) {
             if bi_conn.servers.contains_key(&addr) || bi_conn.clients.contains_key(&addr) {
                 return Ok(());
@@ -208,6 +223,13 @@ impl ConnectionManager {
         let allow = *ALLOW_LOOPBACK
             .get_or_init(|| std::env::var("AEX_ALLOW_LOOPBACK").as_deref() == Ok("1"));
         if !allow && addr.ip().is_loopback() {
+            // 关键：调用方（connect/accept/nat bridge）在调 add() 前已 spawn 了持有
+            // socket 的任务。若此处直接 return，AbortHandle/CancellationToken/Context
+            // 会被丢弃，任务与 socket 永久裸奔无人回收 → FD 泄漏。必须显式取消任务
+            // 并 drop context，让 split 后的 socket halves 关闭。
+            handle.abort();
+            cancel_token.cancel();
+            drop(context);
             return;
         }
 
