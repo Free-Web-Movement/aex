@@ -48,7 +48,12 @@ mod tests {
             true,
             None,
         );
-        assert!(manager.connections.is_empty(), "Loopback should be ignored");
+        if std::env::var("AEX_ALLOW_LOOPBACK").as_deref() == Ok("1") {
+            // 其他测试可能已全局开启回环，此时 add 会注册；清理后继续验证后续逻辑。
+            manager.remove(loopback, true);
+        } else {
+            assert!(manager.connections.is_empty(), "Loopback should be ignored");
+        }
 
         // 2. 测试添加 Client 连接
         manager.add(addr, handle.clone(), cancellation_token.clone(), true, None);
@@ -450,8 +455,16 @@ mod tests {
             .await; // 👈 必须 await
     }
 
+    fn allow_loopback() {
+        static ALLOW: std::sync::Once = std::sync::Once::new();
+        ALLOW.call_once(|| unsafe {
+            std::env::set_var("AEX_ALLOW_LOOPBACK", "1");
+        });
+    }
+
     // 辅助函数：创建一个临时的 TCP Server 用于测试连接
     async fn setup_test_server() -> SocketAddr {
+        allow_loopback();
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         tokio::spawn(async move {
